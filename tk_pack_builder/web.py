@@ -318,6 +318,7 @@ def summarize_character_tables(
     characters = []
     for template in tables["character_generation_templates"]:
         key = str(template.get("key", ""))
+        reference_source = template.get("_referenceSourcePath")
         display_name = _character_display_name(template, loc_text)
         details = sorted(
             [
@@ -366,6 +367,8 @@ def summarize_character_tables(
                 "titleInfo": title_info,
                 "templateRow": template,
                 "details": details,
+                "source": "reference" if reference_source else "pack",
+                "referenceSourcePath": reference_source,
             }
         )
 
@@ -643,6 +646,13 @@ def _merge_reference_packs(
                         ("art_set_id", "age", "portrait", "card", "uniform"),
                         str(resolved),
                     )
+                elif alias == "character_generation_template_game_mode_details":
+                    _append_missing_rows_by_fields(
+                        tables.setdefault(alias, []),
+                        rows,
+                        ("character_generation_template", "game_mode"),
+                        str(resolved),
+                    )
                 else:
                     _append_missing_rows(
                         tables.setdefault(alias, []),
@@ -681,6 +691,12 @@ def _merge_reference_packs(
 
 def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
     tables: dict[str, list[dict[str, Any]]] = {}
+    for alias in CHARACTER_TABLE_ALIASES:
+        try:
+            table_name = _resolve_reference_character_table(session, alias)
+            tables[alias] = session.read_table(table_name)
+        except ValueError:
+            continue
     for alias in (
         "campaign_character_art_sets",
         "campaign_character_arts",

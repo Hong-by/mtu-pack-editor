@@ -245,7 +245,8 @@ function normalizePackCharacter(item, summary) {
     cardImagePath: item.cardImagePath || artSet?.cardImagePath || '',
     cardImageSourcePath: item.cardImageSourcePath || artSet?.cardImageSourcePath || '',
     uniform: item.uniform || artSet?.uniform || '',
-    source: 'pack',
+    source: item.source || 'pack',
+    referenceSourcePath: item.referenceSourcePath || '',
   };
 }
 
@@ -390,7 +391,7 @@ function renderRoster() {
       ${portraitMarkup(character, 'mini-portrait')}
       <div class="card-main">
         <strong>${escapeHtml(character.name)}</strong>
-        <span>${meta.name} · ${escapeHtml(character.retinue)}</span>
+        <span>${meta.name} · ${escapeHtml(character.retinue)}${character.source === 'reference' ? ' · 참조' : ''}</span>
         <small>${escapeHtml(character.key)}</small>
       </div>
       <b>${meta.label}</b>
@@ -440,6 +441,7 @@ function renderSelected() {
     infoCard('병종/부대 타입', character.unitProfile, unitBrief(character)),
     infoCard('등장 조건', `${character.minRound}~${character.maxRound} 라운드`, `등장 가중치 ${character.weight}`),
     infoCard('등장 이벤트', spawnEventMeta(character.spawnEvent).name, spawnEventMeta(character.spawnEvent).note),
+    infoCard('데이터 출처', character.source === 'reference' ? '참조 pack' : '현재 pack', character.referenceSourcePath || '수정/저장 가능 대상'),
     infoCard('원본 key', character.key, '저장 시 내부 식별자로 사용'),
   ].join('');
 
@@ -725,6 +727,11 @@ function unitPatchDescription(clone) {
 
 function stageEdit() {
   const character = selectedCharacter();
+  if (character.source === 'reference') {
+    state.serverMessages = [validationItem('warning', '참조 장수 수정 보류', '참조 pack 장수는 현재 pack 내부 row가 아니어서 기존 장수 수정 대상에서 제외됩니다. 신규 생성 재료로만 사용하세요.')];
+    renderValidation();
+    return;
+  }
   const imageSet = characters().find((item) => item.key === $('editImageSet').value);
   const modelSet = characters().find((item) => item.key === $('editModelSet').value);
   const hist = characters().find((item) => item.key === $('editHistoricalSkill').value);
