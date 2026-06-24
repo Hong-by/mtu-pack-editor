@@ -241,7 +241,9 @@ function normalizePackCharacter(item, summary) {
     portraitPath: item.portrait || artSet?.portrait || '',
     cardPath: item.card || artSet?.card || '',
     portraitImagePath: item.portraitImagePath || artSet?.portraitImagePath || '',
+    portraitImageSourcePath: item.portraitImageSourcePath || artSet?.portraitImageSourcePath || '',
     cardImagePath: item.cardImagePath || artSet?.cardImagePath || '',
+    cardImageSourcePath: item.cardImageSourcePath || artSet?.cardImageSourcePath || '',
     uniform: item.uniform || artSet?.uniform || '',
     source: 'pack',
   };
@@ -579,7 +581,7 @@ function renderTitleSummary(prefix, character) {
 function imagePreviewMarkup(character, modeLabel) {
   if (!character) return '<p class="empty">이미지 세트를 선택하세요.</p>';
   const portraitLabel = character.portraitPath || '초상화 경로 대기';
-  const portraitUrl = assetUrl(character.portraitImagePath);
+  const portraitUrl = assetUrl(character.portraitImagePath, character.portraitImageSourcePath);
   return `
     <div class="preview-art portrait-art element-${character.element}">
       ${portraitUrl ? `<img src="${escapeHtml(portraitUrl)}" alt="${escapeHtml(character.name)} 초상화">` : `<span>${escapeHtml(character.portrait)}</span>`}
@@ -596,7 +598,7 @@ function imagePreviewMarkup(character, modeLabel) {
 }
 
 function portraitMarkup(character, className) {
-  const url = assetUrl(character.portraitImagePath);
+  const url = assetUrl(character.portraitImagePath, character.portraitImageSourcePath);
   const fallback = `<span>${escapeHtml(character.portrait)}</span>`;
   return `
     <div class="${className} element-${character.element}">
@@ -605,10 +607,10 @@ function portraitMarkup(character, className) {
   `;
 }
 
-function assetUrl(path) {
+function assetUrl(path, sourcePath = '') {
   if (!path || location.protocol === 'file:') return '';
   const params = new URLSearchParams({
-    inputPath: $('inputPackPath').value,
+    inputPath: sourcePath || $('inputPackPath').value,
     path,
   });
   return `/api/asset?${params.toString()}`;

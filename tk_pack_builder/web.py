@@ -218,9 +218,18 @@ def read_character_data(
     tables = _read_character_tables(session, "pack")
     loc_text = _read_all_loc_text(session)
     asset_files = session.list_files()
-    reference_report = _merge_reference_packs(tables, loc_text, reference_paths or [], adapter_name, session.pack_path)
+    asset_sources: dict[str, str] = {}
+    reference_report = _merge_reference_packs(
+        tables,
+        loc_text,
+        asset_files,
+        asset_sources,
+        reference_paths or [],
+        adapter_name,
+        session.pack_path,
+    )
     data = {
-        "pack": summarize_character_tables(tables, loc_text, asset_files),
+        "pack": summarize_character_tables(tables, loc_text, asset_files, asset_sources),
         "vanilla": {"available": False, "error": None, "summary": None},
         "referencePacks": reference_report,
     }
@@ -241,9 +250,11 @@ def summarize_character_tables(
     tables: dict[str, list[dict[str, Any]]],
     loc_text: dict[str, str] | None = None,
     asset_files: list[str] | None = None,
+    asset_sources: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     loc_text = loc_text or {}
     asset_files = asset_files or []
+    asset_sources = asset_sources or {}
     details_by_template: dict[str, list[dict[str, Any]]] = {}
     for row in tables["character_generation_template_game_mode_details"]:
         details_by_template.setdefault(str(row.get("character_generation_template", "")), []).append(row)
@@ -261,6 +272,8 @@ def summarize_character_tables(
         primary_art = _primary_art_row(art_rows)
         portrait_path = str(primary_art.get("portrait") or "").strip("/")
         card_path = str(primary_art.get("card") or "").strip("/")
+        portrait_image_path = _find_character_image(asset_files, portrait_path, "halfbody_large")
+        card_image_path = _find_character_image(asset_files, card_path, "unitcards")
         art_sets.append(
             {
                 "key": art_set_id,
@@ -269,8 +282,10 @@ def summarize_character_tables(
                 "portrait": primary_art.get("portrait"),
                 "card": primary_art.get("card"),
                 "uniform": primary_art.get("uniform"),
-                "portraitImagePath": _find_character_image(asset_files, portrait_path, "halfbody_large"),
-                "cardImagePath": _find_character_image(asset_files, card_path, "unitcards"),
+                "portraitImagePath": portrait_image_path,
+                "portraitImageSourcePath": asset_sources.get(portrait_image_path or ""),
+                "cardImagePath": card_image_path,
+                "cardImageSourcePath": asset_sources.get(card_image_path or ""),
                 "rows": art_rows,
             }
         )
@@ -344,7 +359,9 @@ def summarize_character_tables(
                 "card": primary_art.get("card"),
                 "uniform": primary_art.get("uniform"),
                 "portraitImagePath": art_set_summary.get("portraitImagePath"),
+                "portraitImageSourcePath": art_set_summary.get("portraitImageSourcePath"),
                 "cardImagePath": art_set_summary.get("cardImagePath"),
+                "cardImageSourcePath": art_set_summary.get("cardImageSourcePath"),
                 "combatStats": combat_stats,
                 "titleInfo": title_info,
                 "templateRow": template,
@@ -595,11 +612,14 @@ def _read_character_tables(session: Any, source: str) -> dict[str, list[dict[str
 def _merge_reference_packs(
     tables: dict[str, list[dict[str, Any]]],
     loc_text: dict[str, str],
+    asset_files: list[str],
+    asset_sources: dict[str, str],
     reference_paths: list[Path],
     adapter_name: str,
     primary_pack_path: Path,
 ) -> list[dict[str, Any]]:
     report = []
+    known_assets = set(asset_files)
     for reference_path in reference_paths:
         resolved = reference_path.expanduser()
         if not resolved.exists():
@@ -616,14 +636,30 @@ def _merge_reference_packs(
             session = adapter_for(adapter_name).open_pack(resolved)
             reference_tables = _read_reference_tables(session)
             for alias, rows in reference_tables.items():
-                _append_missing_rows(
-                    tables.setdefault(alias, []),
-                    rows,
-                    _key_field_for_alias(alias),
-                    str(resolved),
-                )
+                if alias == "campaign_character_arts":
+                    _append_missing_rows_by_fields(
+                        tables.setdefault(alias, []),
+                        rows,
+                        ("art_set_id", "age", "portrait", "card", "uniform"),
+                        str(resolved),
+                    )
+                else:
+                    _append_missing_rows(
+                        tables.setdefault(alias, []),
+                        rows,
+                        _key_field_for_alias(alias),
+                        str(resolved),
+                    )
             for key, text in _read_all_loc_text(session).items():
                 loc_text.setdefault(key, text)
+            added_assets = 0
+            for asset_path in session.list_files():
+                if asset_path in known_assets:
+                    continue
+                asset_files.append(asset_path)
+                known_assets.add(asset_path)
+                asset_sources[asset_path] = str(resolved)
+                added_assets += 1
             added = {
                 alias: len(tables.get(alias, [])) - before_counts.get(alias, 0)
                 for alias in reference_tables
@@ -633,6 +669,7 @@ def _merge_reference_packs(
                 "ok": True,
                 "tables": sorted(reference_tables),
                 "addedRows": {key: value for key, value in added.items() if value},
+                "addedAssets": added_assets,
             })
         except Exception as error:
             report.append({"path": str(resolved), "ok": False, "error": str(error)})
@@ -645,6 +682,8 @@ def _merge_reference_packs(
 def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
     tables: dict[str, list[dict[str, Any]]] = {}
     for alias in (
+        "campaign_character_art_sets",
+        "campaign_character_arts",
         "equipment_variants_weapons",
         "equipment_variants_armours",
         "melee_weapons",
@@ -654,7 +693,10 @@ def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
         "land_units",
     ):
         try:
-            table_name = _resolve_stat_table(session, alias, "pack")
+            if alias in {"campaign_character_art_sets", "campaign_character_arts"}:
+                table_name = _resolve_reference_character_table(session, alias)
+            else:
+                table_name = _resolve_stat_table(session, alias, "pack")
             tables[alias] = session.read_table(table_name)
         except ValueError:
             continue
@@ -676,7 +718,27 @@ def _append_missing_rows(
         existing.add(key)
 
 
+def _append_missing_rows_by_fields(
+    target: list[dict[str, Any]],
+    source: list[dict[str, Any]],
+    fields: tuple[str, ...],
+    reference_path: str,
+) -> None:
+    existing = {
+        tuple(row.get(field) for field in fields)
+        for row in target
+    }
+    for row in source:
+        key = tuple(row.get(field) for field in fields)
+        if key in existing:
+            continue
+        target.append({**row, "_referenceSourcePath": reference_path})
+        existing.add(key)
+
+
 def _key_field_for_alias(alias: str) -> str:
+    if alias == "campaign_character_art_sets":
+        return "art_set_id"
     if alias in {"equipment_variants_weapons", "equipment_variants_armours"}:
         return "ceos_key"
     return "key"
@@ -897,6 +959,10 @@ def _find_character_image(asset_files: list[str], image_key: str, image_kind: st
     preferred = [
         f"ui/characters/{normalized}/stills/{image_kind}/{normalized}.png",
         f"ui/characters/{normalized}/stills/{image_kind}/large/{normalized}.png",
+        f"ui/characters/{normalized}/composites/large_panel/norm/noanim.png",
+        f"ui/characters/{normalized}/composites/large_panel/norm/norm.png",
+        f"ui/characters/{normalized}/composites/large_panel/happy/noanim.png",
+        f"ui/characters/{normalized}/composites/large_panel/happy/happy.png",
     ]
     assets = set(asset_files)
     for path in preferred:
@@ -905,7 +971,11 @@ def _find_character_image(asset_files: list[str], image_key: str, image_kind: st
     matches = [
         path for path in asset_files
         if path.startswith(f"ui/characters/{normalized}/")
-        and f"/stills/{image_kind}/" in path
+        and (
+            f"/stills/{image_kind}/" in path
+            or "/composites/large_panel/norm/" in path
+            or "/composites/large_panel/happy/" in path
+        )
         and path.endswith(".png")
     ]
     return matches[0] if matches else None
@@ -955,6 +1025,23 @@ def _resolve_stat_table(session: Any, alias: str, source: str) -> str:
             return preferred[0]
         return matches[0]
     raise ValueError(f"Required stat table is missing in {source}: {alias}")
+
+
+def _resolve_reference_character_table(session: Any, alias: str) -> str:
+    tables = set(session.list_tables("pack"))
+    for candidate in CHARACTER_TABLE_ALIASES[alias]:
+        if candidate in tables:
+            return candidate
+    matches = sorted(table for table in tables if table.startswith(f"db/{alias}_tables/"))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        preferred = [
+            table for table in matches
+            if "/_mtu" in table or "/data__" in table
+        ]
+        return preferred[0] if preferred else matches[0]
+    raise ValueError(f"Required reference character table is missing: {alias}")
 
 
 def _open_session(payload: dict[str, Any]) -> Any:
