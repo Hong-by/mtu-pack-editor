@@ -1,0 +1,38 @@
+{
+  "modName": "hby_character_clone",
+  "characterCloneRecipes": [
+    {
+      "newTemplateKey": "hby_template_clone_chen_jiu_body_dong_min_art",
+      "sourceTemplateKey": "3k_mtu_template_historical_chen_jiu_hero_wood",
+      "detailSourceTemplateKey": "3k_mtu_template_historical_chen_jiu_hero_wood",
+      "newArtSetId": "hby_art_set_clone_dong_min_general",
+      "artSetSourceId": "3k_mtu_art_set_historical_dong_min_general",
+      "newAgeRangeKey": "hby_age_clone_chen_jiu",
+      "ageRangeSourceKey": "3k_mtu_age_fixed_ancestral_ma",
+      "newInitialCeoKey": "hby_ceo_initial_data_clone_chen_jiu",
+      "initialCeoSourceKey": "3k_mtu_ceo_initial_data_character_historical_chen_jiu",
+      "templateOverrides": {
+        "weight": 0.0,
+        "min_spawn_round": 999,
+        "max_spawn_round": 999,
+        "voiceover_actor": "vo_actor_group_generic_male_earth_general",
+        "subtype": "3k_general_earth"
+      },
+      "detailOverrides": {
+        "historical": {
+          "retinue": "3k_main_general_generic_earth",
+          "attribute_set": "3k_main_attribute_set_general_earth_records",
+          "skill_set_override": "3k_main_skillset_historical_dong_min"
+        },
+        "romance": {
+          "retinue": "3k_main_hero_generic_earth",
+          "attribute_set": "3k_main_attribute_set_general_earth_romance",
+          "skill_set_override": "3k_main_skillset_historical_dong_min"
+        }
+      },
+      "ageRangeOverrides": {
+        "birth_year": 172
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "modName": "hby_character_patch",
+  "characterPatches": [
+    {
+      "templateKey": "3k_mtu_template_historical_chen_jiu_hero_wood",
+      "templateOverrides": {
+        "weight": 42.0,
+        "min_spawn_round": 10,
+        "max_spawn_round": 120
+      },
+      "detailOverrides": {
+        "historical": {
+          "retinue": "3k_main_general_generic_earth",
+          "skill_set_override": "3k_main_skillset_historical_dong_min"
+        },
+        "romance": {
+          "retinue": "3k_main_hero_generic_earth",
+          "skill_set_override": "3k_main_skillset_historical_dong_min"
+        }
+      }
+    }
+  ]
+}

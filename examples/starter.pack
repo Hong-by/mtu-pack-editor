@@ -1,0 +1,288 @@
+{
+  "format": "tk-cce-mock-pack-v1",
+  "metadata": {
+    "packName": "starter.pack",
+    "game": "Total War: THREE KINGDOMS",
+    "gameKey": "three_kingdoms"
+  },
+  "tables": {
+    "ceos_to_equipment_variants_weapons": [
+      {
+        "ceos_key": "3k_mtu_ancillary_weapon_comet_spear",
+        "primary_melee_weapon": "3k_mtu_general_2h175_comet_spear_unique",
+        "primary_missile_weapon": "",
+        "game_mode": "historical"
+      },
+      {
+        "ceos_key": "3k_mtu_ancillary_weapon_comet_spear",
+        "primary_melee_weapon": "3k_mtu_hero_2h175_comet_spear_unique",
+        "primary_missile_weapon": "",
+        "game_mode": "romance"
+      },
+      {
+        "ceos_key": "3k_mtu_ancillary_weapon_hawk",
+        "primary_melee_weapon": "",
+        "primary_missile_weapon": "3k_mtu_hero_bow_hawk_unique",
+        "game_mode": "romance"
+      }
+    ],
+    "ceos_to_equipment_variants_armours": [
+      {
+        "ceos_key": "3k_mtu_ancillary_armour_chen_jius_armour_unique",
+        "armour": "3k_mtu_hero_chen_jiu_unique",
+        "game_mode": ""
+      }
+    ],
+    "melee_weapons": [
+      {
+        "key": "3k_mtu_general_2h175_comet_spear_unique",
+        "damage": 21,
+        "ap_damage": 45,
+        "bonus_v_cavalry": 0,
+        "bonus_v_large": 0,
+        "bonus_v_infantry": 0,
+        "weapon_length": 2.0,
+        "building_damage": 300,
+        "melee_attack_interval": 2.5
+      },
+      {
+        "key": "3k_mtu_hero_2h175_comet_spear_unique",
+        "damage": 2015,
+        "ap_damage": 1056,
+        "bonus_v_cavalry": 0,
+        "bonus_v_large": 0,
+        "bonus_v_infantry": 0,
+        "weapon_length": 2.0,
+        "building_damage": 300,
+        "melee_attack_interval": 2.5
+      }
+    ],
+    "missile_weapons": [
+      {
+        "key": "3k_mtu_hero_bow_hawk_unique",
+        "default_projectile": "3k_mtu_hero_bow_hawk_unique"
+      }
+    ],
+    "projectiles": [
+      {
+        "key": "3k_mtu_hero_bow_hawk_unique",
+        "effective_range": 252,
+        "damage": 1400,
+        "ap_damage": 750,
+        "base_reload_time": 2.0,
+        "shots_per_volley": 1
+      }
+    ],
+    "unit_armour_types": [
+      {
+        "key": "3k_mtu_hero_chen_jiu_unique",
+        "armour_value": 55,
+        "audio_type": "Segmented_Light"
+      }
+    ],
+    "character_generation_templates": [
+      {
+        "key": "3k_mtu_template_historical_chen_jiu_hero_wood",
+        "forename": 544256164,
+        "family_name": 1777547188,
+        "clan_name": 942251121,
+        "other_name": 0,
+        "weight": 100.0,
+        "unique": true,
+        "art_set_override": "3k_mtu_art_set_historical_chen_jiu_general",
+        "is_male": true,
+        "voiceover_actor": "vo_actor_group_generic_any_male_wood_general",
+        "min_rounds_to_stay_in_a_pool": 2,
+        "max_rounds_to_stay_in_a_pool": 6,
+        "max_rounds_in_all_pools_before_destroyed": 20,
+        "spawn_age_range": "3k_main_age_fixed_historical_pang_de_hero_wood",
+        "min_spawn_round": 0,
+        "max_spawn_round": 290,
+        "can_be_born": false,
+        "ai_skill_generation": "default_character_skill_selection_policy",
+        "subtype": "3k_general_wood"
+      },
+      {
+        "key": "3k_mtu_template_historical_dong_min_hero_earth",
+        "forename": 993290721,
+        "family_name": 62828720,
+        "clan_name": 1582964075,
+        "other_name": 0,
+        "weight": 50.5,
+        "unique": true,
+        "art_set_override": "3k_mtu_art_set_historical_dong_min_general",
+        "is_male": true,
+        "voiceover_actor": "vo_actor_group_generic_male_earth_general",
+        "min_rounds_to_stay_in_a_pool": 2,
+        "max_rounds_to_stay_in_a_pool": 6,
+        "max_rounds_in_all_pools_before_destroyed": 20,
+        "spawn_age_range": "3k_main_age_fixed_historical_dong_min_hero_earth",
+        "min_spawn_round": 0,
+        "max_spawn_round": 165,
+        "can_be_born": false,
+        "ai_skill_generation": "default_character_skill_selection_policy",
+        "subtype": "3k_general_earth"
+      }
+    ],
+    "character_generation_template_game_mode_details": [
+      {
+        "character_generation_template": "3k_mtu_template_historical_chen_jiu_hero_wood",
+        "death_distribution_curve": "3k_standard_death_distribution_no_infant_mortality",
+        "game_mode": "historical",
+        "initial_ceos": "3k_mtu_ceo_initial_data_character_historical_chen_jiu",
+        "retinue": "3k_main_general_wood_pang_de",
+        "min_rank": 0,
+        "max_rank": 0,
+        "experience_rank_effects": "3k_main_rank_effect_set_records_base",
+        "attribute_set": "3k_main_attribute_set_general_wood_records",
+        "skill_set_override": "3k_main_skillset_historical_pang_de",
+        "initial_lives": 1,
+        "undercover_character_chance_multiplier": 1.0,
+        "is_deployable": true
+      },
+      {
+        "character_generation_template": "3k_mtu_template_historical_chen_jiu_hero_wood",
+        "death_distribution_curve": "3k_romance_death_distribution",
+        "game_mode": "romance",
+        "initial_ceos": "3k_mtu_ceo_initial_data_character_historical_chen_jiu",
+        "retinue": "3k_main_hero_wood_pang_de",
+        "min_rank": 0,
+        "max_rank": 0,
+        "experience_rank_effects": "3k_main_rank_effect_set_romance_base",
+        "attribute_set": "3k_main_attribute_set_general_wood_romance",
+        "skill_set_override": "3k_main_skillset_historical_pang_de",
+        "initial_lives": 1,
+        "undercover_character_chance_multiplier": 1.0,
+        "is_deployable": true
+      },
+      {
+        "character_generation_template": "3k_mtu_template_historical_dong_min_hero_earth",
+        "death_distribution_curve": "3k_standard_death_distribution_no_infant_mortality",
+        "game_mode": "historical",
+        "initial_ceos": "3k_mtu_ceo_initial_data_character_historical_dong_min",
+        "retinue": "3k_main_general_generic_earth",
+        "min_rank": 0,
+        "max_rank": 0,
+        "experience_rank_effects": "3k_main_rank_effect_set_records_earth_commander",
+        "attribute_set": "3k_main_attribute_set_general_earth_records",
+        "skill_set_override": "3k_main_skillset_historical_dong_min",
+        "initial_lives": 1,
+        "undercover_character_chance_multiplier": 1.0,
+        "is_deployable": true
+      }
+    ],
+    "campaign_character_art_sets": [
+      {
+        "agent_type": "general",
+        "art_set_id": "3k_mtu_art_set_historical_chen_jiu_general",
+        "culture": "3k_main_chinese",
+        "subculture": "",
+        "faction": "",
+        "is_custom": true,
+        "is_male": true,
+        "agent_subtype": "",
+        "campaign_map_scale": 1.0
+      },
+      {
+        "agent_type": "general",
+        "art_set_id": "3k_mtu_art_set_historical_dong_min_general",
+        "culture": "3k_main_chinese",
+        "subculture": "",
+        "faction": "",
+        "is_custom": true,
+        "is_male": true,
+        "agent_subtype": "",
+        "campaign_map_scale": 1.0
+      }
+    ],
+    "campaign_character_arts": [
+      {
+        "art_set_id": "3k_mtu_art_set_historical_chen_jiu_general",
+        "level": 0,
+        "age": 16,
+        "portrait": "3k_mtu_hero_special_wood_chen_jiu/",
+        "season": "none",
+        "uniform": "3k_mtu_chen_jiu",
+        "card": "3k_mtu_hero_special_wood_chen_jiu",
+        "id": 1823092738,
+        "has_come_of_age": true
+      },
+      {
+        "art_set_id": "3k_mtu_art_set_historical_dong_min_general",
+        "level": 0,
+        "age": 16,
+        "portrait": "3k_main_hero_special_earth_dong_min/",
+        "season": "none",
+        "uniform": "3k_mtu_dong_min",
+        "card": "3k_main_hero_special_earth_dong_min",
+        "id": 1811753933,
+        "has_come_of_age": true
+      }
+    ],
+    "character_generation_spawn_age_ranges": [
+      {
+        "birth_year": 170,
+        "key": "3k_mtu_age_fixed_ancestral_ma",
+        "max_age_for_birth_year": 80,
+        "max_random_age": 50,
+        "min_age_for_birth_year": 0,
+        "min_random_age": 16,
+        "has_valid_birth_year": true,
+        "min_spawn_year": 998,
+        "min_spawn_year_round": 0,
+        "max_spawn_year": 999,
+        "max_spawn_year_round": 999
+      },
+      {
+        "birth_year": 155,
+        "key": "3k_main_age_fixed_historical_dong_min_hero_earth",
+        "max_age_for_birth_year": 80,
+        "max_random_age": 50,
+        "min_age_for_birth_year": 0,
+        "min_random_age": 16,
+        "has_valid_birth_year": true,
+        "min_spawn_year": 998,
+        "min_spawn_year_round": 0,
+        "max_spawn_year": 999,
+        "max_spawn_year_round": 999
+      }
+    ],
+    "ceo_initial_datas": [
+      {
+        "key": "3k_mtu_ceo_initial_data_character_historical_chen_jiu"
+      },
+      {
+        "key": "3k_mtu_ceo_initial_data_character_historical_dong_min"
+      }
+    ]
+  },
+  "vanillaTables": {
+    "character_generation_spawn_age_ranges": [
+      {
+        "birth_year": 170,
+        "key": "3k_main_age_fixed_historical_pang_de_hero_wood",
+        "max_age_for_birth_year": 80,
+        "max_random_age": 50,
+        "min_age_for_birth_year": 0,
+        "min_random_age": 16,
+        "has_valid_birth_year": true,
+        "min_spawn_year": 998,
+        "min_spawn_year_round": 0,
+        "max_spawn_year": 999,
+        "max_spawn_year_round": 999
+      }
+    ]
+  },
+  "loc": {
+    "text/db/custom_generals.loc": {
+      "ancillary_3k_mtu_ancillary_weapon_comet_spear": "혜성창",
+      "ancillary_3k_mtu_ancillary_armour_chen_jius_armour_unique": "진구의 갑옷",
+      "ancillary_3k_mtu_ancillary_weapon_hawk": "매의 활",
+      "names_alt_name_544256164": "구",
+      "names_alt_name_1777547188": "진",
+      "names_alt_name_993290721": "민",
+      "names_alt_name_62828720": "동"
+    }
+  },
+  "files": []
+}

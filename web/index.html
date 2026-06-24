@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Three Kingdoms Pack Builder</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Three Kingdoms Pack Builder</h1>
+        <p id="statusText">대기 중</p>
+      </div>
+      <div class="actions">
+        <button id="openButton" type="button" title="팩 열기">↻</button>
+        <button id="validateButton" type="button" title="검증">✓</button>
+        <button id="buildButton" type="button" title="저장">⇩</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="config">
+        <label>
+          <span>Adapter</span>
+          <select id="adapterSelect">
+            <option value="mock">Mock</option>
+            <option value="rpfm">RPFM</option>
+          </select>
+        </label>
+        <label class="path-field">
+          <span>Input .pack</span>
+          <input id="inputPath" value="/Users/hong/Documents/new_hero/examples/starter.pack">
+        </label>
+        <label class="path-field">
+          <span>Output .pack</span>
+          <input id="outputPath" value="/Users/hong/Documents/new_hero/work/web_output.pack">
+        </label>
+        <label class="check">
+          <input id="includeVanilla" type="checkbox">
+          <span>Vanilla DB</span>
+        </label>
+        <label class="check">
+          <input id="inPlace" type="checkbox">
+          <span>원본 저장</span>
+        </label>
+      </section>
+
+      <section class="split">
+        <aside class="list-pane">
+          <div class="pane-head">
+            <h2>장수</h2>
+            <input id="searchInput" placeholder="검색">
+          </div>
+          <div id="characterList" class="character-list"></div>
+        </aside>
+
+        <section class="editor-pane">
+          <nav class="tabs" aria-label="작업">
+            <button class="tab active" data-tab="patch" type="button">수정</button>
+            <button class="tab" data-tab="clone" type="button">신규</button>
+            <button class="tab" data-tab="recipe" type="button">Recipe</button>
+            <button class="tab" data-tab="log" type="button">Log</button>
+          </nav>
+
+          <section id="patchTab" class="tab-panel active">
+            <div class="form-grid">
+              <label><span>Template</span><input id="patchTemplate" readonly></label>
+              <label><span>Weight</span><input id="patchWeight" type="number" step="0.1"></label>
+              <label><span>Min Round</span><input id="patchMinRound" type="number"></label>
+              <label><span>Max Round</span><input id="patchMaxRound" type="number"></label>
+              <label><span>Historical Retinue</span><input id="patchHistRetinue"></label>
+              <label><span>Historical Skill</span><input id="patchHistSkill"></label>
+              <label><span>Romance Retinue</span><input id="patchRomanceRetinue"></label>
+              <label><span>Romance Skill</span><input id="patchRomanceSkill"></label>
+            </div>
+            <button id="stagePatchButton" class="primary" type="button">수정 반영</button>
+          </section>
+
+          <section id="cloneTab" class="tab-panel">
+            <div class="form-grid">
+              <label><span>Source Body</span><select id="cloneBody"></select></label>
+              <label><span>Source Details</span><select id="cloneDetails"></select></label>
+              <label><span>Source Art</span><select id="cloneArt"></select></label>
+              <label><span>Source Age</span><select id="cloneAge"></select></label>
+              <label><span>Source CEO</span><select id="cloneCeo"></select></label>
+              <label><span>New Template</span><input id="cloneTemplateKey"></label>
+              <label><span>New Art Set</span><input id="cloneArtKey"></label>
+              <label><span>New Age</span><input id="cloneAgeKey"></label>
+              <label><span>New CEO</span><input id="cloneCeoKey"></label>
+              <label><span>Subtype</span><input id="cloneSubtype"></label>
+              <label><span>Birth Year</span><input id="cloneBirthYear" type="number"></label>
+              <label><span>Weight</span><input id="cloneWeight" type="number" step="0.1"></label>
+            </div>
+            <button id="stageCloneButton" class="primary" type="button">신규 반영</button>
+          </section>
+
+          <section id="recipeTab" class="tab-panel">
+            <textarea id="recipeText" spellcheck="false"></textarea>
+          </section>
+
+          <section id="logTab" class="tab-panel">
+            <pre id="logOutput"></pre>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

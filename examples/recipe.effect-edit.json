@@ -1,0 +1,25 @@
+{
+  "modName": "hby_custom_generals",
+  "equipmentStatPatches": [
+    {
+      "equipmentKey": "3k_mtu_ancillary_weapon_comet_spear",
+      "statTable": "melee_weapon",
+      "gameMode": "historical",
+      "column": "damage",
+      "value": 25
+    },
+    {
+      "equipmentKey": "3k_mtu_ancillary_armour_chen_jius_armour_unique",
+      "statTable": "armour",
+      "column": "armour_value",
+      "value": 70
+    },
+    {
+      "equipmentKey": "3k_mtu_ancillary_weapon_hawk",
+      "statTable": "projectile",
+      "gameMode": "romance",
+      "column": "ap_damage",
+      "value": 900
+    }
+  ]
+}
