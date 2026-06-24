@@ -147,19 +147,25 @@ class WebHandler(BaseHTTPRequestHandler):
 def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
     input_path = payload.get("inputPath")
     include_vanilla = bool(payload.get("includeVanilla"))
+    reference_paths = _reference_pack_paths(payload)
     if not input_path:
         raise ValueError("inputPath is required.")
     pack_path = Path(input_path)
     if not payload.get("forceRefresh"):
-        cached = PACK_CACHE.get_open_payload(pack_path, include_vanilla)
+        cached = PACK_CACHE.get_open_payload(pack_path, include_vanilla, reference_paths)
         if cached is not None:
             return cached
 
     session = _open_session(payload)
     try:
         analysis = analyze_pack(session).to_dict()
-        character_data = read_character_data(session, include_vanilla=include_vanilla)
-        PACK_CACHE.put_open_payload(pack_path, include_vanilla, analysis, character_data)
+        character_data = read_character_data(
+            session,
+            include_vanilla=include_vanilla,
+            reference_paths=reference_paths,
+            adapter_name=payload.get("adapter", "mock"),
+        )
+        PACK_CACHE.put_open_payload(pack_path, include_vanilla, analysis, character_data, reference_paths)
         return {
             "ok": True,
             "analysis": analysis,
@@ -203,13 +209,20 @@ def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
         _close_session(session)
 
 
-def read_character_data(session: Any, include_vanilla: bool = False) -> dict[str, Any]:
+def read_character_data(
+    session: Any,
+    include_vanilla: bool = False,
+    reference_paths: list[Path] | None = None,
+    adapter_name: str = "mock",
+) -> dict[str, Any]:
     tables = _read_character_tables(session, "pack")
     loc_text = _read_all_loc_text(session)
     asset_files = session.list_files()
+    reference_report = _merge_reference_packs(tables, loc_text, reference_paths or [], adapter_name, session.pack_path)
     data = {
         "pack": summarize_character_tables(tables, loc_text, asset_files),
         "vanilla": {"available": False, "error": None, "summary": None},
+        "referencePacks": reference_report,
     }
     if include_vanilla:
         try:
@@ -285,6 +298,7 @@ def summarize_character_tables(
         if row.get("key")
     ]
     combat_stats_by_initial_ceo = _combat_stats_by_initial_ceo(tables)
+    land_units = {str(row.get("key")): row for row in tables.get("land_units", []) if row.get("key")}
 
     characters = []
     for template in tables["character_generation_templates"]:
@@ -308,7 +322,8 @@ def summarize_character_tables(
         art_rows = art_rows_by_set.get(art_set, [])
         primary_art = _primary_art_row(art_rows)
         art_set_summary = next((row for row in art_sets if row["key"] == art_set), {})
-        combat_stats = _combat_stats_for_details(details, combat_stats_by_initial_ceo)
+        combat_stats = _combat_stats_for_details(details, combat_stats_by_initial_ceo) or {}
+        combat_stats.update(_unit_stats_for_details(key, details, land_units))
         characters.append(
             {
                 "key": key,
@@ -365,6 +380,8 @@ def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dic
         if row.get("ceos_key")
     }
     melee_weapons = {str(row.get("key")): row for row in tables.get("melee_weapons", [])}
+    missile_weapons = {str(row.get("key")): row for row in tables.get("missile_weapons", [])}
+    projectiles = {str(row.get("key")): row for row in tables.get("projectiles", [])}
     armour_types = {str(row.get("key")): row for row in tables.get("unit_armour_types", [])}
 
     initial_keys = {
@@ -386,13 +403,24 @@ def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dic
         weapon = _best_equipment_variant(name_token, weapon_ceos, "weapon")
         armour = _best_equipment_variant(name_token, armour_ceos, "armour")
         weapon_row = melee_weapons.get(str((weapon or {}).get("primary_melee_weapon") or ""))
+        missile_weapon_row = missile_weapons.get(str((weapon or {}).get("primary_missile_weapon") or ""))
+        projectile_row = projectiles.get(str((missile_weapon_row or {}).get("default_projectile") or ""))
         armour_row = armour_types.get(str((armour or {}).get("armour") or ""))
-        if weapon_row or armour_row:
+        if weapon_row or missile_weapon_row or projectile_row or armour_row:
             stats[initial_key] = {
                 "weaponCeo": (weapon or {}).get("ceos_key"),
                 "weaponStatKey": (weapon or {}).get("primary_melee_weapon"),
+                "weaponDamage": _number_or_none((weapon_row or {}).get("damage")),
+                "weaponApDamage": _number_or_none((weapon_row or {}).get("ap_damage")),
+                "weaponType": (weapon_row or {}).get("melee_weapon_type"),
+                "missileWeaponStatKey": (weapon or {}).get("primary_missile_weapon"),
+                "projectileStatKey": (missile_weapon_row or {}).get("default_projectile"),
+                "projectileDamage": _number_or_none((projectile_row or {}).get("damage")),
+                "projectileApDamage": _number_or_none((projectile_row or {}).get("ap_damage")),
+                "projectileRange": _number_or_none((projectile_row or {}).get("effective_range")),
                 "armourCeo": (armour or {}).get("ceos_key"),
                 "armourStatKey": (armour or {}).get("armour"),
+                "armourAudioType": (armour_row or {}).get("audio_type"),
                 "baseAttack": _sum_numeric(weapon_row, ("damage", "ap_damage")),
                 "baseDefense": _number_or_none((armour_row or {}).get("armour_value")),
             }
@@ -485,7 +513,10 @@ def _read_character_tables(session: Any, source: str) -> dict[str, list[dict[str
         "equipment_variants_weapons",
         "equipment_variants_armours",
         "melee_weapons",
+        "missile_weapons",
+        "projectiles",
         "unit_armour_types",
+        "land_units",
     ):
         try:
             table_name = _resolve_stat_table(session, alias, source)
@@ -493,6 +524,163 @@ def _read_character_tables(session: Any, source: str) -> dict[str, list[dict[str
         except ValueError:
             tables[alias] = []
     return tables
+
+
+def _merge_reference_packs(
+    tables: dict[str, list[dict[str, Any]]],
+    loc_text: dict[str, str],
+    reference_paths: list[Path],
+    adapter_name: str,
+    primary_pack_path: Path,
+) -> list[dict[str, Any]]:
+    report = []
+    for reference_path in reference_paths:
+        resolved = reference_path.expanduser()
+        if not resolved.exists():
+            report.append({"path": str(resolved), "ok": False, "error": "file_not_found"})
+            continue
+        if resolved.resolve() == primary_pack_path.resolve():
+            report.append({"path": str(resolved), "ok": False, "error": "same_as_input_pack"})
+            continue
+        session = None
+        before_counts = {alias: len(rows) for alias, rows in tables.items()}
+        try:
+            if adapter_name == "rpfm":
+                _ensure_rpfm_server()
+            session = adapter_for(adapter_name).open_pack(resolved)
+            reference_tables = _read_reference_tables(session)
+            for alias, rows in reference_tables.items():
+                _append_missing_rows(
+                    tables.setdefault(alias, []),
+                    rows,
+                    _key_field_for_alias(alias),
+                    str(resolved),
+                )
+            for key, text in _read_all_loc_text(session).items():
+                loc_text.setdefault(key, text)
+            added = {
+                alias: len(tables.get(alias, [])) - before_counts.get(alias, 0)
+                for alias in reference_tables
+            }
+            report.append({
+                "path": str(resolved),
+                "ok": True,
+                "tables": sorted(reference_tables),
+                "addedRows": {key: value for key, value in added.items() if value},
+            })
+        except Exception as error:
+            report.append({"path": str(resolved), "ok": False, "error": str(error)})
+        finally:
+            if session is not None:
+                _close_session(session)
+    return report
+
+
+def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
+    tables: dict[str, list[dict[str, Any]]] = {}
+    for alias in (
+        "equipment_variants_weapons",
+        "equipment_variants_armours",
+        "melee_weapons",
+        "missile_weapons",
+        "projectiles",
+        "unit_armour_types",
+        "land_units",
+    ):
+        try:
+            table_name = _resolve_stat_table(session, alias, "pack")
+            tables[alias] = session.read_table(table_name)
+        except ValueError:
+            continue
+    return tables
+
+
+def _append_missing_rows(
+    target: list[dict[str, Any]],
+    source: list[dict[str, Any]],
+    key_field: str,
+    reference_path: str,
+) -> None:
+    existing = {row.get(key_field) for row in target if row.get(key_field) is not None}
+    for row in source:
+        key = row.get(key_field)
+        if key is None or key in existing:
+            continue
+        target.append({**row, "_referenceSourcePath": reference_path})
+        existing.add(key)
+
+
+def _key_field_for_alias(alias: str) -> str:
+    if alias in {"equipment_variants_weapons", "equipment_variants_armours"}:
+        return "ceos_key"
+    return "key"
+
+
+def _unit_stats_for_details(
+    template_key: str,
+    details: list[dict[str, Any]],
+    land_units: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    for game_mode in ("historical", "romance"):
+        for detail in details:
+            if detail.get("gameMode") != game_mode:
+                continue
+            row = land_units.get(str(detail.get("retinue") or ""))
+            if row:
+                return _unit_stats_from_row(row)
+    for detail in details:
+        row = land_units.get(str(detail.get("retinue") or ""))
+        if row:
+            return _unit_stats_from_row(row)
+    name_token = _character_token_from_template(template_key)
+    row = _best_land_unit(name_token, land_units)
+    if row:
+        return _unit_stats_from_row(row)
+    return {}
+
+
+def _unit_stats_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "landUnitKey": row.get("key"),
+        "unitMeleeAttack": _number_or_none(row.get("melee_attack")),
+        "unitMeleeDefence": _number_or_none(row.get("melee_defence")),
+        "unitChargeBonus": _number_or_none(row.get("charge_bonus")),
+        "unitMorale": _number_or_none(row.get("morale")),
+        "unitPrimaryAmmo": _number_or_none(row.get("primary_ammo")),
+        "unitCategory": row.get("category"),
+        "unitClass": row.get("class"),
+        "unitFromReference": bool(row.get("_referenceSourcePath")),
+        "unitReferenceSource": row.get("_referenceSourcePath"),
+    }
+
+
+def _character_token_from_template(template_key: str) -> str:
+    token = template_key
+    for marker in ("template_historical_", "template_ancestral_"):
+        if marker in token:
+            token = token.split(marker, 1)[1]
+            break
+    for suffix in ("_hero_earth", "_hero_fire", "_hero_metal", "_hero_water", "_hero_wood"):
+        token = token.removesuffix(suffix)
+    return token.removeprefix("lady_")
+
+
+def _best_land_unit(
+    name_token: str,
+    land_units: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not name_token:
+        return None
+    candidates = []
+    for key, row in land_units.items():
+        normalized = key.lower()
+        if name_token.lower() not in normalized:
+            continue
+        priority = 0 if "_general_" in normalized else 1
+        candidates.append((priority, key.count("_"), key, row))
+    if not candidates:
+        return None
+    return sorted(candidates)[0][3]
 
 
 def _read_all_loc_text(session: Any) -> dict[str, str]:
@@ -684,6 +872,22 @@ def _resolve_stat_table(session: Any, alias: str, source: str) -> str:
     for candidate in TABLE_ALIASES[alias]:
         if candidate in tables:
             return candidate
+    generic_prefix = (
+        "db/ceos_to_equipment_variants_tables/"
+        if alias in {"equipment_variants_weapons", "equipment_variants_armours"}
+        else f"db/{alias}_tables/"
+    )
+    matches = sorted(table for table in tables if table.startswith(generic_prefix))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        preferred = [
+            table for table in matches
+            if "/data__" in table or table.endswith(f"/{alias}") or table.endswith(f"/_{alias}")
+        ]
+        if len(preferred) == 1:
+            return preferred[0]
+        return matches[0]
     raise ValueError(f"Required stat table is missing in {source}: {alias}")
 
 
@@ -695,6 +899,18 @@ def _open_session(payload: dict[str, Any]) -> Any:
     if adapter_name == "rpfm":
         _ensure_rpfm_server()
     return adapter_for(adapter_name).open_pack(Path(input_path))
+
+
+def _reference_pack_paths(payload: dict[str, Any]) -> list[Path]:
+    raw_paths = payload.get("referencePackPaths") or []
+    if isinstance(raw_paths, str):
+        raw_paths = [line.strip() for line in raw_paths.splitlines()]
+    paths = []
+    for raw_path in raw_paths:
+        if not raw_path:
+            continue
+        paths.append(Path(str(raw_path)).expanduser())
+    return paths
 
 
 def _ensure_rpfm_server() -> None:

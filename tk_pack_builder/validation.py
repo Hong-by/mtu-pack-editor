@@ -7,6 +7,7 @@ from .adapters import PackSession
 from .analyzer import analyze_pack
 from .character_clone import validate_character_clone, validate_character_patch
 from .game import THREE_KINGDOMS_GAME_KEY
+from .land_units import validate_land_unit_clone
 from .recipe import Recipe
 from .stat_tables import resolve_stat_target
 
@@ -73,7 +74,12 @@ def validate(session: PackSession, recipe: Recipe, output_path: str | None = Non
             )
         )
 
-    if not recipe.equipment_stat_patches and not recipe.character_clones and not recipe.character_patches:
+    if (
+        not recipe.equipment_stat_patches
+        and not recipe.land_unit_clones
+        and not recipe.character_clones
+        and not recipe.character_patches
+    ):
         messages.append(
             ValidationMessage(
                 "warning",
@@ -81,6 +87,24 @@ def validate(session: PackSession, recipe: Recipe, output_path: str | None = Non
                 "Recipe has no equipment stat patches, character patches, or character clones.",
             )
         )
+
+    seen_land_unit_keys: set[str] = set()
+    for clone in recipe.land_unit_clones:
+        if clone.new_key in seen_land_unit_keys:
+            messages.append(
+                ValidationMessage(
+                    "error",
+                    "duplicate_land_unit_clone",
+                    f"Duplicate land unit clone key: {clone.new_key}",
+                )
+            )
+        seen_land_unit_keys.add(clone.new_key)
+        try:
+            validate_land_unit_clone(session, clone)
+        except ValueError as error:
+            messages.append(
+                ValidationMessage("error", "invalid_land_unit_clone", str(error))
+            )
 
     seen_character_patch_keys: set[str] = set()
     for patch in recipe.character_patches:

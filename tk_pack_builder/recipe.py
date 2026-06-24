@@ -16,6 +16,13 @@ class StatPatch:
 
 
 @dataclass(frozen=True)
+class LandUnitClone:
+    source_key: str
+    new_key: str
+    overrides: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class CharacterClone:
     new_template_key: str
     source_template_key: str
@@ -44,6 +51,7 @@ class CharacterPatch:
 class Recipe:
     mod_name: str
     equipment_stat_patches: list[StatPatch]
+    land_unit_clones: list[LandUnitClone]
     character_clones: list[CharacterClone]
     character_patches: list[CharacterPatch]
     raw: dict[str, Any]
@@ -64,6 +72,14 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             game_mode=item.get("gameMode"),
         )
         for item in data.get("equipmentStatPatches", [])
+    ]
+    land_unit_clones = [
+        LandUnitClone(
+            source_key=item["sourceKey"],
+            new_key=item["newKey"],
+            overrides=item.get("overrides", {}),
+        )
+        for item in data.get("landUnitClones", [])
     ]
     character_clones = [
         CharacterClone(
@@ -95,6 +111,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     return Recipe(
         mod_name=data.get("modName", "unnamed_mod"),
         equipment_stat_patches=patches,
+        land_unit_clones=land_unit_clones,
         character_clones=character_clones,
         character_patches=character_patches,
         raw=data,

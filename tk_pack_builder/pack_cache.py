@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 6
 
 
 class PackCache:
@@ -20,8 +20,10 @@ class PackCache:
         self,
         pack_path: Path,
         include_vanilla: bool,
+        reference_paths: list[Path] | None = None,
     ) -> dict[str, Any] | None:
         fingerprint = _fingerprint(pack_path)
+        reference_key = _reference_key(reference_paths or [])
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -31,6 +33,7 @@ class PackCache:
                   and mtime_ns = ?
                   and size_bytes = ?
                   and include_vanilla = ?
+                  and reference_key = ?
                   and cache_version = ?
                 """,
                 (
@@ -38,6 +41,7 @@ class PackCache:
                     fingerprint["mtime_ns"],
                     fingerprint["size_bytes"],
                     int(include_vanilla),
+                    reference_key,
                     SCHEMA_VERSION,
                 ),
             ).fetchone()
@@ -59,8 +63,10 @@ class PackCache:
         include_vanilla: bool,
         analysis: dict[str, Any],
         characters: dict[str, Any],
+        reference_paths: list[Path] | None = None,
     ) -> None:
         fingerprint = _fingerprint(pack_path)
+        reference_key = _reference_key(reference_paths or [])
         with self._connect() as connection:
             connection.execute(
                 """
@@ -69,17 +75,19 @@ class PackCache:
                     mtime_ns,
                     size_bytes,
                     include_vanilla,
+                    reference_key,
                     cache_version,
                     analysis_json,
                     characters_json,
                     updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?)
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(pack_path.resolve()),
                     fingerprint["mtime_ns"],
                     fingerprint["size_bytes"],
                     int(include_vanilla),
+                    reference_key,
                     SCHEMA_VERSION,
                     json.dumps(analysis, ensure_ascii=False),
                     json.dumps(characters, ensure_ascii=False),
@@ -156,15 +164,17 @@ class PackCache:
                     mtime_ns integer not null,
                     size_bytes integer not null,
                     include_vanilla integer not null,
+                    reference_key text not null default '',
                     cache_version integer not null default 1,
                     analysis_json text not null,
                     characters_json text not null,
                     updated_at real not null,
-                    primary key (input_path, mtime_ns, size_bytes, include_vanilla, cache_version)
+                    primary key (input_path, mtime_ns, size_bytes, include_vanilla, reference_key, cache_version)
                 )
                 """
             )
             _ensure_column(connection, "pack_open_cache", "cache_version", "integer not null default 1")
+            _ensure_column(connection, "pack_open_cache", "reference_key", "text not null default ''")
             connection.execute(
                 """
                 create table if not exists pack_asset_cache (
@@ -198,6 +208,21 @@ def _fingerprint(pack_path: Path) -> dict[str, int]:
         "mtime_ns": stat.st_mtime_ns,
         "size_bytes": stat.st_size,
     }
+
+
+def _reference_key(reference_paths: list[Path]) -> str:
+    parts = []
+    for path in reference_paths:
+        if not path.exists():
+            parts.append({"path": str(path.resolve()), "missing": True})
+            continue
+        stat = path.stat()
+        parts.append({
+            "path": str(path.resolve()),
+            "mtime_ns": stat.st_mtime_ns,
+            "size_bytes": stat.st_size,
+        })
+    return json.dumps(parts, ensure_ascii=False, sort_keys=True)
 
 
 def _ensure_column(

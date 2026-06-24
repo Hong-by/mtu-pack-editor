@@ -18,6 +18,9 @@
       <div class="header-actions">
         <input id="inputPackPath" class="path-input" value="/Users/hong/Downloads/my_hero.pack" aria-label="입력 pack 경로">
         <input id="outputPackPath" class="path-input" value="/Users/hong/Documents/new_hero/출력팩/my_hero_patch.pack" aria-label="출력 pack 경로">
+        <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">/Users/hong/Downloads/database.pack
+/Users/hong/Downloads/data_mh.pack
+/Users/hong/Downloads/data_ep.pack</textarea>
         <select id="saveModeSelect" class="save-mode" aria-label="저장 방식">
           <option value="patch_pack" selected>패치 pack</option>
           <option value="save_as">Save As 원본 복사</option>
@@ -146,27 +149,19 @@
           <div class="tab-section" data-tab-section="edit-combat">
             <div class="form-group">
             <div class="group-title">
-              <strong>전투 기본값</strong>
-              <span>기본 무기/갑옷/병종 정보를 바꿉니다.</span>
+              <strong>전투 유닛 / 장비 정보</strong>
+              <span>장비, 무기, 투사체 수치는 현재 읽기 전용입니다.</span>
             </div>
             <label>
-              <span>장비 수치 세트</span>
+              <span>참고 장비 세트</span>
               <select id="editCombatProfile"></select>
             </label>
-            <div class="two-col">
-              <label>
-                <span>기본 공격력</span>
-                <input id="editBaseAttack" type="number" min="0">
-              </label>
-              <label>
-                <span>기본 방어력</span>
-                <input id="editBaseDefense" type="number" min="0">
-              </label>
-            </div>
+            <div id="editEquipmentSummary" class="equipment-summary"></div>
             <label>
               <span>병종/부대 타입</span>
               <select id="editUnitProfile"></select>
             </label>
+            <div id="editUnitSummary" class="equipment-summary"></div>
             </div>
           </div>
 
@@ -255,27 +250,19 @@
           <div class="tab-section" data-tab-section="create-combat">
             <div class="form-group">
             <div class="group-title">
-              <strong>전투 기본값</strong>
-              <span>무기/갑옷 수치와 병종은 서로 다른 장수에서 가져올 수 있습니다.</span>
+              <strong>전투 유닛 / 장비 정보</strong>
+              <span>신규 장수는 선택한 베이스의 장비 정보를 유지합니다.</span>
             </div>
             <label>
-              <span>장비 수치 세트</span>
+              <span>참고 장비 세트</span>
               <select id="sourceCombatProfile"></select>
             </label>
-            <div class="two-col">
-              <label>
-                <span>기본 공격력</span>
-                <input id="createBaseAttack" type="number" min="0">
-              </label>
-              <label>
-                <span>기본 방어력</span>
-                <input id="createBaseDefense" type="number" min="0">
-              </label>
-            </div>
+            <div id="sourceEquipmentSummary" class="equipment-summary"></div>
             <label>
               <span>병종/부대 타입</span>
               <select id="sourceUnitProfile"></select>
             </label>
+            <div id="sourceUnitSummary" class="equipment-summary"></div>
             </div>
           </div>
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from .adapters import PackSession
 from .character_clone import apply_character_clones, apply_character_patches
 from .delta_builder import build_delta_pack
+from .land_units import apply_land_unit_clones
 from .recipe import Recipe
 from .stat_tables import resolve_stat_target
 from .validation import has_errors, validate
@@ -50,11 +51,13 @@ def build_pack(
     for table_name, rows in rows_by_table.items():
         session.replace_table(table_name, rows)
 
+    created_land_units = apply_land_unit_clones(session, recipe.land_unit_clones)
     changed_characters = apply_character_patches(session, recipe.character_patches)
     created_characters = apply_character_clones(session, recipe.character_clones)
 
     session.set_metadata("lastRecipeModName", recipe.mod_name)
     session.set_metadata("changedStatCount", changed)
+    session.set_metadata("createdLandUnitCount", created_land_units)
     session.set_metadata("changedCharacterFieldCount", changed_characters)
     session.set_metadata("createdCharacterCount", created_characters)
     if in_place:
@@ -77,6 +80,7 @@ def build_pack(
             "code": code,
             "message": (
                 f"Wrote {target} with {changed} edited equipment stat value(s), "
+                f"{created_land_units} cloned land unit row(s), "
                 f"{changed_characters} edited character field(s), "
                 f"and {created_characters} cloned character(s)."
             ),

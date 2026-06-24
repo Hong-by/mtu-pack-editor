@@ -6,8 +6,9 @@ from typing import Any
 
 from .adapters import RpfmPackSession, _encode_rpfm_cell
 from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_name
+from .land_units import validate_land_unit_clone
 from .recipe import CharacterClone, CharacterPatch, Recipe
-from .stat_tables import resolve_stat_target
+from .stat_tables import resolve_stat_target, resolve_table_name
 from .validation import has_errors, validate
 
 
@@ -29,6 +30,7 @@ def build_delta_pack(
     rows_by_table: dict[str, list[dict[str, Any]]] = {}
 
     changed_stats = _collect_stat_patch_rows(session, recipe, source_dbs, rows_by_table)
+    cloned_land_units = _collect_land_unit_clone_rows(session, recipe, source_dbs, rows_by_table)
     changed_character_fields = _collect_character_patch_rows(session, recipe.character_patches, source_dbs, rows_by_table)
     cloned_characters = _collect_character_clone_rows(session, recipe.character_clones, source_dbs, rows_by_table)
 
@@ -65,6 +67,7 @@ def build_delta_pack(
             "message": (
                 f"Wrote delta patch pack {output_path} ({output_path.stat().st_size} bytes) "
                 f"with {len(rows_by_table)} DB table(s), {changed_stats} edited equipment stat value(s), "
+                f"{cloned_land_units} cloned land unit row(s), "
                 f"{changed_character_fields} edited character field(s), and {cloned_characters} cloned character(s)."
             ),
         }
@@ -93,6 +96,27 @@ def _collect_stat_patch_rows(
         _upsert_delta_row(rows_by_table, target.table_name, "key", patched)
         changed += 1
     return changed
+
+
+def _collect_land_unit_clone_rows(
+    session: RpfmPackSession,
+    recipe: Recipe,
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+) -> int:
+    if not recipe.land_unit_clones:
+        return 0
+    table_name = resolve_table_name(session, "land_units")
+    rows = _read_rows(session, table_name, source_dbs)
+    created = 0
+    for clone in recipe.land_unit_clones:
+        validate_land_unit_clone(session, clone)
+        source = _find_required(rows, "key", clone.source_key)
+        cloned = {**source, "key": clone.new_key, **clone.overrides}
+        _upsert_delta_row(rows_by_table, table_name, "key", cloned)
+        rows.append(cloned)
+        created += 1
+    return created
 
 
 def _collect_character_patch_rows(

@@ -325,6 +325,82 @@ class CliFlowTest(unittest.TestCase):
         ceos = {row["key"]: row for row in data["tables"]["ceo_initial_datas"]}
         self.assertIn("hby_ceo_initial_data_clone_chen_jiu", ceos)
 
+    def test_build_clones_land_unit_and_remaps_new_character_retinue(self) -> None:
+        tmp_path = ROOT / "work" / "test-output"
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        recipe = tmp_path / "recipe.land-unit-clone.json"
+        output = tmp_path / "land-unit-clone.pack"
+        recipe.write_text(
+            json.dumps(
+                {
+                    "modName": "hby_land_unit_clone",
+                    "landUnitClones": [
+                        {
+                            "sourceKey": "3k_main_general_generic_earth",
+                            "newKey": "hby_land_unit_test_general",
+                            "overrides": {
+                                "charge_bonus": 222,
+                                "morale": 88,
+                                "primary_ammo": 12,
+                            },
+                        }
+                    ],
+                    "characterCloneRecipes": [
+                        {
+                            "newTemplateKey": "hby_template_land_unit_test",
+                            "sourceTemplateKey": "3k_mtu_template_historical_chen_jiu_hero_wood",
+                            "detailSourceTemplateKey": "3k_mtu_template_historical_chen_jiu_hero_wood",
+                            "newInitialCeoKey": "hby_ceo_initial_data_land_unit_test",
+                            "initialCeoSourceKey": "3k_mtu_ceo_initial_data_character_historical_chen_jiu",
+                            "detailOverrides": {
+                                "historical": {
+                                    "retinue": "hby_land_unit_test_general"
+                                },
+                                "romance": {
+                                    "retinue": "hby_land_unit_test_general"
+                                },
+                            },
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tk_pack_builder",
+                "build",
+                "--recipe",
+                str(recipe),
+                "--input",
+                str(ROOT / "examples" / "starter.pack"),
+                "--output",
+                str(output),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(output.read_text(encoding="utf-8"))
+        land_units = {row["key"]: row for row in data["tables"]["land_units"]}
+        self.assertEqual(land_units["3k_main_general_generic_earth"]["charge_bonus"], 150)
+        self.assertEqual(land_units["hby_land_unit_test_general"]["charge_bonus"], 222)
+        self.assertEqual(land_units["hby_land_unit_test_general"]["morale"], 88)
+        self.assertEqual(land_units["hby_land_unit_test_general"]["primary_ammo"], 12)
+
+        detail_rows = [
+            row for row in data["tables"]["character_generation_template_game_mode_details"]
+            if row["character_generation_template"] == "hby_template_land_unit_test"
+        ]
+        self.assertEqual(len(detail_rows), 2)
+        self.assertTrue(all(row["retinue"] == "hby_land_unit_test_general" for row in detail_rows))
+
 
 if __name__ == "__main__":
     unittest.main()

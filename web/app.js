@@ -183,11 +183,31 @@ function normalizePackCharacter(item, summary) {
     romanceSkill: romance.skillSet || historical.skillSet || '-',
     retinue: historical.retinue || romance.retinue || '-',
     attributeSet: historical.attributeSet || romance.attributeSet || '-',
-    combatProfile: combatStats.weaponCeo || combatStats.armourCeo || historical.initialCeos || romance.initialCeos || '장비 수치 세트 미확인',
+    combatProfile: combatStats.weaponCeo || combatStats.armourCeo || historical.initialCeos || romance.initialCeos || '장비 정보 미확인',
     baseAttack: nullableNumber(combatStats.baseAttack),
     baseDefense: nullableNumber(combatStats.baseDefense),
     weaponStatKey: combatStats.weaponStatKey || '',
+    weaponDamage: nullableNumber(combatStats.weaponDamage),
+    weaponApDamage: nullableNumber(combatStats.weaponApDamage),
+    weaponType: combatStats.weaponType || '',
+    missileWeaponStatKey: combatStats.missileWeaponStatKey || '',
+    projectileStatKey: combatStats.projectileStatKey || '',
+    projectileDamage: nullableNumber(combatStats.projectileDamage),
+    projectileApDamage: nullableNumber(combatStats.projectileApDamage),
+    projectileRange: nullableNumber(combatStats.projectileRange),
+    armourCeo: combatStats.armourCeo || '',
     armourStatKey: combatStats.armourStatKey || '',
+    armourAudioType: combatStats.armourAudioType || '',
+    landUnitKey: combatStats.landUnitKey || '',
+    unitMeleeAttack: nullableNumber(combatStats.unitMeleeAttack),
+    unitMeleeDefence: nullableNumber(combatStats.unitMeleeDefence),
+    unitChargeBonus: nullableNumber(combatStats.unitChargeBonus),
+    unitMorale: nullableNumber(combatStats.unitMorale),
+    unitPrimaryAmmo: nullableNumber(combatStats.unitPrimaryAmmo),
+    unitCategory: combatStats.unitCategory || '',
+    unitClass: combatStats.unitClass || '',
+    unitFromReference: Boolean(combatStats.unitFromReference),
+    unitReferenceSource: combatStats.unitReferenceSource || '',
     unitProfile: historical.retinue || romance.retinue || '-',
     weight: Number(item.weight ?? 0),
     minRound: Number(item.minSpawnRound ?? 0),
@@ -224,7 +244,93 @@ function combatValue(value) {
 }
 
 function combatPair(character) {
-  return `${combatValue(character.baseAttack)} 공격 / ${combatValue(character.baseDefense)} 방어`;
+  return `근접 ${combatValue(character.weaponDamage)}+${combatValue(character.weaponApDamage)} / 방어구 ${combatValue(character.baseDefense)}`;
+}
+
+function equipmentBrief(character) {
+  if (!character) return '장비 정보 미확인';
+  const melee = character.weaponStatKey
+    ? `근접 ${combatValue(character.weaponDamage)}+${combatValue(character.weaponApDamage)}`
+    : '근접 무기 미확인';
+  const missile = character.missileWeaponStatKey
+    ? `사격 ${combatValue(character.projectileDamage)}+${combatValue(character.projectileApDamage)}`
+    : '사격 무기 없음';
+  const armour = character.armourStatKey
+    ? `방어구 ${combatValue(character.baseDefense)}`
+    : '방어구 미확인';
+  return `${melee} · ${missile} · ${armour}`;
+}
+
+function equipmentSummaryMarkup(character, prefix) {
+  if (!character) return '<p class="empty">장비 정보를 확인할 수 없습니다.</p>';
+  const canEditArmour = Boolean(character.armourCeo && character.armourStatKey);
+  const armourWarning = character.armourStatKey?.includes('_unique')
+    ? '고유 방어구라 영향 범위가 좁습니다.'
+    : '공용 방어구면 같은 key를 쓰는 다른 유닛에도 영향을 줄 수 있습니다.';
+  const rows = [
+    ['근접 무기', character.weaponStatKey || '미확인'],
+    ['근접 피해', character.weaponStatKey ? `${combatValue(character.weaponDamage)} / AP ${combatValue(character.weaponApDamage)}` : '미확인'],
+    ['사격 무기', character.missileWeaponStatKey || '없음'],
+    ['투사체', character.projectileStatKey || '없음'],
+    ['사격 피해', character.projectileStatKey ? `${combatValue(character.projectileDamage)} / AP ${combatValue(character.projectileApDamage)} / 사거리 ${combatValue(character.projectileRange)}` : '없음'],
+    ['방어구', character.armourStatKey || '미확인'],
+    ['Audio Type', character.armourAudioType || '미확인'],
+  ];
+  return `
+    <div class="equipment-note">무기/투사체 수정은 보류, 방어값은 armour_value로 저장됩니다.</div>
+    ${rows.map(([label, value]) => `
+      <div class="equipment-row">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </div>
+    `).join('')}
+    <label class="armour-edit">
+      <span>방어값</span>
+      <input id="${prefix}ArmourValue" type="number" min="0" value="${escapeHtml(character.baseDefense ?? '')}" ${canEditArmour ? '' : 'disabled'}>
+      <small>${escapeHtml(canEditArmour ? armourWarning : '연결된 방어구 CEO를 찾지 못했습니다.')}</small>
+    </label>
+  `;
+}
+
+function unitBrief(character) {
+  if (!character) return '유닛 정보 미확인';
+  return `돌격 ${combatValue(character.unitChargeBonus)} · 사기 ${combatValue(character.unitMorale)} · 탄약 ${combatValue(character.unitPrimaryAmmo)}`;
+}
+
+function unitSummaryMarkup(character, prefix) {
+  if (!character) return '<p class="empty">유닛 정보를 확인할 수 없습니다.</p>';
+  const canEdit = Boolean(character.landUnitKey)
+    && !character.unitFromReference
+    && [character.unitChargeBonus, character.unitMorale, character.unitPrimaryAmmo].some((value) => value !== null);
+  const rows = [
+    ['land unit', character.landUnitKey || '미확인'],
+    ['분류', [character.unitCategory, character.unitClass].filter(Boolean).join(' / ') || '미확인'],
+    ['근접 공격', combatValue(character.unitMeleeAttack)],
+    ['근접 방어', combatValue(character.unitMeleeDefence)],
+  ];
+  return `
+    <div class="equipment-note">${escapeHtml(character.unitFromReference ? '참조 pack에서 보강된 유닛 row라 현재는 읽기 전용입니다.' : '돌격 보너스/사기/탄약은 새 land_units row로 복제 저장됩니다. 근공/근방은 현재 확인용입니다.')}</div>
+    ${rows.map(([label, value]) => `
+      <div class="equipment-row">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </div>
+    `).join('')}
+    <div class="unit-stat-grid">
+      <label>
+        <span>돌격 보너스</span>
+        <input id="${prefix}ChargeBonus" type="number" min="0" value="${escapeHtml(character.unitChargeBonus ?? '')}" ${canEdit ? '' : 'disabled'}>
+      </label>
+      <label>
+        <span>사기</span>
+        <input id="${prefix}Morale" type="number" min="0" value="${escapeHtml(character.unitMorale ?? '')}" ${canEdit ? '' : 'disabled'}>
+      </label>
+      <label>
+        <span>탄약</span>
+        <input id="${prefix}PrimaryAmmo" type="number" min="0" value="${escapeHtml(character.unitPrimaryAmmo ?? '')}" ${canEdit ? '' : 'disabled'}>
+      </label>
+    </div>
+  `;
 }
 
 function elementFromSubtype(subtype) {
@@ -305,8 +411,8 @@ function renderSelected() {
     infoCard('역사 모드', character.historicalSkill, character.retinue),
     infoCard('낭만 모드', character.romanceSkill, character.attributeSet),
     infoCard('능력치 세트', character.attributeSet, '기본 능력치 묶음'),
-    infoCard('장비 수치 세트', character.combatProfile, combatPair(character)),
-    infoCard('병종/부대 타입', character.unitProfile, '전투 배치와 호위대 후보'),
+    infoCard('장비 정보', equipmentBrief(character), '무기/투사체/방어구 수치 수정 보류'),
+    infoCard('병종/부대 타입', character.unitProfile, unitBrief(character)),
     infoCard('등장 조건', `${character.minRound}~${character.maxRound} 라운드`, `등장 가중치 ${character.weight}`),
     infoCard('등장 이벤트', spawnEventMeta(character.spawnEvent).name, spawnEventMeta(character.spawnEvent).note),
     infoCard('원본 key', character.key, '저장 시 내부 식별자로 사용'),
@@ -343,10 +449,6 @@ function fillForms(character) {
   $('editMinRound').value = character.minRound;
   $('editMaxRound').value = character.maxRound;
   $('createWeight').value = character.weight;
-  $('editBaseAttack').value = character.baseAttack ?? '';
-  $('editBaseDefense').value = character.baseDefense ?? '';
-  $('createBaseAttack').value = character.baseAttack ?? '';
-  $('createBaseDefense').value = character.baseDefense ?? '';
 
   fillSelect('editImageSet', characters().map((item) => option(item.key, `${item.name} · ${item.imageSetName}`)));
   fillSelect('editModelSet', characters().map((item) => option(item.key, `${item.name} · ${item.modelSetName}`)));
@@ -356,8 +458,8 @@ function fillForms(character) {
   fillSelect('sourceSkill', characters().map((item) => option(item.key, `${item.name} · ${item.historicalSkill}`)));
   fillSelect('editAttributeSet', characters().map((item) => option(item.key, `${item.name} · ${item.attributeSet}`)));
   fillSelect('sourceAttributeSet', characters().map((item) => option(item.key, `${item.name} · ${item.attributeSet}`)));
-  fillSelect('editCombatProfile', characters().map((item) => option(item.key, `${item.name} · ${item.combatProfile} · ${combatValue(item.baseAttack)}/${combatValue(item.baseDefense)}`)));
-  fillSelect('sourceCombatProfile', characters().map((item) => option(item.key, `${item.name} · ${item.combatProfile} · ${combatValue(item.baseAttack)}/${combatValue(item.baseDefense)}`)));
+  fillSelect('editCombatProfile', characters().map((item) => option(item.key, `${item.name} · ${equipmentBrief(item)}`)));
+  fillSelect('sourceCombatProfile', characters().map((item) => option(item.key, `${item.name} · ${equipmentBrief(item)}`)));
   fillSelect('editUnitProfile', characters().map((item) => option(item.key, `${item.name} · ${item.unitProfile}`)));
   fillSelect('sourceUnitProfile', characters().map((item) => option(item.key, `${item.name} · ${item.unitProfile}`)));
   fillSelect('sourceSpawn', characters().map((item) => option(item.key, `${item.name} · ${item.spawnAge}`)));
@@ -388,6 +490,10 @@ function fillForms(character) {
   $('editHistoricalSkill').value = character.key;
   $('editRomanceSkill').value = character.key;
   $('createName').value = `${character.name} 파생`;
+  syncEquipmentSummary('edit', 'editCombatProfile');
+  syncEquipmentSummary('source', 'sourceCombatProfile');
+  syncUnitSummary('edit', 'editUnitProfile');
+  syncUnitSummary('source', 'sourceUnitProfile');
   updateImagePreviews();
 }
 
@@ -484,11 +590,81 @@ function setWorkTab(target) {
   }
 }
 
-function syncCombatInputs(prefix, sourceId) {
+function syncEquipmentSummary(prefix, sourceId) {
   const character = characters().find((item) => item.key === $(sourceId).value);
   if (!character) return;
-  $(`${prefix}BaseAttack`).value = character.baseAttack ?? '';
-  $(`${prefix}BaseDefense`).value = character.baseDefense ?? '';
+  $(`${prefix}EquipmentSummary`).innerHTML = equipmentSummaryMarkup(character, prefix);
+  const armourInput = $(`${prefix}ArmourValue`);
+  if (armourInput) {
+    armourInput.addEventListener('input', renderValidation);
+    armourInput.addEventListener('change', renderValidation);
+  }
+  renderValidation();
+}
+
+function syncUnitSummary(prefix, sourceId) {
+  const character = characters().find((item) => item.key === $(sourceId).value);
+  if (!character) return;
+  $(`${prefix}UnitSummary`).innerHTML = unitSummaryMarkup(character, prefix);
+  for (const suffix of ['ChargeBonus', 'Morale', 'PrimaryAmmo']) {
+    const input = $(`${prefix}${suffix}`);
+    if (input) {
+      input.addEventListener('input', renderValidation);
+      input.addEventListener('change', renderValidation);
+    }
+  }
+  renderValidation();
+}
+
+function armourPatchFrom(prefix, character) {
+  const input = $(`${prefix}ArmourValue`);
+  if (!input || !character?.armourCeo || !character?.armourStatKey) return null;
+  const value = nullableNumber(input.value);
+  if (value === null || value < 0 || value === character.baseDefense) return null;
+  return {
+    equipmentKey: character.armourCeo,
+    statTable: 'armour',
+    column: 'armour_value',
+    value,
+    armourKey: character.armourStatKey,
+    previousValue: character.baseDefense,
+  };
+}
+
+function unitStatCloneFrom(prefix, character, slug, index) {
+  if (!character?.landUnitKey) return [];
+  const fields = [
+    ['ChargeBonus', 'charge_bonus', character.unitChargeBonus],
+    ['Morale', 'morale', character.unitMorale],
+    ['PrimaryAmmo', 'primary_ammo', character.unitPrimaryAmmo],
+  ];
+  const overrides = {};
+  const changes = [];
+  for (const [suffix, column, previousValue] of fields) {
+    const input = $(`${prefix}${suffix}`);
+    if (!input || input.disabled) continue;
+    const value = nullableNumber(input.value);
+    if (value === null || value < 0 || value === previousValue) continue;
+    overrides[column] = value;
+    changes.push({ column, value, previousValue });
+  }
+  if (!changes.length) return null;
+  return {
+    sourceKey: character.landUnitKey,
+    newKey: `hby_land_unit_${slug}_${index}`,
+    overrides,
+    changes,
+  };
+}
+
+function unitPatchDescription(clone) {
+  if (!clone?.changes?.length) return '';
+  const labels = {
+    charge_bonus: '돌격',
+    morale: '사기',
+    primary_ammo: '탄약',
+  };
+  return ` · 유닛 ${clone.changes.map((patch) => `${labels[patch.column] || patch.column} ${patch.previousValue}→${patch.value}`).join(', ')}`;
 }
 
 function stageEdit() {
@@ -501,6 +677,9 @@ function stageEdit() {
   const combat = characters().find((item) => item.key === $('editCombatProfile').value);
   const unit = characters().find((item) => item.key === $('editUnitProfile').value);
   const spawnEvent = spawnEventMeta($('editSpawnEvent').value);
+  const armourPatch = armourPatchFrom('edit', combat);
+  const editSlug = slugify(`${character.key}_${state.queue.length + 1}`);
+  const landUnitClone = unitStatCloneFrom('edit', unit, editSlug, state.queue.length + 1);
   const payload = {
     targetKey: character.key,
     displayName: $('editName').value.trim(),
@@ -508,8 +687,8 @@ function stageEdit() {
     modelSetKey: modelSet?.key,
     attributeSetSourceKey: attribute?.key,
     combatProfileSourceKey: combat?.key,
-    baseAttack: nullableNumber($('editBaseAttack').value),
-    baseDefense: nullableNumber($('editBaseDefense').value),
+    armourPatch,
+    landUnitClone,
     unitProfileSourceKey: unit?.key,
     subtype: $('editSubtype').value,
     spawn: {
@@ -527,7 +706,7 @@ function stageEdit() {
     kind: 'patch_character',
     type: '기존 수정',
     title: `${character.name} 수정`,
-    description: `${$('editName').value} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'} · 장비 ${combat?.name || '-'} ${$('editBaseAttack').value}/${$('editBaseDefense').value} · 병종 ${unit?.name || '-'} · 등장 이벤트 ${spawnEvent.name} · 역사 ${hist?.name || '-'} · 낭만 ${romance?.name || '-'}`,
+    description: `${$('editName').value} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'} · 장비 유지(${equipmentBrief(combat)})${armourPatch ? ` · 방어값 ${armourPatch.previousValue}→${armourPatch.value}` : ''} · 병종 ${unit?.name || '-'}${unitPatchDescription(landUnitClone)} · 등장 이벤트 ${spawnEvent.name} · 역사 ${hist?.name || '-'} · 낭만 ${romance?.name || '-'}`,
     payload,
   });
   renderQueue();
@@ -544,6 +723,9 @@ function stageCreate() {
   const unit = characters().find((item) => item.key === $('sourceUnitProfile').value);
   const spawn = characters().find((item) => item.key === $('sourceSpawn').value);
   const spawnEvent = spawnEventMeta($('sourceSpawnEvent').value);
+  const armourPatch = armourPatchFrom('source', combat);
+  const createSlug = slugify(`${base?.key || $('createName').value.trim() || 'new'}_${state.queue.length + 1}`);
+  const landUnitClone = unitStatCloneFrom('source', unit, createSlug, state.queue.length + 1);
   const payload = {
     newName: $('createName').value.trim(),
     sourceKeys: {
@@ -557,10 +739,8 @@ function stageCreate() {
       spawn: spawn?.key,
     },
     subtype: $('createSubtype').value,
-    combat: {
-      baseAttack: nullableNumber($('createBaseAttack').value),
-      baseDefense: nullableNumber($('createBaseDefense').value),
-    },
+    armourPatch,
+    landUnitClone,
     spawn: {
       weight: Number($('createWeight').value),
       event: $('sourceSpawnEvent').value,
@@ -570,7 +750,7 @@ function stageCreate() {
     kind: 'clone_character',
     type: '신규 생성',
     title: `${$('createName').value || '새 장수'} 생성`,
-    description: `기본 ${base?.name || '-'} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'} · 장비 ${combat?.name || '-'} ${$('createBaseAttack').value}/${$('createBaseDefense').value} · 병종 ${unit?.name || '-'} · 스킬 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
+    description: `기본 ${base?.name || '-'} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'} · 장비 유지(${equipmentBrief(combat)})${armourPatch ? ` · 방어값 ${armourPatch.previousValue}→${armourPatch.value}` : ''} · 병종 ${unit?.name || '-'}${unitPatchDescription(landUnitClone)} · 스킬 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
     payload,
   });
   renderQueue();
@@ -596,6 +776,7 @@ function slugify(value) {
     .replace(/[^\w\s-]/g, '')
     .trim()
     .replace(/[\s-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
     .toLowerCase();
   return ascii || `custom_${Date.now()}`;
 }
@@ -608,14 +789,14 @@ function detailsByMode(character) {
   return details;
 }
 
-function detailOverrideFromSources(attribute, skill, unit) {
+function detailOverrideFromSources(attribute, skill, unit, retinueOverride = null) {
   const overrides = {};
   const attributeDetails = detailsByMode(attribute);
   const skillDetails = detailsByMode(skill);
   const unitDetails = detailsByMode(unit);
   for (const mode of ['historical', 'romance']) {
     overrides[mode] = compactObject({
-      retinue: unitDetails[mode]?.retinue || unit?.unitProfile,
+      retinue: retinueOverride || unitDetails[mode]?.retinue || unit?.unitProfile,
       attribute_set: attributeDetails[mode]?.attributeSet || attribute?.attributeSet,
       skill_set_override: skillDetails[mode]?.skillSet || (mode === 'romance' ? skill?.romanceSkill : skill?.historicalSkill),
     });
@@ -629,6 +810,7 @@ function recipeFromQueue() {
     characterPatches: [],
     characterCloneRecipes: [],
     equipmentStatPatches: [],
+    landUnitClones: [],
   };
 
   state.queue.forEach((item, index) => {
@@ -639,6 +821,14 @@ function recipeFromQueue() {
       const hist = characters().find((candidate) => candidate.key === payload.skillSources?.historical);
       const romance = characters().find((candidate) => candidate.key === payload.skillSources?.romance);
       const unit = characters().find((candidate) => candidate.key === payload.unitProfileSourceKey);
+      const retinueOverride = payload.landUnitClone?.newKey;
+      if (payload.landUnitClone) {
+        recipe.landUnitClones.push({
+          sourceKey: payload.landUnitClone.sourceKey,
+          newKey: payload.landUnitClone.newKey,
+          overrides: payload.landUnitClone.overrides,
+        });
+      }
       recipe.characterPatches.push({
         templateKey: payload.targetKey,
         templateOverrides: compactObject({
@@ -650,17 +840,25 @@ function recipeFromQueue() {
         }),
         detailOverrides: {
           historical: compactObject({
-            retinue: detailsByMode(unit).historical?.retinue || unit?.unitProfile,
+            retinue: retinueOverride || detailsByMode(unit).historical?.retinue || unit?.unitProfile,
             attribute_set: detailsByMode(attribute).historical?.attributeSet || attribute?.attributeSet,
             skill_set_override: detailsByMode(hist).historical?.skillSet || hist?.historicalSkill,
           }),
           romance: compactObject({
-            retinue: detailsByMode(unit).romance?.retinue || unit?.unitProfile,
+            retinue: retinueOverride || detailsByMode(unit).romance?.retinue || unit?.unitProfile,
             attribute_set: detailsByMode(attribute).romance?.attributeSet || attribute?.attributeSet,
             skill_set_override: detailsByMode(romance).romance?.skillSet || romance?.romanceSkill,
           }),
         },
       });
+      if (payload.armourPatch) {
+        recipe.equipmentStatPatches.push({
+          equipmentKey: payload.armourPatch.equipmentKey,
+          statTable: payload.armourPatch.statTable,
+          column: payload.armourPatch.column,
+          value: payload.armourPatch.value,
+        });
+      }
     }
 
     if (item.kind === 'clone_character') {
@@ -672,6 +870,14 @@ function recipeFromQueue() {
       const unit = characters().find((candidate) => candidate.key === payload.sourceKeys?.unitProfile);
       const spawn = characters().find((candidate) => candidate.key === payload.sourceKeys?.spawn);
       const slug = slugify(payload.newName);
+      const retinueOverride = payload.landUnitClone?.newKey;
+      if (payload.landUnitClone) {
+        recipe.landUnitClones.push({
+          sourceKey: payload.landUnitClone.sourceKey,
+          newKey: payload.landUnitClone.newKey,
+          overrides: payload.landUnitClone.overrides,
+        });
+      }
       recipe.characterCloneRecipes.push({
         newTemplateKey: `hby_template_${slug}_${index + 1}`,
         sourceTemplateKey: base?.key,
@@ -688,8 +894,16 @@ function recipeFromQueue() {
           max_spawn_round: spawn?.maxRound,
           subtype: payload.subtype,
         }),
-        detailOverrides: detailOverrideFromSources(attribute, skill, unit),
+        detailOverrides: detailOverrideFromSources(attribute, skill, unit, retinueOverride),
       });
+      if (payload.armourPatch) {
+        recipe.equipmentStatPatches.push({
+          equipmentKey: payload.armourPatch.equipmentKey,
+          statTable: payload.armourPatch.statTable,
+          column: payload.armourPatch.column,
+          value: payload.armourPatch.value,
+        });
+      }
     }
   });
 
@@ -712,11 +926,13 @@ function renderValidation() {
   const name = isCreate ? $('createName').value.trim() : $('editName').value.trim();
   const minRound = Number($('editMinRound').value);
   const maxRound = Number($('editMaxRound').value);
-  const attackRaw = isCreate ? $('createBaseAttack').value : $('editBaseAttack').value;
-  const defenseRaw = isCreate ? $('createBaseDefense').value : $('editBaseDefense').value;
-  const attack = nullableNumber(attackRaw);
-  const defense = nullableNumber(defenseRaw);
   const eventKey = isCreate ? $('sourceSpawnEvent').value : $('editSpawnEvent').value;
+  const armourInput = isCreate ? $('sourceArmourValue') : $('editArmourValue');
+  const armourValue = armourInput ? nullableNumber(armourInput.value) : null;
+  const unitPrefix = isCreate ? 'source' : 'edit';
+  const unitInputs = ['ChargeBonus', 'Morale', 'PrimaryAmmo']
+    .map((suffix) => $(`${unitPrefix}${suffix}`))
+    .filter(Boolean);
 
   if (!name) {
     items.push(validationItem('error', '이름 필요', '저장 전에 표시 이름을 입력해야 합니다.'));
@@ -724,8 +940,11 @@ function renderValidation() {
   if (isCreate && characters().some((character) => character.name === name)) {
     items.push(validationItem('warning', '이름 중복 가능성', '기존 장수와 같은 표시 이름입니다. loc 충돌 검증이 필요합니다.'));
   }
-  if (attack === null || defense === null || attack < 0 || defense < 0) {
-    items.push(validationItem('error', '전투 수치 확인', '기본 공격력과 방어력은 0 이상의 숫자여야 합니다. 미확인 값은 직접 입력해야 합니다.'));
+  if (armourInput && !armourInput.disabled && (armourValue === null || armourValue < 0)) {
+    items.push(validationItem('error', '방어값 확인', '방어값은 0 이상의 숫자여야 합니다.'));
+  }
+  if (unitInputs.some((input) => !input.disabled && (nullableNumber(input.value) === null || nullableNumber(input.value) < 0))) {
+    items.push(validationItem('error', '유닛 수치 확인', '돌격 보너스, 사기, 탄약은 0 이상의 숫자여야 합니다.'));
   }
   if (!isCreate && minRound > maxRound) {
     items.push(validationItem('error', '등장 라운드 확인', '최소 라운드가 최대 라운드보다 클 수 없습니다.'));
@@ -775,6 +994,13 @@ function previewRecipe() {
   $('recipeDialog').showModal();
 }
 
+function referencePackPaths() {
+  return $('referencePackPaths').value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function serverPayload() {
   const saveMode = $('saveModeSelect').value;
   const inPlace = saveMode === 'in_place';
@@ -782,6 +1008,7 @@ function serverPayload() {
     adapter: 'rpfm',
     inputPath: $('inputPackPath').value,
     outputPath: inPlace ? '' : $('outputPackPath').value,
+    referencePackPaths: referencePackPaths(),
     inPlace,
     delta: saveMode === 'patch_pack',
     recipe: recipeFromQueue(),
@@ -811,11 +1038,15 @@ async function loadPack() {
     const data = await postJson('/api/open', {
       adapter: 'rpfm',
       inputPath: $('inputPackPath').value,
+      referencePackPaths: referencePackPaths(),
       includeVanilla: false,
     });
     hydrateFromPackData(data.characters);
     const cacheText = data.cache?.hit ? 'DB 캐시 사용' : 'DB 캐시 갱신';
-    state.serverMessages = [validationItem('info', '팩 읽기 완료', `${state.characters.length}명 로드 · ${cacheText}`)];
+    const referenceOk = (data.characters?.referencePacks || []).filter((item) => item.ok).length;
+    const referenceTotal = (data.characters?.referencePacks || []).length;
+    const referenceText = referenceTotal ? ` · 참조 pack ${referenceOk}/${referenceTotal}` : '';
+    state.serverMessages = [validationItem('info', '팩 읽기 완료', `${state.characters.length}명 로드 · ${cacheText}${referenceText}`)];
     renderAll();
   } catch (error) {
     state.serverMessages = [validationItem('error', '팩 읽기 실패', error.message)];
@@ -888,8 +1119,10 @@ $('createModeButton').addEventListener('click', () => setMode('create'));
 for (const button of document.querySelectorAll('.tab-btn')) {
   button.addEventListener('click', () => setWorkTab(button.dataset.tabTarget));
 }
-$('editCombatProfile').addEventListener('change', () => syncCombatInputs('edit', 'editCombatProfile'));
-$('sourceCombatProfile').addEventListener('change', () => syncCombatInputs('create', 'sourceCombatProfile'));
+$('editCombatProfile').addEventListener('change', () => syncEquipmentSummary('edit', 'editCombatProfile'));
+$('sourceCombatProfile').addEventListener('change', () => syncEquipmentSummary('source', 'sourceCombatProfile'));
+$('editUnitProfile').addEventListener('change', () => syncUnitSummary('edit', 'editUnitProfile'));
+$('sourceUnitProfile').addEventListener('change', () => syncUnitSummary('source', 'sourceUnitProfile'));
 $('editImageSet').addEventListener('change', updateImagePreviews);
 $('sourceImageSet').addEventListener('change', updateImagePreviews);
 $('stageEditButton').addEventListener('click', stageEdit);
@@ -922,5 +1155,7 @@ for (const control of document.querySelectorAll('input, select')) {
   control.addEventListener('input', renderValidation);
   control.addEventListener('change', renderValidation);
 }
+$('referencePackPaths').addEventListener('input', renderValidation);
+$('referencePackPaths').addEventListener('change', renderValidation);
 
 renderAll();

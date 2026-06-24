@@ -80,6 +80,28 @@
         "audio_type": "Segmented_Light"
       }
     ],
+    "land_units": [
+      {
+        "key": "3k_main_general_generic_earth",
+        "charge_bonus": 150,
+        "morale": 60,
+        "primary_ammo": 0,
+        "melee_attack": 0,
+        "melee_defence": 0,
+        "category": "cavalry",
+        "class": "com"
+      },
+      {
+        "key": "3k_main_hero_generic_earth",
+        "charge_bonus": 38,
+        "morale": 60,
+        "primary_ammo": 10,
+        "melee_attack": 0,
+        "melee_defence": 0,
+        "category": "cavalry",
+        "class": "com"
+      }
+    ],
     "character_generation_templates": [
       {
         "key": "3k_mtu_template_historical_chen_jiu_hero_wood",

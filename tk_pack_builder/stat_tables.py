@@ -31,6 +31,10 @@ TABLE_ALIASES = {
         "unit_armour_types",
         "db/unit_armour_types_tables/_mtu_characters_skills_abilities",
     ],
+    "land_units": [
+        "land_units",
+        "db/land_units_tables/_mtu_characters_custom_battles_land_units",
+    ],
 }
 
 NUMERIC_COLUMNS = {
@@ -66,6 +70,11 @@ NUMERIC_COLUMNS = {
         "bonus_v_large",
         "burst_size",
         "shots_per_volley",
+    },
+    "land_unit": {
+        "charge_bonus",
+        "morale",
+        "primary_ammo",
     },
 }
 
@@ -115,6 +124,12 @@ def resolve_stat_target(
         variant = _find_variant(variants, equipment_key, game_mode, "armour")
         row_key = variant["armour"]
         target_table = resolve_table_name(session, "unit_armour_types")
+        _require_row(session.read_table(target_table), row_key, column)
+        return StatTarget(stat_table, target_table, row_key, column, value)
+
+    if stat_table == "land_unit":
+        row_key = equipment_key
+        target_table = resolve_table_name(session, "land_units")
         _require_row(session.read_table(target_table), row_key, column)
         return StatTarget(stat_table, target_table, row_key, column, value)
 
