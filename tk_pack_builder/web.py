@@ -324,6 +324,7 @@ def summarize_character_tables(
         art_set_summary = next((row for row in art_sets if row["key"] == art_set), {})
         combat_stats = _combat_stats_for_details(details, combat_stats_by_initial_ceo) or {}
         combat_stats.update(_unit_stats_for_details(key, details, land_units))
+        title_info = _title_info_for_character(template, details, loc_text)
         characters.append(
             {
                 "key": key,
@@ -345,6 +346,7 @@ def summarize_character_tables(
                 "portraitImagePath": art_set_summary.get("portraitImagePath"),
                 "cardImagePath": art_set_summary.get("cardImagePath"),
                 "combatStats": combat_stats,
+                "titleInfo": title_info,
                 "templateRow": template,
                 "details": details,
             }
@@ -456,6 +458,70 @@ def _character_token_from_initial_ceo(initial_key: str) -> str:
             token = token.split(marker, 1)[1]
             break
     return token.removeprefix("lady_")
+
+
+def _title_info_for_character(
+    template: dict[str, Any],
+    details: list[dict[str, Any]],
+    loc_text: dict[str, str],
+) -> dict[str, Any]:
+    initial_key = _preferred_initial_ceo(details)
+    token = _character_token_from_initial_ceo(initial_key) if initial_key else _character_token_from_template(str(template.get("key", "")))
+    candidates = _title_candidate_keys(token)
+    matched = next((key for key in candidates if _loc_title_for_ceo_node(key, loc_text)), candidates[0] if candidates else "")
+    return {
+        "status": "read_only_spike",
+        "label": _loc_title_for_ceo_node(matched, loc_text) or _friendly_title_label(matched),
+        "ceoNodeKey": matched,
+        "initialCeoKey": initial_key,
+        "locTitleKey": f"ceo_nodes_title_{matched}" if matched else "",
+        "descriptionKey": f"ceo_nodes_description_{matched}" if matched else "",
+        "source": "campaigns/ceo_data.ccd",
+        "note": "set_title/career CEO는 CCD/startpos 계층이라 쓰기는 별도 검증 후 지원",
+    }
+
+
+def _preferred_initial_ceo(details: list[dict[str, Any]]) -> str:
+    for game_mode in ("historical", "romance"):
+        for detail in details:
+            if detail.get("gameMode") == game_mode and detail.get("initialCeos"):
+                return str(detail.get("initialCeos"))
+    for detail in details:
+        if detail.get("initialCeos"):
+            return str(detail.get("initialCeos"))
+    return ""
+
+
+def _title_candidate_keys(token: str) -> list[str]:
+    if not token:
+        return []
+    normalized = token.removeprefix("lady_")
+    tokens = [normalized]
+    if token != normalized:
+        tokens.append(token)
+    prefixes = ("3k_mtu", "3k_main", "3k_dlc04", "3k_dlc05", "ep")
+    candidates = []
+    for prefix in prefixes:
+        for item in tokens:
+            candidates.append(f"{prefix}_ceo_node_career_historical_{item}_01")
+    return candidates
+
+
+def _loc_title_for_ceo_node(ceo_node_key: str, loc_text: dict[str, str]) -> str | None:
+    if not ceo_node_key:
+        return None
+    return loc_text.get(f"ceo_nodes_title_{ceo_node_key}")
+
+
+def _friendly_title_label(ceo_node_key: str) -> str:
+    if not ceo_node_key:
+        return "칭호 미확인"
+    value = ceo_node_key
+    for marker in ("_ceo_node_career_historical_", "_ceo_node_career_generated_"):
+        if marker in value:
+            value = value.split(marker, 1)[1]
+            break
+    return value.removesuffix("_01").replace("_", " ")
 
 
 def _best_equipment_variant(

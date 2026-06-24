@@ -28,6 +28,9 @@ const SAMPLE_CHARACTERS = [
     retinue: '수 속성 전략가',
     attributeSet: 'water strategist',
     combatProfile: '전략가 기본 장비',
+    titleName: '부여월 칭호',
+    titleKey: '3k_mtu_ceo_node_career_historical_buyeo_wol_01',
+    titleStatus: 'read_only_spike',
     baseAttack: 42,
     baseDefense: 28,
     unitProfile: '검 보병 호위대',
@@ -50,6 +53,9 @@ const SAMPLE_CHARACTERS = [
     retinue: '목 속성 용장',
     attributeSet: 'wood champion',
     combatProfile: '용장 장창 장비',
+    titleName: '진구 칭호',
+    titleKey: '3k_mtu_ceo_node_career_historical_chen_jiu_01',
+    titleStatus: 'read_only_spike',
     baseAttack: 58,
     baseDefense: 46,
     unitProfile: '창 보병 호위대',
@@ -72,6 +78,9 @@ const SAMPLE_CHARACTERS = [
     retinue: '토 속성 지휘관',
     attributeSet: 'earth commander',
     combatProfile: '지휘관 균형 장비',
+    titleName: '동민 칭호',
+    titleKey: '3k_mtu_ceo_node_career_historical_dong_min_01',
+    titleStatus: 'read_only_spike',
     baseAttack: 48,
     baseDefense: 52,
     unitProfile: '검기병 호위대',
@@ -94,6 +103,9 @@ const SAMPLE_CHARACTERS = [
     retinue: '금 속성 선봉',
     attributeSet: 'metal sentinel',
     combatProfile: '감시자 중갑 장비',
+    titleName: '마운록 칭호',
+    titleKey: '3k_mtu_ceo_node_career_historical_ma_yunlu_01',
+    titleStatus: 'read_only_spike',
     baseAttack: 50,
     baseDefense: 64,
     unitProfile: '도끼 보병 호위대',
@@ -116,6 +128,9 @@ const SAMPLE_CHARACTERS = [
     retinue: '화 속성 선봉',
     attributeSet: 'fire vanguard',
     combatProfile: '선봉 돌격 장비',
+    titleName: '장포 칭호',
+    titleKey: '3k_mtu_ceo_node_career_historical_zhang_bao_01',
+    titleStatus: 'read_only_spike',
     baseAttack: 72,
     baseDefense: 34,
     unitProfile: '충격 기병 호위대',
@@ -171,6 +186,7 @@ function normalizePackCharacter(item, summary) {
   const element = elementFromSubtype(item.subtype);
   const artSet = summary.artSets.find((candidate) => candidate.key === item.artSet);
   const combatStats = item.combatStats || {};
+  const titleInfo = item.titleInfo || {};
   return {
     key: item.key,
     name: item.label || item.displayName || friendlyKey(item.key),
@@ -184,6 +200,12 @@ function normalizePackCharacter(item, summary) {
     retinue: historical.retinue || romance.retinue || '-',
     attributeSet: historical.attributeSet || romance.attributeSet || '-',
     combatProfile: combatStats.weaponCeo || combatStats.armourCeo || historical.initialCeos || romance.initialCeos || '장비 정보 미확인',
+    titleName: titleInfo.label || '칭호 미확인',
+    titleKey: titleInfo.ceoNodeKey || '',
+    titleInitialCeoKey: titleInfo.initialCeoKey || '',
+    titleLocKey: titleInfo.locTitleKey || '',
+    titleStatus: titleInfo.status || 'read_only_spike',
+    titleNote: titleInfo.note || 'set_title 쓰기는 검증 필요',
     baseAttack: nullableNumber(combatStats.baseAttack),
     baseDefense: nullableNumber(combatStats.baseDefense),
     weaponStatKey: combatStats.weaponStatKey || '',
@@ -411,6 +433,7 @@ function renderSelected() {
     infoCard('역사 모드', character.historicalSkill, character.retinue),
     infoCard('낭만 모드', character.romanceSkill, character.attributeSet),
     infoCard('능력치 세트', character.attributeSet, '기본 능력치 묶음'),
+    infoCard('칭호/직함', titleBrief(character), 'set_title 후보, 저장은 검증 필요'),
     infoCard('장비 정보', equipmentBrief(character), '무기/투사체/방어구 수치 수정 보류'),
     infoCard('병종/부대 타입', character.unitProfile, unitBrief(character)),
     infoCard('등장 조건', `${character.minRound}~${character.maxRound} 라운드`, `등장 가중치 ${character.weight}`),
@@ -490,6 +513,8 @@ function fillForms(character) {
   $('editHistoricalSkill').value = character.key;
   $('editRomanceSkill').value = character.key;
   $('createName').value = `${character.name} 파생`;
+  renderTitleSummary('edit', character);
+  renderTitleSummary('source', character);
   syncEquipmentSummary('edit', 'editCombatProfile');
   syncEquipmentSummary('source', 'sourceCombatProfile');
   syncUnitSummary('edit', 'editUnitProfile');
@@ -520,6 +545,35 @@ function infoCard(title, value, note) {
       <small>${escapeHtml(note)}</small>
     </article>
   `;
+}
+
+function titleBrief(character) {
+  if (!character?.titleKey) return '칭호 미확인';
+  return `${character.titleName || friendlyKey(character.titleKey)} · ${character.titleKey}`;
+}
+
+function titleSummaryMarkup(character) {
+  if (!character) return '<p class="empty">칭호 정보를 확인할 수 없습니다.</p>';
+  const rows = [
+    ['현재 칭호', character.titleName || '미확인'],
+    ['career CEO', character.titleKey || '미확인'],
+    ['initial CEO', character.titleInitialCeoKey || '미확인'],
+    ['loc key', character.titleLocKey || '미확인'],
+  ];
+  return `
+    <div class="equipment-note">set_title/칭호는 campaigns/ceo_data.ccd 및 startpos 계층으로 보여서 현재는 읽기 전용입니다.</div>
+    ${rows.map(([label, value]) => `
+      <div class="equipment-row">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </div>
+    `).join('')}
+  `;
+}
+
+function renderTitleSummary(prefix, character) {
+  const target = $(`${prefix}TitleSummary`);
+  if (target) target.innerHTML = titleSummaryMarkup(character);
 }
 
 function imagePreviewMarkup(character, modeLabel) {
@@ -1123,6 +1177,11 @@ $('editCombatProfile').addEventListener('change', () => syncEquipmentSummary('ed
 $('sourceCombatProfile').addEventListener('change', () => syncEquipmentSummary('source', 'sourceCombatProfile'));
 $('editUnitProfile').addEventListener('change', () => syncUnitSummary('edit', 'editUnitProfile'));
 $('sourceUnitProfile').addEventListener('change', () => syncUnitSummary('source', 'sourceUnitProfile'));
+$('sourceBase').addEventListener('change', () => {
+  const character = characters().find((item) => item.key === $('sourceBase').value);
+  renderTitleSummary('source', character);
+  renderValidation();
+});
 $('editImageSet').addEventListener('change', updateImagePreviews);
 $('sourceImageSet').addEventListener('change', updateImagePreviews);
 $('stageEditButton').addEventListener('click', stageEdit);
