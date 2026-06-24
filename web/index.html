@@ -3,109 +3,333 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Three Kingdoms Pack Builder</title>
-    <link rel="stylesheet" href="/app.css">
+    <title>MTU 장수 제작소</title>
+    <link rel="stylesheet" href="./app.css">
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <h1>Three Kingdoms Pack Builder</h1>
-        <p id="statusText">대기 중</p>
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark">將</span>
+        <div>
+          <h1>MTU 장수 제작소</h1>
+          <p>기존 장수를 수정하거나, 여러 장수의 정보를 조합해 신규 장수를 만듭니다.</p>
+        </div>
       </div>
-      <div class="actions">
-        <button id="openButton" type="button" title="팩 열기">↻</button>
-        <button id="validateButton" type="button" title="검증">✓</button>
-        <button id="buildButton" type="button" title="저장">⇩</button>
+      <div class="header-actions">
+        <input id="inputPackPath" class="path-input" value="/Users/hong/Downloads/my_hero.pack" aria-label="입력 pack 경로">
+        <input id="outputPackPath" class="path-input" value="/Users/hong/Documents/new_hero/출력팩/my_hero_patch.pack" aria-label="출력 pack 경로">
+        <select id="saveModeSelect" class="save-mode" aria-label="저장 방식">
+          <option value="patch_pack" selected>패치 pack</option>
+          <option value="save_as">Save As 원본 복사</option>
+          <option value="in_place">원본 수정</option>
+        </select>
+        <button id="loadPackButton" class="ghost-btn" type="button">팩 읽기</button>
+        <button id="validateButton" class="ghost-btn" type="button">검증</button>
+        <button id="buildButton" class="primary-btn" type="button">저장</button>
+        <button id="previewRecipeButton" class="ghost-btn" type="button">레시피 미리보기</button>
+        <button id="saveDraftButton" class="ghost-btn" type="button">작업 저장</button>
       </div>
     </header>
 
-    <main class="workspace">
-      <section class="config">
-        <label>
-          <span>Adapter</span>
-          <select id="adapterSelect">
-            <option value="mock">Mock</option>
-            <option value="rpfm">RPFM</option>
-          </select>
-        </label>
-        <label class="path-field">
-          <span>Input .pack</span>
-          <input id="inputPath" value="/Users/hong/Documents/new_hero/examples/starter.pack">
-        </label>
-        <label class="path-field">
-          <span>Output .pack</span>
-          <input id="outputPath" value="/Users/hong/Documents/new_hero/work/web_output.pack">
-        </label>
-        <label class="check">
-          <input id="includeVanilla" type="checkbox">
-          <span>Vanilla DB</span>
-        </label>
-        <label class="check">
-          <input id="inPlace" type="checkbox">
-          <span>원본 저장</span>
-        </label>
-      </section>
-
-      <section class="split">
-        <aside class="list-pane">
-          <div class="pane-head">
+    <main class="app-shell">
+      <aside class="roster-panel">
+        <div class="panel-toolbar">
+          <div>
             <h2>장수</h2>
-            <input id="searchInput" placeholder="검색">
+            <span id="rosterCount">0명</span>
           </div>
-          <div id="characterList" class="character-list"></div>
-        </aside>
+          <input id="searchInput" placeholder="이름, 오행, key 검색">
+        </div>
+        <div class="filter-row" role="group" aria-label="오행 필터">
+          <button class="filter active" data-filter="all" type="button">전체</button>
+          <button class="filter" data-filter="earth" type="button">土</button>
+          <button class="filter" data-filter="fire" type="button">火</button>
+          <button class="filter" data-filter="wood" type="button">木</button>
+          <button class="filter" data-filter="water" type="button">水</button>
+          <button class="filter" data-filter="metal" type="button">金</button>
+        </div>
+        <div id="characterList" class="character-list"></div>
+      </aside>
 
-        <section class="editor-pane">
-          <nav class="tabs" aria-label="작업">
-            <button class="tab active" data-tab="patch" type="button">수정</button>
-            <button class="tab" data-tab="clone" type="button">신규</button>
-            <button class="tab" data-tab="recipe" type="button">Recipe</button>
-            <button class="tab" data-tab="log" type="button">Log</button>
-          </nav>
-
-          <section id="patchTab" class="tab-panel active">
-            <div class="form-grid">
-              <label><span>Template</span><input id="patchTemplate" readonly></label>
-              <label><span>Weight</span><input id="patchWeight" type="number" step="0.1"></label>
-              <label><span>Min Round</span><input id="patchMinRound" type="number"></label>
-              <label><span>Max Round</span><input id="patchMaxRound" type="number"></label>
-              <label><span>Historical Retinue</span><input id="patchHistRetinue"></label>
-              <label><span>Historical Skill</span><input id="patchHistSkill"></label>
-              <label><span>Romance Retinue</span><input id="patchRomanceRetinue"></label>
-              <label><span>Romance Skill</span><input id="patchRomanceSkill"></label>
+      <section class="detail-panel">
+        <div class="hero-preview">
+          <div id="portraitFrame" class="portrait-frame">
+            <span id="portraitGlyph">將</span>
+          </div>
+          <div class="hero-summary">
+            <div class="summary-top">
+              <div>
+                <h2 id="selectedName">장수를 선택하세요</h2>
+                <p id="selectedKey">MTU pack 기준 샘플 UI</p>
+              </div>
+              <span id="elementBadge" class="element-badge">-</span>
             </div>
-            <button id="stagePatchButton" class="primary" type="button">수정 반영</button>
-          </section>
+            <div id="selectedChips" class="chip-row"></div>
+            <dl class="stat-grid">
+              <div><dt>이미지 세트</dt><dd id="currentImageSet">-</dd></div>
+              <div><dt>모델 세트</dt><dd id="currentModelSet">-</dd></div>
+              <div><dt>능력치 세트</dt><dd id="currentAttributeSet">-</dd></div>
+              <div><dt>전투 기본값</dt><dd id="currentCombatProfile">-</dd></div>
+              <div><dt>병종</dt><dd id="currentUnitProfile">-</dd></div>
+              <div><dt>역사 스킬셋</dt><dd id="currentHistSkill">-</dd></div>
+              <div><dt>낭만 스킬셋</dt><dd id="currentRomanceSkill">-</dd></div>
+              <div><dt>등장 조건</dt><dd id="currentSpawn">-</dd></div>
+              <div><dt>등장 이벤트</dt><dd id="currentSpawnEvent">-</dd></div>
+            </dl>
+          </div>
+        </div>
 
-          <section id="cloneTab" class="tab-panel">
-            <div class="form-grid">
-              <label><span>Source Body</span><select id="cloneBody"></select></label>
-              <label><span>Source Details</span><select id="cloneDetails"></select></label>
-              <label><span>Source Art</span><select id="cloneArt"></select></label>
-              <label><span>Source Age</span><select id="cloneAge"></select></label>
-              <label><span>Source CEO</span><select id="cloneCeo"></select></label>
-              <label><span>New Template</span><input id="cloneTemplateKey"></label>
-              <label><span>New Art Set</span><input id="cloneArtKey"></label>
-              <label><span>New Age</span><input id="cloneAgeKey"></label>
-              <label><span>New CEO</span><input id="cloneCeoKey"></label>
-              <label><span>Subtype</span><input id="cloneSubtype"></label>
-              <label><span>Birth Year</span><input id="cloneBirthYear" type="number"></label>
-              <label><span>Weight</span><input id="cloneWeight" type="number" step="0.1"></label>
-            </div>
-            <button id="stageCloneButton" class="primary" type="button">신규 반영</button>
-          </section>
+        <div class="section-block">
+          <div class="section-head">
+            <h3>현재 장수 설정</h3>
+            <span>읽기 쉬운 이름으로 보여주고, 원본 key는 보조로만 표시합니다.</span>
+          </div>
+          <div id="currentCards" class="info-card-grid"></div>
+        </div>
 
-          <section id="recipeTab" class="tab-panel">
-            <textarea id="recipeText" spellcheck="false"></textarea>
-          </section>
-
-          <section id="logTab" class="tab-panel">
-            <pre id="logOutput"></pre>
-          </section>
-        </section>
+        <div class="section-block">
+          <div class="section-head">
+            <h3>이미지/모델 후보</h3>
+            <span>이미지 세트는 초상화/카드, 모델 세트는 전장/캠페인/전체 외형을 묶습니다.</span>
+          </div>
+          <div id="appearanceGallery" class="appearance-gallery"></div>
+        </div>
       </section>
+
+      <aside class="work-panel">
+        <div class="mode-switch">
+          <button id="editModeButton" class="mode-btn active" data-mode="edit" type="button">기존 장수 수정</button>
+          <button id="createModeButton" class="mode-btn" data-mode="create" type="button">신규 장수 생성</button>
+        </div>
+
+        <section id="editPanel" class="work-mode active">
+          <div class="work-title">
+            <h2>기존 장수 수정</h2>
+            <p>선택한 장수 자체의 표시 이름, 이미지, 모델, 스킬셋, 등장 조건을 바꿉니다.</p>
+          </div>
+
+          <div class="tab-bar" data-tabs-for="edit">
+            <button class="tab-btn active" data-tab-target="edit-basic" type="button">기본</button>
+            <button class="tab-btn" data-tab-target="edit-appearance" type="button">외형</button>
+            <button class="tab-btn" data-tab-target="edit-combat" type="button">전투</button>
+            <button class="tab-btn" data-tab-target="edit-spawn" type="button">등장</button>
+            <button class="tab-btn" data-tab-target="edit-advanced" type="button">고급</button>
+          </div>
+
+          <div class="tab-section active" data-tab-section="edit-basic">
+            <label>
+              <span>표시 이름</span>
+              <input id="editName" placeholder="예: 부여월">
+            </label>
+            <label>
+              <span>능력치 세트</span>
+              <select id="editAttributeSet"></select>
+            </label>
+            <label>
+              <span>오행/타입</span>
+              <select id="editSubtype"></select>
+            </label>
+          </div>
+
+          <div class="tab-section" data-tab-section="edit-appearance">
+            <div id="editImagePreview" class="image-set-preview"></div>
+            <label>
+              <span>이미지 세트</span>
+              <select id="editImageSet"></select>
+            </label>
+            <label>
+              <span>모델 세트</span>
+              <select id="editModelSet"></select>
+            </label>
+          </div>
+
+          <div class="tab-section" data-tab-section="edit-combat">
+            <div class="form-group">
+            <div class="group-title">
+              <strong>전투 기본값</strong>
+              <span>기본 무기/갑옷/병종 정보를 바꿉니다.</span>
+            </div>
+            <label>
+              <span>장비 수치 세트</span>
+              <select id="editCombatProfile"></select>
+            </label>
+            <div class="two-col">
+              <label>
+                <span>기본 공격력</span>
+                <input id="editBaseAttack" type="number" min="0">
+              </label>
+              <label>
+                <span>기본 방어력</span>
+                <input id="editBaseDefense" type="number" min="0">
+              </label>
+            </div>
+            <label>
+              <span>병종/부대 타입</span>
+              <select id="editUnitProfile"></select>
+            </label>
+            </div>
+          </div>
+
+          <div class="tab-section" data-tab-section="edit-spawn">
+            <div class="two-col">
+              <label>
+                <span>등장 가중치</span>
+                <input id="editWeight" type="number" step="0.1">
+              </label>
+              <label>
+                <span>등장 이벤트</span>
+                <select id="editSpawnEvent"></select>
+              </label>
+            </div>
+            <div class="two-col">
+              <label>
+                <span>최소 라운드</span>
+                <input id="editMinRound" type="number">
+              </label>
+              <label>
+                <span>최대 라운드</span>
+                <input id="editMaxRound" type="number">
+              </label>
+            </div>
+          </div>
+
+          <div class="tab-section" data-tab-section="edit-advanced">
+            <label>
+              <span>역사 스킬셋</span>
+              <select id="editHistoricalSkill"></select>
+            </label>
+            <label>
+              <span>낭만 스킬셋</span>
+              <select id="editRomanceSkill"></select>
+            </label>
+          </div>
+
+          <button id="stageEditButton" class="primary-btn wide" type="button">수정 작업에 추가</button>
+        </section>
+
+        <section id="createPanel" class="work-mode">
+          <div class="work-title">
+            <h2>신규 장수 생성</h2>
+            <p>여러 장수의 이름, 이미지, 모델, 스킬셋, 등장 조건을 조합합니다.</p>
+          </div>
+
+          <div class="tab-bar" data-tabs-for="create">
+            <button class="tab-btn active" data-tab-target="create-basic" type="button">기본</button>
+            <button class="tab-btn" data-tab-target="create-appearance" type="button">외형</button>
+            <button class="tab-btn" data-tab-target="create-combat" type="button">전투</button>
+            <button class="tab-btn" data-tab-target="create-spawn" type="button">등장</button>
+            <button class="tab-btn" data-tab-target="create-advanced" type="button">고급</button>
+          </div>
+
+          <div class="tab-section active" data-tab-section="create-basic">
+            <label>
+              <span>새 장수 이름</span>
+              <input id="createName" placeholder="예: 홍비">
+            </label>
+            <label>
+              <span>기본 정보</span>
+              <select id="sourceBase"></select>
+            </label>
+            <label>
+              <span>능력치 세트</span>
+              <select id="sourceAttributeSet"></select>
+            </label>
+            <label>
+              <span>오행/타입</span>
+              <select id="createSubtype"></select>
+            </label>
+          </div>
+
+          <div class="tab-section" data-tab-section="create-appearance">
+            <div id="sourceImagePreview" class="image-set-preview"></div>
+            <label>
+              <span>이미지 세트</span>
+              <select id="sourceImageSet"></select>
+            </label>
+            <label>
+              <span>모델 세트</span>
+              <select id="sourceModelSet"></select>
+            </label>
+          </div>
+
+          <div class="tab-section" data-tab-section="create-combat">
+            <div class="form-group">
+            <div class="group-title">
+              <strong>전투 기본값</strong>
+              <span>무기/갑옷 수치와 병종은 서로 다른 장수에서 가져올 수 있습니다.</span>
+            </div>
+            <label>
+              <span>장비 수치 세트</span>
+              <select id="sourceCombatProfile"></select>
+            </label>
+            <div class="two-col">
+              <label>
+                <span>기본 공격력</span>
+                <input id="createBaseAttack" type="number" min="0">
+              </label>
+              <label>
+                <span>기본 방어력</span>
+                <input id="createBaseDefense" type="number" min="0">
+              </label>
+            </div>
+            <label>
+              <span>병종/부대 타입</span>
+              <select id="sourceUnitProfile"></select>
+            </label>
+            </div>
+          </div>
+
+          <div class="tab-section" data-tab-section="create-spawn">
+            <label>
+              <span>등장 조건</span>
+              <select id="sourceSpawn"></select>
+            </label>
+            <label>
+              <span>등장 이벤트</span>
+              <select id="sourceSpawnEvent"></select>
+            </label>
+            <label>
+              <span>등장 가중치</span>
+              <input id="createWeight" type="number" step="0.1" value="0">
+            </label>
+          </div>
+
+          <div class="tab-section" data-tab-section="create-advanced">
+            <label>
+              <span>스킬셋</span>
+              <select id="sourceSkill"></select>
+            </label>
+          </div>
+
+          <button id="stageCreateButton" class="primary-btn wide" type="button">신규 생성 작업에 추가</button>
+        </section>
+
+        <section class="validation-panel">
+          <div class="section-head compact">
+            <h3>저장 전 검증</h3>
+            <span id="validationCount">0개</span>
+          </div>
+          <div id="validationList" class="validation-list"></div>
+        </section>
+
+        <section class="queue-panel">
+          <div class="section-head compact">
+            <h3>작업 목록</h3>
+            <span id="queueCount">0개</span>
+          </div>
+          <div id="workQueue" class="work-queue"></div>
+        </section>
+      </aside>
     </main>
 
-    <script src="/app.js"></script>
+    <dialog id="recipeDialog">
+      <div class="dialog-head">
+        <h2>레시피 미리보기</h2>
+        <button id="closeRecipeButton" type="button">×</button>
+      </div>
+      <textarea id="recipeText" spellcheck="false"></textarea>
+    </dialog>
+
+    <script src="./app.js"></script>
   </body>
 </html>

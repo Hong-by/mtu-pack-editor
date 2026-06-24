@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     build_parser.add_argument("--input", required=True, type=Path)
     build_parser.add_argument("--output", type=Path)
     build_parser.add_argument("--in-place", action="store_true")
+    build_parser.add_argument("--delta", action="store_true", help="Write only changed rows to a small patch pack.")
 
     args = parser.parse_args(argv)
     adapter = adapter_for(args.adapter)
@@ -153,11 +154,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "build":
             if args.in_place and args.output:
                 raise ValueError("Use either --output for Save As or --in-place for original save, not both.")
+            if args.in_place and args.delta:
+                raise ValueError("Use either --delta for a patch pack or --in-place for original save, not both.")
+            if args.delta and args.adapter != "rpfm":
+                raise ValueError("--delta is currently supported only with --adapter rpfm.")
             if not args.in_place and not args.output:
                 raise ValueError("Either --output for Save As or --in-place for original save is required.")
             session = adapter.open_pack(args.input)
             recipe = load_recipe(args.recipe)
-            messages = build_pack(session, recipe, args.output, in_place=args.in_place)
+            messages = build_pack(session, recipe, args.output, in_place=args.in_place, delta=args.delta)
             _print_json({"messages": messages})
             return 1 if any(message["level"] == "error" for message in messages) else 0
     except ValueError as error:

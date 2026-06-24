@@ -42,6 +42,9 @@ class PackSession(Protocol):
     def list_files(self) -> list[str]:
         ...
 
+    def read_file_bytes(self, packed_path: str) -> bytes:
+        ...
+
     def metadata(self) -> dict[str, Any]:
         ...
 
@@ -88,6 +91,17 @@ class MockPackSession:
 
     def list_files(self) -> list[str]:
         return sorted(self.envelope.get("files", []))
+
+    def read_file_bytes(self, packed_path: str) -> bytes:
+        files = self.envelope.get("fileData", {})
+        if packed_path not in files:
+            raise ValueError(f"Packed file not found: {packed_path}")
+        value = files[packed_path]
+        if isinstance(value, str):
+            return value.encode("utf-8")
+        if isinstance(value, list):
+            return bytes(value)
+        raise ValueError(f"Unsupported mock file data for: {packed_path}")
 
     def metadata(self) -> dict[str, Any]:
         return copy.deepcopy(self.envelope.get("metadata", {}))
@@ -240,6 +254,14 @@ class RpfmPackSession:
             and not info["path"].startswith(("db/", "ceo_db/"))
             and not info["path"].endswith(".loc")
         )
+
+    def read_file_bytes(self, packed_path: str) -> bytes:
+        response = self.client.send({"GetPackedFileRawData": [self.pack_key, packed_path]})
+        _raise_rpfm_error(response)
+        data = response.get("data", {})
+        if "VecU8" not in data:
+            raise ValueError(f"RPFM did not return raw data for '{packed_path}'.")
+        return bytes(data["VecU8"])
 
     def metadata(self) -> dict[str, Any]:
         return {

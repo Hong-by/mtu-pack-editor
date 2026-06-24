@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .adapters import PackSession
 from .character_clone import apply_character_clones, apply_character_patches
+from .delta_builder import build_delta_pack
 from .recipe import Recipe
 from .stat_tables import resolve_stat_target
 from .validation import has_errors, validate
@@ -14,7 +15,13 @@ def build_pack(
     recipe: Recipe,
     output_path: Path | None,
     in_place: bool = False,
+    delta: bool = False,
 ) -> list[dict[str, object]]:
+    if delta:
+        if output_path is None:
+            raise ValueError("Delta patch pack output path is required.")
+        return build_delta_pack(session, recipe, output_path)  # type: ignore[arg-type]
+
     messages = validate(session, recipe, str(output_path) if output_path else None)
     if has_errors(messages):
         return [

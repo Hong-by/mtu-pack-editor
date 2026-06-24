@@ -11,16 +11,32 @@ UI 없이 `recipe.json + starter.pack -> output.pack` 흐름을 검증하는 CLI
 웹 UI 실행:
 
 ```bash
-python3 -m tk_pack_builder.web --port 8765
+python3 scripts/dev_server.py
 ```
 
-브라우저에서 `http://127.0.0.1:8765`를 엽니다. RPFM Adapter를 쓰려면 별도로 RPFM 서버가 `127.0.0.1:45127`에서 실행 중이어야 합니다.
+브라우저에서 `http://127.0.0.1:8765`를 엽니다. 이 런처는 RPFM 서버(`127.0.0.1:45127`)와 웹 UI 서버(`127.0.0.1:8765`)를 함께 확인하고, 꺼져 있는 서버만 자동으로 켭니다.
+
+macOS Finder에서 바로 실행하려면 프로젝트 루트의 `MTU Pack Editor.command`를 더블클릭합니다. 서버를 켠 뒤 기본 브라우저로 `http://127.0.0.1:8765`를 자동으로 엽니다.
+
+터미널에서 브라우저까지 자동으로 열려면:
+
+```bash
+python3 scripts/dev_server.py --open-browser
+```
+
+웹 UI만 켜고 싶으면:
+
+```bash
+python3 scripts/dev_server.py --no-rpfm
+```
+
+웹 UI의 기본 저장 방식은 `패치 pack`입니다. 이 모드는 원본 MTU pack 전체를 복사하지 않고, 원본 모드는 별도로 켠다는 전제로 변경/신규 row만 담은 작은 `.pack`을 만듭니다. 원본 전체를 복사하는 방식은 저장 방식에서 `Save As 원본 복사`를 명시적으로 선택했을 때만 사용합니다.
 
 ```bash
 python3 -m tk_pack_builder build \
   --recipe examples/recipe.effect-edit.json \
   --input examples/starter.pack \
-  --output work/output.pack
+  --output 출력팩/output.pack
 ```
 
 원본 pack에 직접 저장:
@@ -121,3 +137,13 @@ python3 -m tk_pack_builder --adapter rpfm build \
 ```
 
 실제 원본 pack에 직접 저장하려면 `--output` 대신 `--in-place`를 사용합니다. 이 모드는 원본 파일을 바꾸므로 백업 pack을 따로 둔 뒤 실행하는 것을 권장합니다.
+
+원본 MTU pack을 별도 모드로 유지하고 변경분만 작은 패치 pack으로 만들려면:
+
+```bash
+python3 -m tk_pack_builder --adapter rpfm build \
+  --recipe examples/recipe.character-clone.json \
+  --input /Users/hong/Downloads/my_hero.pack \
+  --output 출력팩/hby_character_delta.pack \
+  --delta
+```

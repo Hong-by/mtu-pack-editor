@@ -1,308 +1,926 @@
+const ELEMENTS = {
+  earth: { label: '土', name: '토', subtype: '3k_general_earth' },
+  fire: { label: '火', name: '화', subtype: '3k_general_fire' },
+  wood: { label: '木', name: '목', subtype: '3k_general_wood' },
+  water: { label: '水', name: '수', subtype: '3k_general_water' },
+  metal: { label: '金', name: '금', subtype: '3k_general_metal' },
+};
+
+const SPAWN_EVENTS = [
+  { key: 'campaign_start', name: '캠페인 시작 시 등록', note: '시작 시점부터 장수 풀에 포함' },
+  { key: 'round_pool', name: '라운드 조건으로 등장', note: '최소/최대 라운드와 가중치 사용' },
+  { key: 'faction_join', name: '지정 세력 합류 이벤트', note: '특정 세력 또는 군주에게 지급' },
+  { key: 'incident_reward', name: '이벤트 보상으로 영입', note: 'incident/mission 보상 흐름' },
+  { key: 'disabled', name: '자동 등장 안 함', note: '직접 배치나 별도 이벤트 전용' },
+];
+
+const SAMPLE_CHARACTERS = [
+  {
+    key: '3k_mtu_template_historical_lady_buyeo_wol_hero_water',
+    name: '부여월',
+    element: 'water',
+    portrait: '月',
+    artSet: '3k_mtu_art_set_historical_lady_zou_yuan_general',
+    imageSetName: '부여월 이미지 세트',
+    modelSetName: '부여월 모델 세트',
+    historicalSkill: '손권 기반 전략가 스킬셋',
+    romanceSkill: '손권 기반 낭만 스킬셋',
+    retinue: '수 속성 전략가',
+    attributeSet: 'water strategist',
+    combatProfile: '전략가 기본 장비',
+    baseAttack: 42,
+    baseDefense: 28,
+    unitProfile: '검 보병 호위대',
+    weight: 100,
+    minRound: 0,
+    maxRound: 999,
+    spawnAge: '대교 기반 연령대',
+    spawnEvent: 'round_pool',
+  },
+  {
+    key: '3k_mtu_template_historical_chen_jiu_hero_wood',
+    name: '진구',
+    element: 'wood',
+    portrait: '仇',
+    artSet: '3k_mtu_art_set_historical_chen_jiu_general',
+    imageSetName: '진구 이미지 세트',
+    modelSetName: '진구 모델 세트',
+    historicalSkill: '방덕 기반 기록 스킬셋',
+    romanceSkill: '방덕 기반 낭만 스킬셋',
+    retinue: '목 속성 용장',
+    attributeSet: 'wood champion',
+    combatProfile: '용장 장창 장비',
+    baseAttack: 58,
+    baseDefense: 46,
+    unitProfile: '창 보병 호위대',
+    weight: 100,
+    minRound: 0,
+    maxRound: 290,
+    spawnAge: '방덕 기반 연령대',
+    spawnEvent: 'round_pool',
+  },
+  {
+    key: '3k_mtu_template_historical_dong_min_hero_earth',
+    name: '동민',
+    element: 'earth',
+    portrait: '旻',
+    artSet: '3k_mtu_art_set_historical_dong_min_general',
+    imageSetName: '동민 이미지 세트',
+    modelSetName: '동민 모델 세트',
+    historicalSkill: '동민 기록 스킬셋',
+    romanceSkill: '동민 낭만 스킬셋',
+    retinue: '토 속성 지휘관',
+    attributeSet: 'earth commander',
+    combatProfile: '지휘관 균형 장비',
+    baseAttack: 48,
+    baseDefense: 52,
+    unitProfile: '검기병 호위대',
+    weight: 50.5,
+    minRound: 0,
+    maxRound: 165,
+    spawnAge: '동민 연령대',
+    spawnEvent: 'faction_join',
+  },
+  {
+    key: '3k_mtu_template_historical_lady_ma_yunlu_hero_metal',
+    name: '마운록',
+    element: 'metal',
+    portrait: '騄',
+    artSet: '3k_mtu_art_set_historical_lady_ma_yunlu_general',
+    imageSetName: '마운록 이미지 세트',
+    modelSetName: '마운록 모델 세트',
+    historicalSkill: '마운록 금속 스킬셋',
+    romanceSkill: '마운록 낭만 스킬셋',
+    retinue: '금 속성 선봉',
+    attributeSet: 'metal sentinel',
+    combatProfile: '감시자 중갑 장비',
+    baseAttack: 50,
+    baseDefense: 64,
+    unitProfile: '도끼 보병 호위대',
+    weight: 75.5,
+    minRound: 0,
+    maxRound: 140,
+    spawnAge: '마운록 연령대',
+    spawnEvent: 'incident_reward',
+  },
+  {
+    key: '3k_mtu_template_historical_zhang_bao_hero_fire',
+    name: '장포',
+    element: 'fire',
+    portrait: '苞',
+    artSet: '3k_mtu_art_set_historical_zhang_bao_general',
+    imageSetName: '장포 이미지 세트',
+    modelSetName: '장포 모델 세트',
+    historicalSkill: '장포 화 속성 스킬셋',
+    romanceSkill: '장포 낭만 스킬셋',
+    retinue: '화 속성 선봉',
+    attributeSet: 'fire vanguard',
+    combatProfile: '선봉 돌격 장비',
+    baseAttack: 72,
+    baseDefense: 34,
+    unitProfile: '충격 기병 호위대',
+    weight: 100,
+    minRound: 0,
+    maxRound: 999,
+    spawnAge: '장포 연령대',
+    spawnEvent: 'campaign_start',
+  },
+];
+
 const state = {
-  analysis: null,
-  characters: [],
-  artSets: [],
-  ageRanges: [],
-  initialCeos: [],
-  selectedKey: null,
-  recipe: {
-    modName: "hby_web_recipe",
-    equipmentStatPatches: [],
-    characterPatches: [],
-    characterCloneRecipes: []
-  }
+  characters: SAMPLE_CHARACTERS,
+  options: null,
+  selectedKey: SAMPLE_CHARACTERS[0].key,
+  filter: 'all',
+  mode: 'edit',
+  queue: [],
+  serverMessages: [],
+  lastRecipe: null,
 };
 
 const $ = (id) => document.getElementById(id);
 
-const fields = {
-  adapter: $("adapterSelect"),
-  inputPath: $("inputPath"),
-  outputPath: $("outputPath"),
-  includeVanilla: $("includeVanilla"),
-  inPlace: $("inPlace"),
-  status: $("statusText"),
-  list: $("characterList"),
-  search: $("searchInput"),
-  recipe: $("recipeText"),
-  log: $("logOutput")
-};
-
-function setStatus(text) {
-  fields.status.textContent = text;
+function selectedCharacter() {
+  return state.characters.find((character) => character.key === state.selectedKey) || state.characters[0];
 }
 
-function appendLog(entry) {
-  const text = typeof entry === "string" ? entry : JSON.stringify(entry, null, 2);
-  fields.log.textContent = `${new Date().toLocaleTimeString()} ${text}\n\n${fields.log.textContent}`;
+function characters() {
+  return state.characters;
+}
+
+function elementMeta(element) {
+  return ELEMENTS[element] || { label: '將', name: '기타', subtype: '' };
+}
+
+function spawnEventMeta(key) {
+  return SPAWN_EVENTS.find((event) => event.key === key) || SPAWN_EVENTS[0];
+}
+
+function hydrateFromPackData(characterData) {
+  const summary = characterData?.pack;
+  if (!summary?.characters?.length) return;
+  state.options = summary;
+  state.characters = summary.characters.map((item) => normalizePackCharacter(item, summary));
+  state.selectedKey = state.characters[0].key;
+  state.queue = [];
+}
+
+function normalizePackCharacter(item, summary) {
+  const historical = item.details.find((detail) => detail.gameMode === 'historical') || item.details[0] || {};
+  const romance = item.details.find((detail) => detail.gameMode === 'romance') || historical;
+  const element = elementFromSubtype(item.subtype);
+  const artSet = summary.artSets.find((candidate) => candidate.key === item.artSet);
+  const combatStats = item.combatStats || {};
+  return {
+    key: item.key,
+    name: item.label || item.displayName || friendlyKey(item.key),
+    element,
+    portrait: portraitGlyph(item.label || item.displayName || item.key),
+    artSet: item.artSet || '',
+    imageSetName: artSet?.label || friendlyKey(item.artSet || item.key),
+    modelSetName: item.uniform || artSet?.uniform || friendlyKey(item.artSet || item.key),
+    historicalSkill: historical.skillSet || '-',
+    romanceSkill: romance.skillSet || historical.skillSet || '-',
+    retinue: historical.retinue || romance.retinue || '-',
+    attributeSet: historical.attributeSet || romance.attributeSet || '-',
+    combatProfile: combatStats.weaponCeo || combatStats.armourCeo || historical.initialCeos || romance.initialCeos || '장비 수치 세트 미확인',
+    baseAttack: nullableNumber(combatStats.baseAttack),
+    baseDefense: nullableNumber(combatStats.baseDefense),
+    weaponStatKey: combatStats.weaponStatKey || '',
+    armourStatKey: combatStats.armourStatKey || '',
+    unitProfile: historical.retinue || romance.retinue || '-',
+    weight: Number(item.weight ?? 0),
+    minRound: Number(item.minSpawnRound ?? 0),
+    maxRound: Number(item.maxSpawnRound ?? 999),
+    spawnAge: item.ageRange || '-',
+    spawnEvent: 'round_pool',
+    templateRow: item.templateRow || {},
+    details: item.details || [],
+    portraitPath: item.portrait || artSet?.portrait || '',
+    cardPath: item.card || artSet?.card || '',
+    portraitImagePath: item.portraitImagePath || artSet?.portraitImagePath || '',
+    cardImagePath: item.cardImagePath || artSet?.cardImagePath || '',
+    uniform: item.uniform || artSet?.uniform || '',
+    source: 'pack',
+  };
+}
+
+function friendlyKey(value) {
+  return String(value || '')
+    .split('_')
+    .filter((word) => word && !['3k', 'main', 'mtu', 'template', 'historical', 'hero', 'general'].includes(word))
+    .slice(-4)
+    .join(' ') || String(value || '-');
+}
+
+function nullableNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function combatValue(value) {
+  return value === null || value === undefined ? '미확인' : String(value);
+}
+
+function combatPair(character) {
+  return `${combatValue(character.baseAttack)} 공격 / ${combatValue(character.baseDefense)} 방어`;
+}
+
+function elementFromSubtype(subtype) {
+  const value = String(subtype || '').toLowerCase();
+  return ['earth', 'fire', 'wood', 'water', 'metal'].find((element) => value.includes(element)) || 'earth';
+}
+
+function portraitGlyph(value) {
+  const text = String(value || '將').trim();
+  return [...text][Math.max(0, [...text].length - 1)] || '將';
+}
+
+function renderRoster() {
+  const query = $('searchInput').value.trim().toLowerCase();
+  const list = $('characterList');
+  list.innerHTML = '';
+  const filtered = characters().filter((character) => {
+    const spawnEvent = spawnEventMeta(character.spawnEvent);
+    const haystack = `${character.name} ${character.key} ${character.imageSetName} ${character.modelSetName} ${character.combatProfile} ${character.unitProfile} ${spawnEvent.name} ${character.element}`.toLowerCase();
+    const matchesQuery = !query || haystack.includes(query);
+    const matchesFilter = state.filter === 'all' || character.element === state.filter;
+    return matchesQuery && matchesFilter;
+  });
+
+  $('rosterCount').textContent = `${filtered.length}명`;
+
+  for (const character of filtered) {
+    const meta = elementMeta(character.element);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `character-card ${character.key === state.selectedKey ? 'active' : ''}`;
+    button.innerHTML = `
+      ${portraitMarkup(character, 'mini-portrait')}
+      <div class="card-main">
+        <strong>${escapeHtml(character.name)}</strong>
+        <span>${meta.name} · ${escapeHtml(character.retinue)}</span>
+        <small>${escapeHtml(character.key)}</small>
+      </div>
+      <b>${meta.label}</b>
+    `;
+    button.addEventListener('click', () => {
+      state.selectedKey = character.key;
+      renderAll();
+    });
+    list.appendChild(button);
+  }
+}
+
+function renderSelected() {
+  const character = selectedCharacter();
+  const meta = elementMeta(character.element);
+  $('portraitFrame').className = `portrait-frame element-${character.element}`;
+  $('portraitFrame').innerHTML = portraitMarkup(character, 'portrait-image');
+  $('selectedName').textContent = character.name;
+  $('selectedKey').textContent = character.key;
+  $('elementBadge').className = `element-badge element-${character.element}`;
+  $('elementBadge').textContent = `${meta.label} ${meta.name}`;
+  $('currentImageSet').textContent = character.imageSetName;
+  $('currentModelSet').textContent = character.modelSetName;
+  $('currentAttributeSet').textContent = character.attributeSet;
+  $('currentCombatProfile').textContent = combatPair(character);
+  $('currentUnitProfile').textContent = character.unitProfile;
+  $('currentHistSkill').textContent = character.historicalSkill;
+  $('currentRomanceSkill').textContent = character.romanceSkill;
+  $('currentSpawn').textContent = `${character.minRound}~${character.maxRound} 라운드 · 가중치 ${character.weight}`;
+  $('currentSpawnEvent').textContent = spawnEventMeta(character.spawnEvent).name;
+
+  $('selectedChips').innerHTML = `
+    <span>${escapeHtml(character.retinue)}</span>
+    <span>${escapeHtml(character.attributeSet)}</span>
+    <span>${escapeHtml(character.spawnAge)}</span>
+  `;
+
+  $('currentCards').innerHTML = [
+    infoCard('표시 이름', character.name, 'UI와 loc 표시명 기준'),
+    infoCard('이미지 세트', character.imageSetName, '장수 초상화 이미지'),
+    infoCard('모델 세트', character.modelSetName, '전장 모델 / 캠페인 모델 / 전체 외형'),
+    infoCard('역사 모드', character.historicalSkill, character.retinue),
+    infoCard('낭만 모드', character.romanceSkill, character.attributeSet),
+    infoCard('능력치 세트', character.attributeSet, '기본 능력치 묶음'),
+    infoCard('장비 수치 세트', character.combatProfile, combatPair(character)),
+    infoCard('병종/부대 타입', character.unitProfile, '전투 배치와 호위대 후보'),
+    infoCard('등장 조건', `${character.minRound}~${character.maxRound} 라운드`, `등장 가중치 ${character.weight}`),
+    infoCard('등장 이벤트', spawnEventMeta(character.spawnEvent).name, spawnEventMeta(character.spawnEvent).note),
+    infoCard('원본 key', character.key, '저장 시 내부 식별자로 사용'),
+  ].join('');
+
+  fillForms(character);
+}
+
+function renderAppearanceGallery() {
+  $('appearanceGallery').innerHTML = characters().map((character) => `
+    <button class="appearance-card ${character.key === selectedCharacter().key ? 'active' : ''}" data-key="${escapeHtml(character.key)}" type="button">
+      ${portraitMarkup(character, 'mini-portrait')}
+      <strong>${escapeHtml(character.name)}</strong>
+      <span>이미지: ${escapeHtml(character.imageSetName)}</span>
+      <span>모델: ${escapeHtml(character.modelSetName)}</span>
+    </button>
+  `).join('');
+
+  for (const card of document.querySelectorAll('.appearance-card')) {
+    card.addEventListener('click', () => {
+      $('editImageSet').value = card.dataset.key;
+      $('editModelSet').value = card.dataset.key;
+      $('sourceImageSet').value = card.dataset.key;
+      $('sourceModelSet').value = card.dataset.key;
+      updateImagePreviews();
+      renderValidation();
+    });
+  }
+}
+
+function fillForms(character) {
+  $('editName').value = character.name;
+  $('editWeight').value = character.weight;
+  $('editMinRound').value = character.minRound;
+  $('editMaxRound').value = character.maxRound;
+  $('createWeight').value = character.weight;
+  $('editBaseAttack').value = character.baseAttack ?? '';
+  $('editBaseDefense').value = character.baseDefense ?? '';
+  $('createBaseAttack').value = character.baseAttack ?? '';
+  $('createBaseDefense').value = character.baseDefense ?? '';
+
+  fillSelect('editImageSet', characters().map((item) => option(item.key, `${item.name} · ${item.imageSetName}`)));
+  fillSelect('editModelSet', characters().map((item) => option(item.key, `${item.name} · ${item.modelSetName}`)));
+  fillSelect('sourceImageSet', characters().map((item) => option(item.key, `${item.name} · ${item.imageSetName}`)));
+  fillSelect('sourceModelSet', characters().map((item) => option(item.key, `${item.name} · ${item.modelSetName}`)));
+  fillSelect('sourceBase', characters().map((item) => option(item.key, item.name)));
+  fillSelect('sourceSkill', characters().map((item) => option(item.key, `${item.name} · ${item.historicalSkill}`)));
+  fillSelect('editAttributeSet', characters().map((item) => option(item.key, `${item.name} · ${item.attributeSet}`)));
+  fillSelect('sourceAttributeSet', characters().map((item) => option(item.key, `${item.name} · ${item.attributeSet}`)));
+  fillSelect('editCombatProfile', characters().map((item) => option(item.key, `${item.name} · ${item.combatProfile} · ${combatValue(item.baseAttack)}/${combatValue(item.baseDefense)}`)));
+  fillSelect('sourceCombatProfile', characters().map((item) => option(item.key, `${item.name} · ${item.combatProfile} · ${combatValue(item.baseAttack)}/${combatValue(item.baseDefense)}`)));
+  fillSelect('editUnitProfile', characters().map((item) => option(item.key, `${item.name} · ${item.unitProfile}`)));
+  fillSelect('sourceUnitProfile', characters().map((item) => option(item.key, `${item.name} · ${item.unitProfile}`)));
+  fillSelect('sourceSpawn', characters().map((item) => option(item.key, `${item.name} · ${item.spawnAge}`)));
+  fillSelect('editSpawnEvent', SPAWN_EVENTS.map((item) => option(item.key, `${item.name} · ${item.note}`)));
+  fillSelect('sourceSpawnEvent', SPAWN_EVENTS.map((item) => option(item.key, `${item.name} · ${item.note}`)));
+  fillSelect('editSubtype', Object.entries(ELEMENTS).map(([key, item]) => option(item.subtype, `${item.label} ${item.name}`)));
+  fillSelect('createSubtype', Object.entries(ELEMENTS).map(([key, item]) => option(item.subtype, `${item.label} ${item.name}`)));
+  fillSelect('editHistoricalSkill', characters().map((item) => option(item.key, `${item.name} · ${item.historicalSkill}`)));
+  fillSelect('editRomanceSkill', characters().map((item) => option(item.key, `${item.name} · ${item.romanceSkill}`)));
+
+  $('editImageSet').value = character.key;
+  $('editModelSet').value = character.key;
+  $('sourceImageSet').value = character.key;
+  $('sourceModelSet').value = character.key;
+  $('sourceBase').value = character.key;
+  $('sourceSkill').value = character.key;
+  $('editAttributeSet').value = character.key;
+  $('sourceAttributeSet').value = character.key;
+  $('editCombatProfile').value = character.key;
+  $('sourceCombatProfile').value = character.key;
+  $('editUnitProfile').value = character.key;
+  $('sourceUnitProfile').value = character.key;
+  $('sourceSpawn').value = character.key;
+  $('editSpawnEvent').value = character.spawnEvent;
+  $('sourceSpawnEvent').value = character.spawnEvent;
+  $('editSubtype').value = elementMeta(character.element).subtype;
+  $('createSubtype').value = elementMeta(character.element).subtype;
+  $('editHistoricalSkill').value = character.key;
+  $('editRomanceSkill').value = character.key;
+  $('createName').value = `${character.name} 파생`;
+  updateImagePreviews();
+}
+
+function option(value, label) {
+  return { value, label };
+}
+
+function fillSelect(id, options) {
+  const select = $(id);
+  select.innerHTML = '';
+  for (const item of options) {
+    const optionEl = document.createElement('option');
+    optionEl.value = item.value;
+    optionEl.textContent = item.label;
+    select.appendChild(optionEl);
+  }
+}
+
+function infoCard(title, value, note) {
+  return `
+    <article class="info-card">
+      <span>${escapeHtml(title)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(note)}</small>
+    </article>
+  `;
+}
+
+function imagePreviewMarkup(character, modeLabel) {
+  if (!character) return '<p class="empty">이미지 세트를 선택하세요.</p>';
+  const portraitLabel = character.portraitPath || '초상화 경로 대기';
+  const portraitUrl = assetUrl(character.portraitImagePath);
+  return `
+    <div class="preview-art portrait-art element-${character.element}">
+      ${portraitUrl ? `<img src="${escapeHtml(portraitUrl)}" alt="${escapeHtml(character.name)} 초상화">` : `<span>${escapeHtml(character.portrait)}</span>`}
+      <b>초상화</b>
+    </div>
+    <div class="preview-copy">
+      <strong>${escapeHtml(character.name)} 이미지 세트</strong>
+      <span>${escapeHtml(character.imageSetName)}</span>
+      <small>${escapeHtml(modeLabel)} · ${escapeHtml(character.artSet)}</small>
+      <small>portrait: ${escapeHtml(portraitLabel)}</small>
+      <small>uniform: ${escapeHtml(character.uniform || character.modelSetName || '-')}</small>
+    </div>
+  `;
+}
+
+function portraitMarkup(character, className) {
+  const url = assetUrl(character.portraitImagePath);
+  const fallback = `<span>${escapeHtml(character.portrait)}</span>`;
+  return `
+    <div class="${className} element-${character.element}">
+      ${url ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(character.name)}">` : fallback}
+    </div>
+  `;
+}
+
+function assetUrl(path) {
+  if (!path || location.protocol === 'file:') return '';
+  const params = new URLSearchParams({
+    inputPath: $('inputPackPath').value,
+    path,
+  });
+  return `/api/asset?${params.toString()}`;
+}
+
+function updateImagePreview(containerId, selectId, modeLabel) {
+  const character = characters().find((item) => item.key === $(selectId).value);
+  $(containerId).innerHTML = imagePreviewMarkup(character, modeLabel);
+}
+
+function updateImagePreviews() {
+  updateImagePreview('editImagePreview', 'editImageSet', '기존 장수 수정');
+  updateImagePreview('sourceImagePreview', 'sourceImageSet', '신규 장수 생성');
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  for (const button of document.querySelectorAll('.mode-btn')) {
+    button.classList.toggle('active', button.dataset.mode === mode);
+  }
+  $('editPanel').classList.toggle('active', mode === 'edit');
+  $('createPanel').classList.toggle('active', mode === 'create');
+  renderValidation();
+}
+
+function setWorkTab(target) {
+  const prefix = target.split('-')[0];
+  for (const button of document.querySelectorAll(`.tab-bar[data-tabs-for="${prefix}"] .tab-btn`)) {
+    button.classList.toggle('active', button.dataset.tabTarget === target);
+  }
+  for (const section of document.querySelectorAll(`[data-tab-section^="${prefix}-"]`)) {
+    section.classList.toggle('active', section.dataset.tabSection === target);
+  }
+}
+
+function syncCombatInputs(prefix, sourceId) {
+  const character = characters().find((item) => item.key === $(sourceId).value);
+  if (!character) return;
+  $(`${prefix}BaseAttack`).value = character.baseAttack ?? '';
+  $(`${prefix}BaseDefense`).value = character.baseDefense ?? '';
+}
+
+function stageEdit() {
+  const character = selectedCharacter();
+  const imageSet = characters().find((item) => item.key === $('editImageSet').value);
+  const modelSet = characters().find((item) => item.key === $('editModelSet').value);
+  const hist = characters().find((item) => item.key === $('editHistoricalSkill').value);
+  const romance = characters().find((item) => item.key === $('editRomanceSkill').value);
+  const attribute = characters().find((item) => item.key === $('editAttributeSet').value);
+  const combat = characters().find((item) => item.key === $('editCombatProfile').value);
+  const unit = characters().find((item) => item.key === $('editUnitProfile').value);
+  const spawnEvent = spawnEventMeta($('editSpawnEvent').value);
+  const payload = {
+    targetKey: character.key,
+    displayName: $('editName').value.trim(),
+    imageSetKey: imageSet?.key,
+    modelSetKey: modelSet?.key,
+    attributeSetSourceKey: attribute?.key,
+    combatProfileSourceKey: combat?.key,
+    baseAttack: nullableNumber($('editBaseAttack').value),
+    baseDefense: nullableNumber($('editBaseDefense').value),
+    unitProfileSourceKey: unit?.key,
+    subtype: $('editSubtype').value,
+    spawn: {
+      weight: Number($('editWeight').value),
+      minRound: Number($('editMinRound').value),
+      maxRound: Number($('editMaxRound').value),
+      event: $('editSpawnEvent').value,
+    },
+    skillSources: {
+      historical: hist?.key,
+      romance: romance?.key,
+    },
+  };
+  state.queue.push({
+    kind: 'patch_character',
+    type: '기존 수정',
+    title: `${character.name} 수정`,
+    description: `${$('editName').value} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'} · 장비 ${combat?.name || '-'} ${$('editBaseAttack').value}/${$('editBaseDefense').value} · 병종 ${unit?.name || '-'} · 등장 이벤트 ${spawnEvent.name} · 역사 ${hist?.name || '-'} · 낭만 ${romance?.name || '-'}`,
+    payload,
+  });
+  renderQueue();
+  renderValidation();
+}
+
+function stageCreate() {
+  const base = characters().find((item) => item.key === $('sourceBase').value);
+  const imageSet = characters().find((item) => item.key === $('sourceImageSet').value);
+  const modelSet = characters().find((item) => item.key === $('sourceModelSet').value);
+  const skill = characters().find((item) => item.key === $('sourceSkill').value);
+  const attribute = characters().find((item) => item.key === $('sourceAttributeSet').value);
+  const combat = characters().find((item) => item.key === $('sourceCombatProfile').value);
+  const unit = characters().find((item) => item.key === $('sourceUnitProfile').value);
+  const spawn = characters().find((item) => item.key === $('sourceSpawn').value);
+  const spawnEvent = spawnEventMeta($('sourceSpawnEvent').value);
+  const payload = {
+    newName: $('createName').value.trim(),
+    sourceKeys: {
+      base: base?.key,
+      imageSet: imageSet?.key,
+      modelSet: modelSet?.key,
+      skill: skill?.key,
+      attributeSet: attribute?.key,
+      combatProfile: combat?.key,
+      unitProfile: unit?.key,
+      spawn: spawn?.key,
+    },
+    subtype: $('createSubtype').value,
+    combat: {
+      baseAttack: nullableNumber($('createBaseAttack').value),
+      baseDefense: nullableNumber($('createBaseDefense').value),
+    },
+    spawn: {
+      weight: Number($('createWeight').value),
+      event: $('sourceSpawnEvent').value,
+    },
+  };
+  state.queue.push({
+    kind: 'clone_character',
+    type: '신규 생성',
+    title: `${$('createName').value || '새 장수'} 생성`,
+    description: `기본 ${base?.name || '-'} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'} · 장비 ${combat?.name || '-'} ${$('createBaseAttack').value}/${$('createBaseDefense').value} · 병종 ${unit?.name || '-'} · 스킬 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
+    payload,
+  });
+  renderQueue();
+  renderValidation();
+}
+
+function renderQueue() {
+  $('queueCount').textContent = `${state.queue.length}개`;
+  $('workQueue').innerHTML = state.queue.length
+    ? state.queue.map((item, index) => `
+      <article class="queue-item">
+        <b>${index + 1}. ${escapeHtml(item.type)}</b>
+        <strong>${escapeHtml(item.title)}</strong>
+        <span>${escapeHtml(item.description)}</span>
+      </article>
+    `).join('')
+    : '<p class="empty">아직 추가된 작업이 없습니다.</p>';
+}
+
+function slugify(value) {
+  const ascii = String(value || 'custom')
+    .normalize('NFKD')
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/[\s-]+/g, '_')
+    .toLowerCase();
+  return ascii || `custom_${Date.now()}`;
+}
+
+function detailsByMode(character) {
+  const details = {};
+  for (const detail of character?.details || []) {
+    if (detail.gameMode) details[detail.gameMode] = detail;
+  }
+  return details;
+}
+
+function detailOverrideFromSources(attribute, skill, unit) {
+  const overrides = {};
+  const attributeDetails = detailsByMode(attribute);
+  const skillDetails = detailsByMode(skill);
+  const unitDetails = detailsByMode(unit);
+  for (const mode of ['historical', 'romance']) {
+    overrides[mode] = compactObject({
+      retinue: unitDetails[mode]?.retinue || unit?.unitProfile,
+      attribute_set: attributeDetails[mode]?.attributeSet || attribute?.attributeSet,
+      skill_set_override: skillDetails[mode]?.skillSet || (mode === 'romance' ? skill?.romanceSkill : skill?.historicalSkill),
+    });
+  }
+  return overrides;
+}
+
+function recipeFromQueue() {
+  const recipe = {
+    modName: 'mtu_custom_character_workflow',
+    characterPatches: [],
+    characterCloneRecipes: [],
+    equipmentStatPatches: [],
+  };
+
+  state.queue.forEach((item, index) => {
+    if (item.kind === 'patch_character') {
+      const payload = item.payload;
+      const imageSet = characters().find((candidate) => candidate.key === payload.imageSetKey);
+      const attribute = characters().find((candidate) => candidate.key === payload.attributeSetSourceKey);
+      const hist = characters().find((candidate) => candidate.key === payload.skillSources?.historical);
+      const romance = characters().find((candidate) => candidate.key === payload.skillSources?.romance);
+      const unit = characters().find((candidate) => candidate.key === payload.unitProfileSourceKey);
+      recipe.characterPatches.push({
+        templateKey: payload.targetKey,
+        templateOverrides: compactObject({
+          weight: payload.spawn?.weight,
+          min_spawn_round: payload.spawn?.minRound,
+          max_spawn_round: payload.spawn?.maxRound,
+          subtype: payload.subtype,
+          art_set_override: imageSet?.artSet,
+        }),
+        detailOverrides: {
+          historical: compactObject({
+            retinue: detailsByMode(unit).historical?.retinue || unit?.unitProfile,
+            attribute_set: detailsByMode(attribute).historical?.attributeSet || attribute?.attributeSet,
+            skill_set_override: detailsByMode(hist).historical?.skillSet || hist?.historicalSkill,
+          }),
+          romance: compactObject({
+            retinue: detailsByMode(unit).romance?.retinue || unit?.unitProfile,
+            attribute_set: detailsByMode(attribute).romance?.attributeSet || attribute?.attributeSet,
+            skill_set_override: detailsByMode(romance).romance?.skillSet || romance?.romanceSkill,
+          }),
+        },
+      });
+    }
+
+    if (item.kind === 'clone_character') {
+      const payload = item.payload;
+      const base = characters().find((candidate) => candidate.key === payload.sourceKeys?.base);
+      const imageSet = characters().find((candidate) => candidate.key === payload.sourceKeys?.imageSet);
+      const attribute = characters().find((candidate) => candidate.key === payload.sourceKeys?.attributeSet);
+      const skill = characters().find((candidate) => candidate.key === payload.sourceKeys?.skill);
+      const unit = characters().find((candidate) => candidate.key === payload.sourceKeys?.unitProfile);
+      const spawn = characters().find((candidate) => candidate.key === payload.sourceKeys?.spawn);
+      const slug = slugify(payload.newName);
+      recipe.characterCloneRecipes.push({
+        newTemplateKey: `hby_template_${slug}_${index + 1}`,
+        sourceTemplateKey: base?.key,
+        detailSourceTemplateKey: skill?.key || base?.key,
+        newArtSetId: `hby_art_set_${slug}_${index + 1}`,
+        artSetSourceId: imageSet?.artSet || base?.artSet,
+        newAgeRangeKey: `hby_age_${slug}_${index + 1}`,
+        ageRangeSourceKey: spawn?.spawnAge || base?.spawnAge,
+        newInitialCeoKey: `hby_ceo_initial_data_${slug}_${index + 1}`,
+        initialCeoSourceKey: detailsByMode(base).historical?.initialCeos || base?.combatProfile,
+        templateOverrides: compactObject({
+          weight: payload.spawn?.weight,
+          min_spawn_round: spawn?.minRound,
+          max_spawn_round: spawn?.maxRound,
+          subtype: payload.subtype,
+        }),
+        detailOverrides: detailOverrideFromSources(attribute, skill, unit),
+      });
+    }
+  });
+
+  return recipe;
+}
+
+function compactObject(value) {
+  return Object.fromEntries(
+    Object.entries(value || {}).filter(([, item]) => item !== undefined && item !== null && item !== '')
+  );
+}
+
+function validationItem(level, title, detail) {
+  return { level, title, detail };
+}
+
+function renderValidation() {
+  const items = [];
+  const isCreate = state.mode === 'create';
+  const name = isCreate ? $('createName').value.trim() : $('editName').value.trim();
+  const minRound = Number($('editMinRound').value);
+  const maxRound = Number($('editMaxRound').value);
+  const attackRaw = isCreate ? $('createBaseAttack').value : $('editBaseAttack').value;
+  const defenseRaw = isCreate ? $('createBaseDefense').value : $('editBaseDefense').value;
+  const attack = nullableNumber(attackRaw);
+  const defense = nullableNumber(defenseRaw);
+  const eventKey = isCreate ? $('sourceSpawnEvent').value : $('editSpawnEvent').value;
+
+  if (!name) {
+    items.push(validationItem('error', '이름 필요', '저장 전에 표시 이름을 입력해야 합니다.'));
+  }
+  if (isCreate && characters().some((character) => character.name === name)) {
+    items.push(validationItem('warning', '이름 중복 가능성', '기존 장수와 같은 표시 이름입니다. loc 충돌 검증이 필요합니다.'));
+  }
+  if (attack === null || defense === null || attack < 0 || defense < 0) {
+    items.push(validationItem('error', '전투 수치 확인', '기본 공격력과 방어력은 0 이상의 숫자여야 합니다. 미확인 값은 직접 입력해야 합니다.'));
+  }
+  if (!isCreate && minRound > maxRound) {
+    items.push(validationItem('error', '등장 라운드 확인', '최소 라운드가 최대 라운드보다 클 수 없습니다.'));
+  }
+  if (['faction_join', 'incident_reward'].includes(eventKey)) {
+    items.push(validationItem('warning', '이벤트 매핑 필요', '세력 합류/이벤트 보상은 incident, payload 매핑 검증이 필요합니다.'));
+  }
+  if (!state.queue.length) {
+    items.push(validationItem('info', '작업 없음', '저장할 수정 또는 신규 생성 작업을 먼저 추가하세요.'));
+  }
+
+  for (const message of state.serverMessages) {
+    const level = message.level === 'error' ? 'error' : message.level === 'warning' ? 'warning' : 'info';
+    items.push(validationItem(level, message.title || message.code || 'server_message', message.detail || message.message || String(message)));
+  }
+
+  if (!items.length) {
+    items.push(validationItem('ok', '저장 가능', '현재 화면 기준으로 막히는 항목은 없습니다.'));
+  }
+
+  const blocking = items.filter((item) => item.level === 'error').length;
+  $('validationCount').textContent = blocking ? `${blocking}개 막힘` : `${items.length}개`;
+  $('validationList').innerHTML = items.map((item) => `
+    <article class="validation-item ${item.level}">
+      <b>${escapeHtml(item.title)}</b>
+      <span>${escapeHtml(item.detail)}</span>
+    </article>
+  `).join('');
+}
+
+function previewRecipe() {
+  const actualRecipe = recipeFromQueue();
+  state.lastRecipe = actualRecipe;
+  const recipe = {
+    ...actualRecipe,
+    game: 'total_war_three_kingdoms',
+    inputPack: $('inputPackPath').value,
+    outputMode: $('saveModeSelect').value,
+    note: 'UI 프로토타입용 미리보기입니다. 실제 pack 연동은 제외된 상태입니다.',
+    operations: state.queue.map((item) => ({
+      kind: item.kind,
+      title: item.title,
+      payload: item.payload,
+    })),
+  };
+  $('recipeText').value = JSON.stringify(recipe, null, 2);
+  $('recipeDialog').showModal();
+}
+
+function serverPayload() {
+  const saveMode = $('saveModeSelect').value;
+  const inPlace = saveMode === 'in_place';
+  return {
+    adapter: 'rpfm',
+    inputPath: $('inputPackPath').value,
+    outputPath: inPlace ? '' : $('outputPackPath').value,
+    inPlace,
+    delta: saveMode === 'patch_pack',
+    recipe: recipeFromQueue(),
+  };
 }
 
 async function postJson(path, payload) {
+  if (location.protocol === 'file:') {
+    throw new Error('실제 pack 연동은 로컬 서버에서 열어야 합니다. python3 -m tk_pack_builder.web 로 실행한 URL을 사용하세요.');
+  }
   const response = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
   });
   const data = await response.json();
-  if (!response.ok || data.ok === false) {
-    throw new Error(data.error || JSON.stringify(data));
+  if (!response.ok) {
+    throw new Error(data.error || '서버 요청 실패');
   }
   return data;
 }
 
-function requestBase() {
-  return {
-    adapter: fields.adapter.value,
-    inputPath: fields.inputPath.value,
-    includeVanilla: fields.includeVanilla.checked
-  };
-}
-
-async function openPack() {
-  setStatus("여는 중");
-  const data = await postJson("/api/open", requestBase());
-  state.analysis = data.analysis;
-  const summary = data.characters.pack;
-  state.characters = summary.characters;
-  state.artSets = summary.artSets;
-  state.ageRanges = summary.ageRanges;
-  state.initialCeos = summary.initialCeos;
-  renderCharacters();
-  fillCloneSources();
-  if (!state.selectedKey && state.characters.length) {
-    selectCharacter(state.characters[0].key);
-  }
-  if (data.characters.vanilla.error) {
-    appendLog(data.characters.vanilla.error);
-  }
-  setStatus(`${data.analysis.packName} · 장수 ${state.characters.length}명`);
-  appendLog({ opened: data.analysis.packName, tables: data.analysis.dbTables.length });
-}
-
-function renderCharacters() {
-  const query = fields.search.value.trim().toLowerCase();
-  fields.list.innerHTML = "";
-  for (const character of state.characters) {
-    const haystack = `${character.displayName || ""} ${character.key}`.toLowerCase();
-    if (query && !haystack.includes(query)) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `character-row${character.key === state.selectedKey ? " active" : ""}`;
-    button.innerHTML = `
-      <div>
-        <strong>${escapeHtml(character.displayName || character.key)}</strong>
-        <span>${escapeHtml(character.key)}</span>
-        <span>${escapeHtml(character.subtype || "")} · ${escapeHtml(character.artSet || "")}</span>
-      </div>
-      <b class="mode-count">${character.details.length}</b>
-    `;
-    button.addEventListener("click", () => selectCharacter(character.key));
-    fields.list.appendChild(button);
+async function loadPack() {
+  state.serverMessages = [validationItem('info', '팩 읽는 중', $('inputPackPath').value)];
+  renderValidation();
+  try {
+    const data = await postJson('/api/open', {
+      adapter: 'rpfm',
+      inputPath: $('inputPackPath').value,
+      includeVanilla: false,
+    });
+    hydrateFromPackData(data.characters);
+    const cacheText = data.cache?.hit ? 'DB 캐시 사용' : 'DB 캐시 갱신';
+    state.serverMessages = [validationItem('info', '팩 읽기 완료', `${state.characters.length}명 로드 · ${cacheText}`)];
+    renderAll();
+  } catch (error) {
+    state.serverMessages = [validationItem('error', '팩 읽기 실패', error.message)];
+    renderValidation();
   }
 }
 
-function selectCharacter(key) {
-  state.selectedKey = key;
-  const character = findCharacter(key);
-  if (!character) return;
-  $("patchTemplate").value = character.key;
-  $("patchWeight").value = character.weight ?? "";
-  $("patchMinRound").value = character.minSpawnRound ?? "";
-  $("patchMaxRound").value = character.maxSpawnRound ?? "";
-  const historical = character.details.find((detail) => detail.gameMode === "historical") || {};
-  const romance = character.details.find((detail) => detail.gameMode === "romance") || {};
-  $("patchHistRetinue").value = historical.retinue || "";
-  $("patchHistSkill").value = historical.skillSet || "";
-  $("patchRomanceRetinue").value = romance.retinue || "";
-  $("patchRomanceSkill").value = romance.skillSet || "";
-  $("cloneBody").value = character.key;
-  $("cloneDetails").value = character.key;
-  setCloneDefaults(character);
-  renderCharacters();
-}
-
-function setCloneDefaults(character) {
-  const suffix = character.key.replace(/^3k_/, "hby_").replace(/[^a-zA-Z0-9_]/g, "_");
-  $("cloneTemplateKey").value = `${suffix}_clone`;
-  $("cloneArtKey").value = `hby_art_set_${Date.now().toString().slice(-6)}`;
-  $("cloneAgeKey").value = `hby_age_${Date.now().toString().slice(-6)}`;
-  $("cloneCeoKey").value = `hby_ceo_initial_${Date.now().toString().slice(-6)}`;
-  $("cloneSubtype").value = character.subtype || "";
-  $("cloneWeight").value = character.weight ?? 0;
-  $("cloneBirthYear").value = 172;
-  if (state.artSets.includes(character.artSet)) $("cloneArt").value = character.artSet;
-  if (state.ageRanges.includes(character.ageRange)) $("cloneAge").value = character.ageRange;
-  const detail = character.details.find((item) => item.initialCeos);
-  if (detail && state.initialCeos.includes(detail.initialCeos)) $("cloneCeo").value = detail.initialCeos;
-}
-
-function fillCloneSources() {
-  fillSelect($("cloneBody"), state.characters.map((item) => ({ value: item.key, label: characterLabel(item) })));
-  fillSelect($("cloneDetails"), state.characters.map((item) => ({ value: item.key, label: characterLabel(item) })));
-  fillSelect($("cloneArt"), state.artSets.map((value) => ({ value, label: value })));
-  fillSelect($("cloneAge"), state.ageRanges.map((value) => ({ value, label: value })));
-  fillSelect($("cloneCeo"), state.initialCeos.map((value) => ({ value, label: value })));
-}
-
-function fillSelect(select, options) {
-  select.innerHTML = "";
-  for (const item of options) {
-    const option = document.createElement("option");
-    option.value = item.value;
-    option.textContent = item.label;
-    select.appendChild(option);
+async function validateServerRecipe() {
+  state.serverMessages = [validationItem('info', '서버 검증 중', '현재 작업 큐를 CLI recipe로 변환했습니다.')];
+  renderValidation();
+  try {
+    const data = await postJson('/api/validate', serverPayload());
+    state.serverMessages = data.messages.length
+      ? data.messages
+      : [validationItem('ok', '서버 검증 통과', 'CLI 검증 기준으로 막히는 항목이 없습니다.')];
+  } catch (error) {
+    state.serverMessages = [validationItem('error', '서버 검증 실패', error.message)];
   }
+  renderValidation();
 }
 
-function characterLabel(character) {
-  return character.displayName ? `${character.displayName} · ${character.key}` : character.key;
+async function buildServerPack() {
+  const saveMode = $('saveModeSelect').value;
+  const saveTarget = saveMode === 'in_place'
+    ? '원본 수정'
+    : saveMode === 'patch_pack'
+      ? `패치 pack: ${$('outputPackPath').value}`
+      : `Save As 원본 복사: ${$('outputPackPath').value}`;
+  state.serverMessages = [validationItem('info', '저장 중', saveTarget)];
+  renderValidation();
+  try {
+    const data = await postJson('/api/build', serverPayload());
+    state.serverMessages = data.messages.length
+      ? data.messages.map((message) => ({ level: message.level || 'info', code: message.code, message: message.message }))
+      : [validationItem('ok', '저장 완료', 'pack 저장이 완료되었습니다.')];
+  } catch (error) {
+    state.serverMessages = [validationItem('error', '저장 실패', error.message)];
+  }
+  renderValidation();
 }
 
-function stagePatch() {
-  const key = $("patchTemplate").value;
-  if (!key) return;
-  upsertByKey(state.recipe.characterPatches, "templateKey", {
-    templateKey: key,
-    templateOverrides: {
-      weight: numberValue("patchWeight"),
-      min_spawn_round: numberValue("patchMinRound"),
-      max_spawn_round: numberValue("patchMaxRound")
-    },
-    detailOverrides: {
-      historical: compactObject({
-        retinue: $("patchHistRetinue").value,
-        skill_set_override: $("patchHistSkill").value
-      }),
-      romance: compactObject({
-        retinue: $("patchRomanceRetinue").value,
-        skill_set_override: $("patchRomanceSkill").value
-      })
-    }
-  });
-  renderRecipe();
-  appendLog(`수정 반영: ${key}`);
-}
-
-function stageClone() {
-  const clone = {
-    newTemplateKey: $("cloneTemplateKey").value,
-    sourceTemplateKey: $("cloneBody").value,
-    detailSourceTemplateKey: $("cloneDetails").value,
-    newArtSetId: $("cloneArtKey").value,
-    artSetSourceId: $("cloneArt").value,
-    newAgeRangeKey: $("cloneAgeKey").value,
-    ageRangeSourceKey: $("cloneAge").value,
-    newInitialCeoKey: $("cloneCeoKey").value,
-    initialCeoSourceKey: $("cloneCeo").value,
-    templateOverrides: compactObject({
-      subtype: $("cloneSubtype").value,
-      weight: numberValue("cloneWeight")
-    }),
-    detailOverrides: {},
-    ageRangeOverrides: compactObject({
-      birth_year: numberValue("cloneBirthYear")
-    })
-  };
-  upsertByKey(state.recipe.characterCloneRecipes, "newTemplateKey", clone);
-  renderRecipe();
-  appendLog(`신규 반영: ${clone.newTemplateKey}`);
-}
-
-async function validateRecipe() {
-  syncRecipeFromText();
-  setStatus("검증 중");
-  const data = await postJson("/api/validate", {
-    ...requestBase(),
-    outputPath: fields.outputPath.value,
-    recipe: state.recipe
-  });
-  appendLog(data.messages);
-  setStatus(data.ok ? "검증 완료" : "검증 실패");
-}
-
-async function buildPack() {
-  syncRecipeFromText();
-  setStatus("저장 중");
-  const data = await postJson("/api/build", {
-    ...requestBase(),
-    outputPath: fields.inPlace.checked ? null : fields.outputPath.value,
-    inPlace: fields.inPlace.checked,
-    recipe: state.recipe
-  });
-  appendLog(data.messages);
-  setStatus(data.ok ? "저장 완료" : "저장 실패");
-}
-
-function syncRecipeFromText() {
-  state.recipe = JSON.parse(fields.recipe.value || "{}");
-}
-
-function renderRecipe() {
-  fields.recipe.value = JSON.stringify(state.recipe, null, 2);
-}
-
-function findCharacter(key) {
-  return state.characters.find((character) => character.key === key);
-}
-
-function upsertByKey(list, keyName, item) {
-  const index = list.findIndex((existing) => existing[keyName] === item[keyName]);
-  if (index >= 0) list[index] = item;
-  else list.push(item);
-}
-
-function numberValue(id) {
-  const raw = $(id).value;
-  if (raw === "") return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
-}
-
-function compactObject(object) {
-  return Object.fromEntries(
-    Object.entries(object).filter(([, value]) => value !== undefined && value !== "")
-  );
+function renderAll() {
+  renderRoster();
+  renderSelected();
+  renderAppearanceGallery();
+  renderQueue();
+  renderValidation();
 }
 
 function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
-function switchTab(name) {
-  for (const button of document.querySelectorAll(".tab")) {
-    button.classList.toggle("active", button.dataset.tab === name);
-  }
-  for (const panel of document.querySelectorAll(".tab-panel")) {
-    panel.classList.toggle("active", panel.id === `${name}Tab`);
-  }
+for (const button of document.querySelectorAll('.filter')) {
+  button.addEventListener('click', () => {
+    state.filter = button.dataset.filter;
+    for (const item of document.querySelectorAll('.filter')) item.classList.remove('active');
+    button.classList.add('active');
+    renderRoster();
+  });
 }
 
-for (const button of document.querySelectorAll(".tab")) {
-  button.addEventListener("click", () => switchTab(button.dataset.tab));
+$('searchInput').addEventListener('input', renderRoster);
+$('editModeButton').addEventListener('click', () => setMode('edit'));
+$('createModeButton').addEventListener('click', () => setMode('create'));
+for (const button of document.querySelectorAll('.tab-btn')) {
+  button.addEventListener('click', () => setWorkTab(button.dataset.tabTarget));
 }
-
-$("openButton").addEventListener("click", () => openPack().catch((error) => {
-  setStatus("열기 실패");
-  appendLog(error.message);
-}));
-$("validateButton").addEventListener("click", () => validateRecipe().catch((error) => {
-  setStatus("검증 실패");
-  appendLog(error.message);
-}));
-$("buildButton").addEventListener("click", () => buildPack().catch((error) => {
-  setStatus("저장 실패");
-  appendLog(error.message);
-}));
-$("stagePatchButton").addEventListener("click", stagePatch);
-$("stageCloneButton").addEventListener("click", stageClone);
-fields.search.addEventListener("input", renderCharacters);
-fields.inPlace.addEventListener("change", () => {
-  fields.outputPath.disabled = fields.inPlace.checked;
+$('editCombatProfile').addEventListener('change', () => syncCombatInputs('edit', 'editCombatProfile'));
+$('sourceCombatProfile').addEventListener('change', () => syncCombatInputs('create', 'sourceCombatProfile'));
+$('editImageSet').addEventListener('change', updateImagePreviews);
+$('sourceImageSet').addEventListener('change', updateImagePreviews);
+$('stageEditButton').addEventListener('click', stageEdit);
+$('stageCreateButton').addEventListener('click', stageCreate);
+$('loadPackButton').addEventListener('click', loadPack);
+$('validateButton').addEventListener('click', validateServerRecipe);
+$('buildButton').addEventListener('click', buildServerPack);
+$('previewRecipeButton').addEventListener('click', previewRecipe);
+$('closeRecipeButton').addEventListener('click', () => $('recipeDialog').close());
+$('saveModeSelect').addEventListener('change', () => {
+  $('outputPackPath').disabled = $('saveModeSelect').value === 'in_place';
+  renderValidation();
+});
+$('saveDraftButton').addEventListener('click', () => {
+  state.queue.push({
+    kind: 'draft_note',
+    type: '초안 저장',
+    title: '작업 초안 저장',
+    description: '연동 전 UI 흐름 확인용 상태입니다.',
+    payload: {
+      selectedKey: state.selectedKey,
+      mode: state.mode,
+    },
+  });
+  renderQueue();
+  renderValidation();
 });
 
-renderRecipe();
-openPack().catch((error) => appendLog(error.message));
+for (const control of document.querySelectorAll('input, select')) {
+  control.addEventListener('input', renderValidation);
+  control.addEventListener('change', renderValidation);
+}
+
+renderAll();
