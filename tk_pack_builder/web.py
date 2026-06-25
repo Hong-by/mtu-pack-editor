@@ -985,8 +985,12 @@ def _summarize_skill_trees(
         }
         ability_key = _battle_ability_key_from_effect(effect_key)
         if ability_key and battle_ability_summaries.get(ability_key):
+            ability_name = _battle_ability_label(ability_key, loc_text)
             effect_summary["battleAbilityKey"] = ability_key
+            effect_summary["battleAbilityName"] = ability_name
             effect_summary["battleAbilitySummary"] = battle_ability_summaries[ability_key]
+            if ability_name and effect_summary["name"] in {"능력", "ability", _friendly_effect_key(effect_key)}:
+                effect_summary["name"] = ability_name
         effects_by_skill.setdefault(skill_key, []).append(effect_summary)
 
     owners_by_skill: dict[str, list[dict[str, str]]] = {}
@@ -1070,10 +1074,22 @@ def _skill_index_entry(skill_key: str, loc_text: dict[str, str], effects: list[d
         for effect in effects
         if effect.get("battleAbilitySummary")
     ]
+    battle_pairs = [
+        (str(effect.get("battleAbilityKey") or ""), str(effect.get("battleAbilityName") or ""))
+        for effect in effects
+        if effect.get("battleAbilityKey") and effect.get("battleAbilityName")
+    ]
+    battle_names = [name for _, name in battle_pairs]
+    name = _skill_name_for_key(skill_key, loc_text)
+    if _is_generic_skill_ability_name(name) and battle_names:
+        name = battle_names[0]
+    description = _skill_description_for_key(skill_key, loc_text)
+    if not description and battle_pairs:
+        description = _battle_ability_tooltip(battle_pairs[0][0], loc_text)
     return {
         "key": skill_key,
-        "name": _skill_name_for_key(skill_key, loc_text),
-        "description": _skill_description_for_key(skill_key, loc_text),
+        "name": name,
+        "description": description,
         "effects": effects,
         "effectSummary": _effect_summary(effects),
         "battleAbilitySummary": " / ".join(dict.fromkeys(battle_summaries)),
@@ -1089,6 +1105,44 @@ def _battle_ability_key_from_effect(effect_key: str) -> str:
     if "_ability_" in key:
         return key
     return ""
+
+
+def _battle_ability_label(ability_key: str, loc_text: dict[str, str]) -> str:
+    for loc_key in (
+        f"unit_abilities_onscreen_name_{ability_key}",
+        f"special_ability_phases_onscreen_name_{ability_key}",
+        f"unit_ability_types_localised_description_{ability_key}",
+        f"effects_description_{ability_key}",
+    ):
+        value = loc_text.get(loc_key)
+        if value:
+            return _clean_ability_label(value)
+    return _friendly_skill_key(ability_key)
+
+
+def _battle_ability_tooltip(ability_key: str, loc_text: dict[str, str]) -> str:
+    return loc_text.get(f"unit_abilities_tooltip_text_{ability_key}", "")
+
+
+def _clean_ability_label(value: str) -> str:
+    text = str(value or "").strip()
+    for prefix in ("능력:", "능력："):
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip()
+    return text
+
+
+def _is_generic_skill_ability_name(name: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(name or "")).strip().lower()
+    return normalized in {
+        "능력",
+        "특수 능력",
+        "수계 특수 능력",
+        "화계 특수 능력",
+        "목계 특수 능력",
+        "금계 특수 능력",
+        "토계 특수 능력",
+    }
 
 
 def _battle_ability_summaries(tables: dict[str, list[dict[str, Any]]]) -> dict[str, str]:
@@ -1446,167 +1500,168 @@ def _effect_summary(effects: list[dict[str, Any]]) -> str:
         return "효과 정보 미확인"
     pieces = []
     for effect in effects[:4]:
+        name = effect.get("battleAbilityName") or effect.get("name")
         value = effect.get("value")
         suffix = f" {value:+g}" if isinstance(value, (int, float)) else f" {value}" if value not in {None, ""} else ""
         scope = f" ({effect.get('scope')})" if effect.get("scope") else ""
-        pieces.append(f"{effect.get('name')}{suffix}{scope}")
+        pieces.append(f"{name}{suffix}{scope}")
     if len(effects) > 4:
         pieces.append(f"외 {len(effects) - 4}개")
     return " · ".join(pieces)
 
 
 _SKILL_PHRASE_LABELS = {
-    "ability_fire_blade_breaker": "검 파괴자",
-    "ability_fire_blazing_roar": "불타는 포효",
-    "ability_fire_blazing_saddles": "불타는 안장",
+    "ability_fire_blade_breaker": "칼날 파괴",
+    "ability_fire_blazing_roar": "타오르는 포효",
+    "ability_fire_blazing_saddles": "전광석화",
     "ability_fire_devastating_roar": "파괴적인 포효",
     "ability_fire_final_rush": "최후의 돌격",
-    "ability_fire_fire_bomb": "화염탄",
-    "ability_fire_internal_blaze": "내면의 불꽃",
-    "ability_fire_mighty_thrust": "강력한 찌르기",
+    "ability_fire_fire_bomb": "소이탄",
+    "ability_fire_internal_blaze": "내면의 열정",
+    "ability_fire_mighty_thrust": "강력한 돌격",
     "ability_fire_natures_ally": "자연의 벗",
-    "ability_fire_scattering_blows": "흩뿌리는 일격",
-    "ability_fire_sundering_strike": "분쇄의 일격",
-    "ability_fire_targeted_strike": "정밀 타격",
-    "ability_fire_undying_vow": "불굴의 맹세",
-    "ability_fire_wildfire_raider": "들불 약탈자",
+    "ability_fire_scattering_blows": "산개 공격",
+    "ability_fire_sundering_strike": "절단 공격",
+    "ability_fire_targeted_strike": "약점 공격",
+    "ability_fire_undying_vow": "불멸의 맹세",
+    "ability_fire_wildfire_raider": "들불 습격꾼",
     "ability_earth_stone_bulwark": "석벽",
-    "ability_earth_distant_courage": "원대한 용기",
-    "ability_earth_familial_conflict": "가족 갈등",
+    "ability_earth_distant_courage": "용기의 외침",
+    "ability_earth_familial_conflict": "가족 내 갈등",
     "ability_earth_heavenly_presence": "천상의 존재감",
-    "ability_earth_imperious_presence": "위압적 존재감",
+    "ability_earth_imperious_presence": "위풍당당한 존재감",
     "ability_earth_inspiring_words": "격려의 말",
-    "ability_earth_qiao_sisters": "교 자매",
-    "ability_earth_unyielding_earth": "불굴의 대지",
-    "ability_metal_alt_1": "금속성 보조 1",
-    "ability_metal_alt_2": "금속성 보조 2",
-    "ability_metal_elemental_vigour": "원소의 활력",
-    "ability_metal_fleet_footed": "날랜 발",
-    "ability_metal_geographic_mastery": "지형 숙달",
-    "ability_metal_impenetrable_redoubt": "난공불락 보루",
-    "ability_metal_impetuous_charge": "성급한 돌격",
-    "ability_metal_inward_focus": "내면 집중",
-    "ability_metal_poison_volley": "독화살 일제사격",
-    "ability_metal_swift_fingers": "재빠른 손놀림",
-    "ability_metal_tactical_withdrawal": "전술적 후퇴",
-    "ability_metal_tempered_deflection": "단련된 받아넘기기",
+    "ability_earth_qiao_sisters": "강동이교",
+    "ability_earth_unyielding_earth": "땅의 부동심",
+    "ability_metal_alt_1": "내면의 불꽃",
+    "ability_metal_alt_2": "설교",
+    "ability_metal_elemental_vigour": "자연의 활력",
+    "ability_metal_fleet_footed": "쾌속 이동",
+    "ability_metal_geographic_mastery": "풍수지리",
+    "ability_metal_impenetrable_redoubt": "난공불락의 보루",
+    "ability_metal_impetuous_charge": "맹렬한 돌격",
+    "ability_metal_inward_focus": "자기 집중",
+    "ability_metal_poison_volley": "맹독 사격",
+    "ability_metal_swift_fingers": "날렵한 손길",
+    "ability_metal_tactical_withdrawal": "작전상 후퇴",
+    "ability_metal_tempered_deflection": "능숙한 훼방",
     "ability_metal_venomous_shot": "맹독 사격",
     "ability_metal_warning_shot": "경고 사격",
     "ability_wood_why_the_cold_feet": "망설이는 발걸음",
-    "ability_water_inspiring_surge": "고무적인 격류",
-    "ability_water_stifling_deluge": "숨막히는 폭우",
-    "ability_water_two_zhangs": "두 장씨",
-    "blade_breaker": "검 파괴자",
-    "blazing_roar": "불타는 포효",
-    "blazing_saddles": "불타는 안장",
+    "ability_water_inspiring_surge": "솟구치는 사기",
+    "ability_water_stifling_deluge": "쏟아지는 폭우",
+    "ability_water_two_zhangs": "강동이장",
+    "blade_breaker": "칼날 파괴",
+    "blazing_roar": "타오르는 포효",
+    "blazing_saddles": "전광석화",
     "blossoming_beauty": "꽃피는 미인",
-    "cold_feet": "망설이는 발걸음",
+    "cold_feet": "힘의 과시",
     "devastating_roar": "파괴적인 포효",
-    "distant_courage": "원대한 용기",
-    "earth_distant_courage": "원대한 용기",
-    "earth_familial_conflict": "가족 갈등",
+    "distant_courage": "용기의 외침",
+    "earth_distant_courage": "용기의 외침",
+    "earth_familial_conflict": "가족 내 갈등",
     "earth_heavenly_presence": "천상의 존재감",
-    "earth_imperious_presence": "위압적 존재감",
+    "earth_imperious_presence": "위풍당당한 존재감",
     "earth_inspiring_words": "격려의 말",
     "earth_opportunism": "기회주의",
-    "earth_qiao_sisters": "교 자매",
+    "earth_qiao_sisters": "강동이교",
     "earth_ceasefire": "휴전",
-    "earth_shattering_strike": "대지분쇄 일격",
-    "emperor_earth_imposing": "황제의 위압",
-    "emperor_earth_modesty": "황제의 겸양",
+    "earth_shattering_strike": "지축을 뒤집는 일격",
+    "emperor_earth_imposing": "고압",
+    "emperor_earth_modesty": "겸허",
     "earth_stone_bulwark": "석벽",
-    "earth_unyielding_earth": "불굴의 대지",
-    "elemental_vigour": "원소의 활력",
-    "familial_conflict": "가족 갈등",
+    "earth_unyielding_earth": "땅의 부동심",
+    "elemental_vigour": "자연의 활력",
+    "familial_conflict": "가족 내 갈등",
     "final_rush": "최후의 돌격",
-    "fire_bomb": "화염탄",
-    "internal_blaze": "내면의 불꽃",
-    "mighty_thrust": "강력한 찌르기",
+    "fire_bomb": "소이탄",
+    "internal_blaze": "내면의 열정",
+    "mighty_thrust": "강력한 돌격",
     "natures_ally": "자연의 벗",
-    "scattering_blows": "흩뿌리는 일격",
-    "sundering_strike": "분쇄의 일격",
-    "targeted_strike": "정밀 타격",
-    "undying_vow": "불굴의 맹세",
-    "wildfire_raider": "들불 약탈자",
+    "scattering_blows": "산개 공격",
+    "sundering_strike": "절단 공격",
+    "targeted_strike": "약점 공격",
+    "undying_vow": "불멸의 맹세",
+    "wildfire_raider": "들불 습격꾼",
     "charge_forward": "전진 돌격",
     "exemplary_strike": "모범적인 일격",
-    "fire_hail_of_arrows": "화살 세례",
-    "fire_reign_of_terror": "공포의 지배",
-    "fire_the_dragons_gaze": "용의 응시",
+    "fire_hail_of_arrows": "화살비",
+    "fire_reign_of_terror": "공포의 통치",
+    "fire_the_dragons_gaze": "용의 눈빛",
     "spearhead": "선봉",
-    "blood_soaked_wrath": "피로 물든 분노",
+    "blood_soaked_wrath": "공포의 통치",
     "breakthrough_in_concentration": "집중 돌파",
     "camp_crushing": "진영 파괴",
-    "fervent_cheer": "열렬한 함성",
-    "hail_of_arrows": "화살 세례",
+    "fervent_cheer": "파괴적인 포효",
+    "hail_of_arrows": "화살비",
     "heavenly_presence": "천상의 존재감",
-    "imperious_presence": "위압적 존재감",
-    "imposing": "황제의 위압",
-    "impenetrable_redoubt": "난공불락 보루",
-    "impetuous_charge": "성급한 돌격",
+    "imperious_presence": "위풍당당한 존재감",
+    "imposing": "고압",
+    "impenetrable_redoubt": "난공불락의 보루",
+    "impetuous_charge": "맹렬한 돌격",
     "inspiring_words": "격려의 말",
-    "inspiring_surge": "고무적인 격류",
-    "inward_focus": "내면 집중",
-    "fleet_footed": "날랜 발",
-    "geographic_mastery": "지형 숙달",
-    "metal_alt_1": "금속성 보조 1",
-    "metal_alt_2": "금속성 보조 2",
-    "metal_elemental_vigour": "원소의 활력",
-    "metal_fleet_footed": "날랜 발",
-    "metal_geographic_mastery": "지형 숙달",
-    "metal_impenetrable_redoubt": "난공불락 보루",
-    "metal_impetuous_charge": "성급한 돌격",
-    "metal_inward_focus": "내면 집중",
+    "inspiring_surge": "솟구치는 사기",
+    "inward_focus": "자기 집중",
+    "fleet_footed": "쾌속 이동",
+    "geographic_mastery": "풍수지리",
+    "metal_alt_1": "내면의 불꽃",
+    "metal_alt_2": "설교",
+    "metal_elemental_vigour": "자연의 활력",
+    "metal_fleet_footed": "쾌속 이동",
+    "metal_geographic_mastery": "풍수지리",
+    "metal_impenetrable_redoubt": "난공불락의 보루",
+    "metal_impetuous_charge": "맹렬한 돌격",
+    "metal_inward_focus": "자기 집중",
     "metal_insight": "금속 통찰",
-    "metal_poison_volley": "독화살 일제사격",
-    "metal_swift_fingers": "재빠른 손놀림",
-    "metal_tactical_withdrawal": "전술적 후퇴",
-    "metal_tempered_deflection": "단련된 받아넘기기",
-    "metal_tenacity_of_steel": "강철의 끈기",
+    "metal_poison_volley": "맹독 사격",
+    "metal_swift_fingers": "날렵한 손길",
+    "metal_tactical_withdrawal": "작전상 후퇴",
+    "metal_tempered_deflection": "능숙한 훼방",
+    "metal_tenacity_of_steel": "강철같은 집념",
     "metal_venomous_shot": "맹독 사격",
     "metal_warning_shot": "경고 사격",
     "mastery_metal_insight": "금속 통찰 숙련",
     "mastery_earth_opportunism": "기회주의 숙련",
     "skill_mastery_earth_opportunism": "기회주의 숙련",
-    "modesty": "황제의 겸양",
-    "sight_of_the_dragon": "용의 통찰",
+    "modesty": "겸허",
+    "sight_of_the_dragon": "용의 눈",
     "skill_special_ability_water": "수계 특수 능력",
-    "dlc04_skill_healer_tranquillity": "평온",
-    "ytr_skill_healer_charisma": "카리스마",
+    "dlc04_skill_healer_tranquillity": "평안",
+    "ytr_skill_healer_charisma": "통솔",
     "ytr_skill_healer_defiance": "저항",
-    "ytr_skill_healer_expedience": "신속",
-    "ytr_skill_healer_tranquillity": "평온",
-    "stifling_deluge": "숨막히는 폭우",
-    "the_dragons_gaze": "용의 응시",
-    "two_zhangs": "두 장씨",
-    "unyielding_earth": "불굴의 대지",
-    "why_the_cold_feet": "망설이는 발걸음",
+    "ytr_skill_healer_expedience": "순리",
+    "ytr_skill_healer_tranquillity": "평안",
+    "stifling_deluge": "쏟아지는 폭우",
+    "the_dragons_gaze": "용의 눈빛",
+    "two_zhangs": "강동이장",
+    "unyielding_earth": "땅의 부동심",
+    "why_the_cold_feet": "힘의 과시",
     "xianchenying": "선진영",
     "unbreakable": "불굴",
-    "obfuscation": "기만",
+    "obfuscation": "모호함",
     "patience": "인내",
     "ruthlessness": "무자비",
-    "evasiveness": "회피",
-    "mutability": "변화",
+    "evasiveness": "신속함",
+    "mutability": "변수",
     "trust": "신뢰",
-    "villainy": "간악",
+    "villainy": "악당",
     "wisdom": "지혜",
-    "consideration": "배려",
+    "consideration": "숙고",
     "craft": "기교",
-    "dilligence": "근면",
-    "diligence": "근면",
-    "restlessness": "분주",
+    "dilligence": "성실",
+    "diligence": "성실",
+    "restlessness": "조급함",
     "scholarship": "학식",
-    "stealth": "은신",
-    "ability_fire_heart_seeker": "화염 추적자",
-    "flames_of_the_phoenix": "봉황의 불꽃",
-    "unpredictability": "예측불가",
-    "resourcefulness": "수완",
-    "humanity": "인애",
-    "rapacity": "탐욕",
+    "stealth": "은밀함",
+    "ability_fire_heart_seeker": "심장 추적자",
+    "flames_of_the_phoenix": "불사조의 불꽃",
+    "unpredictability": "예측 불가",
+    "resourcefulness": "지략",
+    "humanity": "인간성",
+    "rapacity": "쟁취자",
     "shamelessness": "파렴치",
     "bodyguard": "호위",
-    "fire_heart_seeker": "화염 추적자",
+    "fire_heart_seeker": "심장 추적자",
     "bravery": "용기",
     "vengeance": "복수",
     "endurance": "인내",
@@ -1616,38 +1671,59 @@ _SKILL_PHRASE_LABELS = {
     "passion": "열정",
     "humility": "겸손",
     "precision": "정밀",
-    "projectile_fire_arrows": "화염 화살",
-    "poison_volley": "독화살 일제사격",
+    "projectile_fire_arrows": "불화살",
+    "poison_volley": "맹독 사격",
     "opportunism": "기회주의",
-    "qiao_sisters": "교 자매",
+    "qiao_sisters": "강동이교",
     "quickfire": "속사",
-    "roar_of_the_beast": "야수의 포효",
+    "roar_of_the_beast": "짐승의 포효",
     "ceasefire": "휴전",
-    "shattering_strike": "대지분쇄 일격",
-    "swift_fingers": "재빠른 손놀림",
-    "tactical_withdrawal": "전술적 후퇴",
-    "tempered_deflection": "단련된 받아넘기기",
-    "tenacity_of_steel": "강철의 끈기",
+    "shattering_strike": "지축을 뒤집는 일격",
+    "swift_fingers": "날렵한 손길",
+    "tactical_withdrawal": "작전상 후퇴",
+    "tempered_deflection": "능숙한 훼방",
+    "tenacity_of_steel": "강철같은 집념",
     "venomous_shot": "맹독 사격",
     "warning_shot": "경고 사격",
-    "fire_arrows": "화염 화살",
-    "abundance": "풍요",
-    "gluttony": "탐욕",
+    "fire_arrows": "불화살",
+    "abundance": "풍부",
+    "gluttony": "식탐가",
     "intuition": "직감",
     "judgement": "판단",
     "judgment": "판단",
     "mobility": "기동",
     "clarity": "명료",
-    "intensity": "집중",
+    "intensity": "격렬",
     "flexibility": "유연",
-    "dignity": "위엄",
+    "dignity": "품위",
     "meditation": "명상",
     "nobility": "고귀",
     "zeal": "열의",
-    "composure": "침착",
+    "composure": "평정",
     "understanding": "이해",
-    "perception": "통찰",
+    "perception": "지각",
     "stability": "안정",
+    "battle_stance": "전투 태세",
+    "cheers_of_encouragement": "격려의 함성",
+    "commanding_presence": "지휘관의 존재감",
+    "coward": "겁쟁이",
+    "cruel_command": "잔혹한 명령",
+    "earth_battle_stance": "전투 태세",
+    "earth_cheers_of_encouragement": "격려의 함성",
+    "earth_commanding_presence": "지휘관의 존재감",
+    "earth_coward": "겁쟁이",
+    "earth_empress_dong": "동태후",
+    "earth_encouragement": "격려",
+    "earth_forced_march": "강행군",
+    "earth_greedy_tyrant": "탐욕스러운 폭군",
+    "earth_order_of_tyrant": "폭군의 명령",
+    "earth_shout": "지휘의 함성",
+    "empress_dong": "동태후",
+    "forced_march": "강행군",
+    "greedy_tyrant": "탐욕스러운 폭군",
+    "lady_dong_cruel_command": "동부인의 잔혹한 명령",
+    "order_of_tyrant": "폭군의 명령",
+    "shout": "지휘의 함성",
 }
 
 _SKILL_TERM_LABELS = {
@@ -3221,6 +3297,9 @@ def _reference_pack_paths(payload: dict[str, Any]) -> list[Path]:
         if not raw_path:
             continue
         paths.append(_resolve_user_path(raw_path))
+    for path in _default_localisation_pack_paths():
+        if path not in paths:
+            paths.append(path)
     return [
         path
         for _, path in sorted(
@@ -3232,15 +3311,39 @@ def _reference_pack_paths(payload: dict[str, Any]) -> list[Path]:
 
 def _reference_pack_priority(path: Path) -> int:
     name = path.name.lower()
-    if name.startswith("bfg_"):
+    if name.startswith("local_") or name.startswith("localisation"):
         return 0
-    if name.startswith("data") or name == "database.pack":
+    if name.startswith("bfg_"):
         return 1
-    if name.startswith("lshz_"):
+    if name.startswith("data") or name == "database.pack":
         return 2
-    if name.startswith(("aw-", "aw ")):
+    if name.startswith("lshz_"):
         return 3
-    return 4
+    if name.startswith(("aw-", "aw ")):
+        return 4
+    return 5
+
+
+def _default_localisation_pack_paths() -> list[Path]:
+    candidates = [
+        ROOT / "work" / "packs" / "refs" / "local_kr.pack",
+        Path("E:/SteamLibrary/steamapps/common/Total War THREE KINGDOMS/data/local_kr.pack"),
+        Path("C:/Program Files (x86)/Steam/steamapps/common/Total War THREE KINGDOMS/data/local_kr.pack"),
+        Path("C:/Program Files/Steam/steamapps/common/Total War THREE KINGDOMS/data/local_kr.pack"),
+    ]
+    seen = set()
+    existing = []
+    for path in candidates:
+        try:
+            resolved = path.expanduser().resolve()
+        except OSError:
+            continue
+        key = str(resolved).lower()
+        if key in seen or not resolved.exists():
+            continue
+        seen.add(key)
+        existing.append(resolved)
+    return existing
 
 
 def _detect_adapter(pack_path: Path) -> str:
