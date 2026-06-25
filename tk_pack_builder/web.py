@@ -33,6 +33,23 @@ DEFAULT_RPFM_SERVER = (
 )
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
 RPFM_PROCESS: subprocess.Popen[bytes] | None = None
+REQUIRED_PACK_LAYOUT = """필수 pack 파일을 찾을 수 없습니다.
+
+공개 배포본에는 Total War: THREE KINGDOMS 원본/모드 pack 파일이 포함되지 않습니다.
+보유 중인 pack 파일을 아래 위치에 직접 넣은 뒤 다시 팩 읽기를 눌러주세요.
+
+- work\\packs\\my_hero.pack
+- work\\packs\\refs\\database.pack
+- work\\packs\\refs\\data_mh.pack
+- work\\packs\\refs\\data_ep.pack
+- work\\packs\\refs\\data_dlc07.pack
+- work\\packs\\refs\\data_dlc06.pack
+- work\\packs\\refs\\data_bl.pack
+- work\\packs\\refs\\data_yt_bl.pack
+- work\\packs\\refs\\data.pack
+- work\\packs\\refs\\BFG_Originals.pack
+
+출력 pack은 기본값 기준 work\\packs\\my_hero_patch.pack 으로 생성됩니다."""
 
 SKILL_TABLE_ALIASES = {
     "character_skill_node_sets": [
@@ -152,6 +169,9 @@ class WebHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.BAD_REQUEST, "inputPath and path are required")
             return
         pack_path = _resolve_user_path(input_path)
+        if not pack_path.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND, f"입력 pack을 찾을 수 없습니다: {pack_path}")
+            return
         cached = PACK_CACHE.get_asset(pack_path, packed_path)
         if cached is not None:
             content_type, data = cached
@@ -192,6 +212,7 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not input_path:
         raise ValueError("inputPath is required.")
     pack_path = _resolve_user_path(input_path)
+    _ensure_pack_exists(pack_path, "입력 pack")
     if not payload.get("forceRefresh"):
         cache_started = time.perf_counter()
         cached = PACK_CACHE.get_open_payload(pack_path, include_vanilla, reference_paths)
@@ -1314,7 +1335,12 @@ def _merge_reference_packs(
             })
             continue
         if not resolved.exists():
-            report.append({"path": str(resolved), "ok": False, "error": "file_not_found", "seconds": _elapsed(reference_started)})
+            report.append({
+                "path": str(resolved),
+                "ok": False,
+                "error": f"참조 pack을 찾을 수 없습니다: {resolved}",
+                "seconds": _elapsed(reference_started),
+            })
             continue
         if resolved.resolve() == primary_pack_path.resolve():
             report.append({"path": str(resolved), "ok": False, "error": "same_as_input_pack", "seconds": _elapsed(reference_started)})
@@ -2041,6 +2067,7 @@ def _open_session(payload: dict[str, Any]) -> Any:
     if not input_path:
         raise ValueError("inputPath is required.")
     pack_path = _resolve_user_path(input_path)
+    _ensure_pack_exists(pack_path, "입력 pack")
     adapter_name = payload.get("adapter", "auto")
     if adapter_name == "auto":
         adapter_name = _detect_adapter(pack_path)
@@ -2094,17 +2121,23 @@ def _detect_adapter(pack_path: Path) -> str:
     return "rpfm"
 
 
+def _ensure_pack_exists(pack_path: Path, label: str) -> None:
+    if pack_path.is_file():
+        return
+    raise ValueError(f"{label}을 찾을 수 없습니다: {pack_path}\n\n{REQUIRED_PACK_LAYOUT}")
+
+
 def _resolve_user_path(raw_path: Any) -> Path:
     text = str(raw_path).strip().strip('"')
     text = text.replace("\u00a5", "\\").replace("\u20a9", "\\")
+    normalized = text.replace("\\", "/")
     if os.name == "nt":
-        normalized = text.replace("\\", "/")
         parts = [part for part in normalized.split("/") if part]
         if len(parts) >= 2 and parts[0].lower() == "users" and ":" not in parts[0]:
             home_parts = Path.home().parts
             if len(home_parts) >= 2 and home_parts[-2].lower() == "users":
                 return Path.home().joinpath(*parts[2:])
-    path = Path(text).expanduser()
+    path = Path(normalized).expanduser()
     if not path.is_absolute():
         path = ROOT / path
     return path
