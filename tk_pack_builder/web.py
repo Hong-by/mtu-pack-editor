@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import socket
 import subprocess
 import time
@@ -19,14 +20,22 @@ from .korean_names import korean_character_name
 from .pack_cache import PackCache
 from .recipe import recipe_from_dict
 from .stat_tables import TABLE_ALIASES
-from .validation import has_errors, messages_to_dicts, validate
+from .validation import allow_reference_backed_clone_sources, has_errors, messages_to_dicts, validate
 
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC_ROOT = ROOT / "web"
-DEFAULT_RPFM_SERVER = ROOT / "work" / "rpfm-master" / "target" / "debug" / "rpfm_server"
+DEFAULT_RPFM_SERVER = (
+    ROOT / "work" / "rpfm-dist" / "rpfm_server.exe"
+    if os.name == "nt"
+    else ROOT / "work" / "rpfm-master" / "target" / "debug" / "rpfm_server"
+)
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
 RPFM_PROCESS: subprocess.Popen[bytes] | None = None
+
+
+def _elapsed(started_at: float) -> float:
+    return round(time.perf_counter() - started_at, 4)
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
@@ -49,6 +58,9 @@ class WebHandler(BaseHTTPRequestHandler):
             return
         if path == "/app.js":
             self._serve_static("app.js")
+            return
+        if path == "/reference_names.js":
+            self._serve_static("reference_names.js")
             return
         if path == "/api/health":
             self._send_json({"ok": True})
@@ -100,8 +112,11 @@ class WebHandler(BaseHTTPRequestHandler):
             return
         data = path.read_bytes()
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        if content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
+            content_type = f"{content_type}; charset=utf-8"
         self.send_response(HTTPStatus.OK)
         self.send_header("content-type", content_type)
+        self.send_header("cache-control", "no-store")
         self.send_header("content-length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -112,7 +127,7 @@ class WebHandler(BaseHTTPRequestHandler):
         if not input_path or not packed_path:
             self.send_error(HTTPStatus.BAD_REQUEST, "inputPath and path are required")
             return
-        pack_path = Path(input_path)
+        pack_path = _resolve_user_path(input_path)
         cached = PACK_CACHE.get_asset(pack_path, packed_path)
         if cached is not None:
             content_type, data = cached
@@ -145,27 +160,41 @@ class WebHandler(BaseHTTPRequestHandler):
 
 
 def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    timings: dict[str, float] = {}
     input_path = payload.get("inputPath")
     include_vanilla = bool(payload.get("includeVanilla"))
     reference_paths = _reference_pack_paths(payload)
     if not input_path:
         raise ValueError("inputPath is required.")
-    pack_path = Path(input_path)
+    pack_path = _resolve_user_path(input_path)
     if not payload.get("forceRefresh"):
+        cache_started = time.perf_counter()
         cached = PACK_CACHE.get_open_payload(pack_path, include_vanilla, reference_paths)
+        timings["cacheLookup"] = _elapsed(cache_started)
         if cached is not None:
+            cached["timings"] = {**timings, "total": _elapsed(started_at)}
             return cached
 
+    open_started = time.perf_counter()
     session = _open_session(payload)
+    timings["openSession"] = _elapsed(open_started)
     try:
+        analyze_started = time.perf_counter()
         analysis = analyze_pack(session).to_dict()
+        timings["analyze"] = _elapsed(analyze_started)
+        read_started = time.perf_counter()
         character_data = read_character_data(
             session,
             include_vanilla=include_vanilla,
             reference_paths=reference_paths,
-            adapter_name=payload.get("adapter", "mock"),
+            adapter_name=payload.get("adapter", "auto"),
         )
+        timings["readCharacterData"] = _elapsed(read_started)
+        cache_write_started = time.perf_counter()
         PACK_CACHE.put_open_payload(pack_path, include_vanilla, analysis, character_data, reference_paths)
+        timings["cacheWrite"] = _elapsed(cache_write_started)
+        timings["total"] = _elapsed(started_at)
         return {
             "ok": True,
             "analysis": analysis,
@@ -174,6 +203,7 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 "hit": False,
                 "path": str(PACK_CACHE.db_path),
             },
+            "timings": timings,
         }
     finally:
         _close_session(session)
@@ -184,6 +214,8 @@ def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         recipe = recipe_from_dict(payload.get("recipe", {}))
         messages = validate(session, recipe, payload.get("outputPath"))
+        if _reference_pack_paths(payload):
+            messages = allow_reference_backed_clone_sources(messages)
         return {"ok": not has_errors(messages), "messages": messages_to_dicts(messages)}
     finally:
         _close_session(session)
@@ -193,13 +225,14 @@ def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
     session = _open_session(payload)
     try:
         recipe = recipe_from_dict(payload.get("recipe", {}))
-        output_path = Path(payload["outputPath"]) if payload.get("outputPath") else None
+        output_path = _resolve_user_path(payload["outputPath"]) if payload.get("outputPath") else None
         messages = build_pack(
             session,
             recipe,
             output_path,
             in_place=bool(payload.get("inPlace")),
             delta=bool(payload.get("delta")),
+            reference_paths=_reference_pack_paths(payload),
         )
         return {
             "ok": not any(message["level"] == "error" for message in messages),
@@ -215,10 +248,19 @@ def read_character_data(
     reference_paths: list[Path] | None = None,
     adapter_name: str = "mock",
 ) -> dict[str, Any]:
+    timings: dict[str, Any] = {}
+    started = time.perf_counter()
+    step = time.perf_counter()
     tables = _read_character_tables(session, "pack")
+    timings["readTables"] = _elapsed(step)
+    step = time.perf_counter()
     loc_text = _read_all_loc_text(session)
+    timings["readLoc"] = _elapsed(step)
+    step = time.perf_counter()
     asset_files = session.list_files()
+    timings["listPrimaryFiles"] = _elapsed(step)
     asset_sources: dict[str, str] = {}
+    step = time.perf_counter()
     reference_report = _merge_reference_packs(
         tables,
         loc_text,
@@ -228,10 +270,16 @@ def read_character_data(
         adapter_name,
         session.pack_path,
     )
+    timings["mergeReferences"] = _elapsed(step)
+    step = time.perf_counter()
+    pack_summary = summarize_character_tables(tables, loc_text, asset_files, asset_sources)
+    timings["summarizePack"] = _elapsed(step)
+    timings["total"] = _elapsed(started)
     data = {
-        "pack": summarize_character_tables(tables, loc_text, asset_files, asset_sources),
+        "pack": pack_summary,
         "vanilla": {"available": False, "error": None, "summary": None},
         "referencePacks": reference_report,
+        "timings": timings,
     }
     if include_vanilla:
         try:
@@ -255,6 +303,7 @@ def summarize_character_tables(
     loc_text = loc_text or {}
     asset_files = asset_files or []
     asset_sources = asset_sources or {}
+    asset_index = _build_asset_index(asset_files)
     details_by_template: dict[str, list[dict[str, Any]]] = {}
     for row in tables["character_generation_template_game_mode_details"]:
         details_by_template.setdefault(str(row.get("character_generation_template", "")), []).append(row)
@@ -262,30 +311,87 @@ def summarize_character_tables(
     art_rows_by_set: dict[str, list[dict[str, Any]]] = {}
     for row in tables["campaign_character_arts"]:
         art_rows_by_set.setdefault(str(row.get("art_set_id", "")), []).append(row)
+    external_art_set_ids = {
+        str(row.get("art_set_id", ""))
+        for row in tables["campaign_character_arts"]
+        if row.get("art_set_id") and _is_bfg_reference(str(row.get("_referenceSourcePath") or row.get("_externalImageSetSourcePath") or ""))
+    }
 
     art_sets = []
+    known_art_set_ids: set[str] = set()
     for row in tables["campaign_character_art_sets"]:
         art_set_id = row.get("art_set_id")
         if not art_set_id:
             continue
+        known_art_set_ids.add(str(art_set_id))
         art_rows = art_rows_by_set.get(str(art_set_id), [])
         primary_art = _primary_art_row(art_rows)
+        art_set_label = _friendly_art_set_label(str(art_set_id), loc_text)
+        reference_source = str(
+            row.get("_referenceSourcePath")
+            or row.get("_externalImageSetSourcePath")
+            or primary_art.get("_referenceSourcePath")
+            or primary_art.get("_externalImageSetSourcePath")
+            or ""
+        )
+        external_image_set = _is_bfg_reference(reference_source) or str(art_set_id) in external_art_set_ids
+        if external_image_set and not reference_source:
+            reference_source = "BFG_Astral.pack"
         portrait_path = str(primary_art.get("portrait") or "").strip("/")
         card_path = str(primary_art.get("card") or "").strip("/")
-        portrait_image_path = _find_character_image(asset_files, portrait_path, "halfbody_large")
-        card_image_path = _find_character_image(asset_files, card_path, "unitcards")
+        portrait_image_path = _find_character_image(asset_index, portrait_path, "halfbody_large")
+        card_image_path = _find_character_image(asset_index, card_path, "unitcards")
+        image_assets = [] if external_image_set else _character_image_assets(asset_index, asset_sources, portrait_path, card_path)
         art_sets.append(
             {
                 "key": art_set_id,
-                "label": _friendly_art_set_label(str(art_set_id)),
+                "label": art_set_label,
                 "rowCount": len(art_rows),
                 "portrait": primary_art.get("portrait"),
                 "card": primary_art.get("card"),
                 "uniform": primary_art.get("uniform"),
+                "uniformLabel": _friendly_model_set_label(primary_art.get("uniform"), art_set_label),
+                "referenceSourcePath": reference_source,
+                "externalImageSet": external_image_set,
                 "portraitImagePath": portrait_image_path,
                 "portraitImageSourcePath": asset_sources.get(portrait_image_path or ""),
                 "cardImagePath": card_image_path,
                 "cardImageSourcePath": asset_sources.get(card_image_path or ""),
+                "imageAssets": image_assets,
+                "rows": art_rows,
+            }
+        )
+    for art_set_id, art_rows in sorted(art_rows_by_set.items()):
+        if not art_set_id or art_set_id in known_art_set_ids:
+            continue
+        primary_art = _primary_art_row(art_rows)
+        art_set_label = _friendly_art_set_label(str(art_set_id), loc_text)
+        reference_source = str(primary_art.get("_referenceSourcePath") or primary_art.get("_externalImageSetSourcePath") or "")
+        external_image_set = _is_bfg_reference(reference_source) or str(art_set_id) in external_art_set_ids
+        if external_image_set and not reference_source:
+            reference_source = "BFG_Astral.pack"
+        portrait_path = str(primary_art.get("portrait") or "").strip("/")
+        card_path = str(primary_art.get("card") or "").strip("/")
+        portrait_image_path = _find_character_image(asset_index, portrait_path, "halfbody_large")
+        card_image_path = _find_character_image(asset_index, card_path, "unitcards")
+        image_assets = [] if external_image_set else _character_image_assets(asset_index, asset_sources, portrait_path, card_path)
+        art_sets.append(
+            {
+                "key": art_set_id,
+                "label": art_set_label,
+                "rowCount": len(art_rows),
+                "portrait": primary_art.get("portrait"),
+                "card": primary_art.get("card"),
+                "uniform": primary_art.get("uniform"),
+                "uniformLabel": _friendly_model_set_label(primary_art.get("uniform"), art_set_label),
+                "referenceSourcePath": reference_source,
+                "virtual": True,
+                "externalImageSet": external_image_set,
+                "portraitImagePath": portrait_image_path,
+                "portraitImageSourcePath": asset_sources.get(portrait_image_path or ""),
+                "cardImagePath": card_image_path,
+                "cardImageSourcePath": asset_sources.get(card_image_path or ""),
+                "imageAssets": image_assets,
                 "rows": art_rows,
             }
         )
@@ -363,6 +469,7 @@ def summarize_character_tables(
                 "portraitImageSourcePath": art_set_summary.get("portraitImageSourcePath"),
                 "cardImagePath": art_set_summary.get("cardImagePath"),
                 "cardImageSourcePath": art_set_summary.get("cardImageSourcePath"),
+                "imageAssets": art_set_summary.get("imageAssets", []),
                 "combatStats": combat_stats,
                 "titleInfo": title_info,
                 "templateRow": template,
@@ -443,6 +550,10 @@ def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dic
                 "armourCeo": (armour or {}).get("ceos_key"),
                 "armourStatKey": (armour or {}).get("armour"),
                 "armourAudioType": (armour_row or {}).get("audio_type"),
+                "armourFromReference": bool(
+                    (armour or {}).get("_referenceSourcePath")
+                    or (armour_row or {}).get("_referenceSourcePath")
+                ),
                 "baseAttack": _sum_numeric(weapon_row, ("damage", "ap_damage")),
                 "baseDefense": _number_or_none((armour_row or {}).get("armour_value")),
             }
@@ -624,20 +735,35 @@ def _merge_reference_packs(
     report = []
     known_assets = set(asset_files)
     for reference_path in reference_paths:
+        reference_started = time.perf_counter()
         resolved = reference_path.expanduser()
+        if _skip_bfg_resource_pack_for_fast_open(resolved):
+            report.append({
+                "path": str(resolved),
+                "ok": False,
+                "error": "skipped_bfg_resource_pack",
+                "seconds": _elapsed(reference_started),
+            })
+            continue
         if not resolved.exists():
-            report.append({"path": str(resolved), "ok": False, "error": "file_not_found"})
+            report.append({"path": str(resolved), "ok": False, "error": "file_not_found", "seconds": _elapsed(reference_started)})
             continue
         if resolved.resolve() == primary_pack_path.resolve():
-            report.append({"path": str(resolved), "ok": False, "error": "same_as_input_pack"})
+            report.append({"path": str(resolved), "ok": False, "error": "same_as_input_pack", "seconds": _elapsed(reference_started)})
             continue
         session = None
         before_counts = {alias: len(rows) for alias, rows in tables.items()}
         try:
-            if adapter_name == "rpfm":
+            step = time.perf_counter()
+            actual_adapter = _detect_adapter(resolved) if adapter_name == "auto" else adapter_name
+            if actual_adapter == "rpfm":
                 _ensure_rpfm_server()
-            session = adapter_for(adapter_name).open_pack(resolved)
-            reference_tables = _read_reference_tables(session)
+            session = adapter_for(actual_adapter).open_pack(resolved)
+            open_seconds = _elapsed(step)
+            step = time.perf_counter()
+            reference_tables = {} if _is_data_pack(resolved) else _read_reference_tables(session)
+            table_seconds = _elapsed(step)
+            step = time.perf_counter()
             for alias, rows in reference_tables.items():
                 if alias == "campaign_character_arts":
                     _append_missing_rows_by_fields(
@@ -662,6 +788,8 @@ def _merge_reference_packs(
                     )
             for key, text in _read_all_loc_text(session).items():
                 loc_text.setdefault(key, text)
+            loc_seconds = _elapsed(step)
+            step = time.perf_counter()
             added_assets = 0
             for asset_path in session.list_files():
                 if asset_path in known_assets:
@@ -670,6 +798,7 @@ def _merge_reference_packs(
                 known_assets.add(asset_path)
                 asset_sources[asset_path] = str(resolved)
                 added_assets += 1
+            asset_seconds = _elapsed(step)
             added = {
                 alias: len(tables.get(alias, [])) - before_counts.get(alias, 0)
                 for alias in reference_tables
@@ -680,13 +809,41 @@ def _merge_reference_packs(
                 "tables": sorted(reference_tables),
                 "addedRows": {key: value for key, value in added.items() if value},
                 "addedAssets": added_assets,
+                "seconds": _elapsed(reference_started),
+                "timings": {
+                    "open": open_seconds,
+                    "tablesAndRows": table_seconds,
+                    "loc": loc_seconds,
+                    "assets": asset_seconds,
+                },
             })
         except Exception as error:
-            report.append({"path": str(resolved), "ok": False, "error": str(error)})
+            report.append({"path": str(resolved), "ok": False, "error": str(error), "seconds": _elapsed(reference_started)})
         finally:
             if session is not None:
                 _close_session(session)
     return report
+
+
+def _skip_reference_pack_for_fast_open(path: Path) -> bool:
+    return False
+
+
+def _is_data_pack(path: Path) -> bool:
+    return path.name.lower() == "data.pack"
+
+
+def _skip_bfg_resource_pack_for_fast_open(path: Path) -> bool:
+    name = path.name.lower()
+    return name.startswith("bfg_") and name not in {"bfg_astral.pack", "bfg_originals.pack"}
+
+
+def _is_bfg_pack(path: Path) -> bool:
+    return path.name.lower().startswith("bfg_")
+
+
+def _is_bfg_reference(path: str) -> bool:
+    return Path(path).name.lower().startswith("bfg_") if path else False
 
 
 def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
@@ -741,15 +898,17 @@ def _append_missing_rows_by_fields(
     reference_path: str,
 ) -> None:
     existing = {
-        tuple(row.get(field) for field in fields)
+        tuple(row.get(field) for field in fields): row
         for row in target
     }
     for row in source:
         key = tuple(row.get(field) for field in fields)
         if key in existing:
+            if _is_bfg_reference(reference_path):
+                existing[key].setdefault("_externalImageSetSourcePath", reference_path)
             continue
         target.append({**row, "_referenceSourcePath": reference_path})
-        existing.add(key)
+        existing[key] = target[-1]
 
 
 def _key_field_for_alias(alias: str) -> str:
@@ -948,11 +1107,86 @@ def _friendly_character_label(value: str) -> str:
     return " ".join(tokens) if tokens else _friendly_key(value)
 
 
-def _friendly_art_set_label(value: str) -> str:
-    value = value.removeprefix("3k_mtu_art_set_historical_")
-    value = value.removeprefix("3k_main_art_set_historical_")
-    value = value.removesuffix("_general")
-    return " ".join(part for part in value.split("_") if part)
+def _friendly_art_set_label(value: str, loc_text: dict[str, str] | None = None) -> str:
+    loc_text = loc_text or {}
+    korean_name = _korean_name_from_art_or_model_key(value, loc_text)
+    if korean_name:
+        return korean_name
+    token = _character_token_from_art_or_model_key(value)
+    return " ".join(part for part in token.split("_") if part) if token else _friendly_key(value)
+
+
+def _friendly_model_set_label(value: Any, fallback_name: str) -> str:
+    model_key = str(value or "")
+    if not model_key:
+        return fallback_name
+    model_name = _korean_name_from_art_or_model_key(model_key, {})
+    if model_name:
+        return f"{model_name} 모델"
+    if fallback_name:
+        return f"{fallback_name} 모델"
+    return _friendly_key(model_key)
+
+
+def _korean_name_from_art_or_model_key(value: str, loc_text: dict[str, str]) -> str | None:
+    token = _character_token_from_art_or_model_key(value)
+    if not token:
+        return None
+    prefixes = _key_prefix_candidates(value)
+    element_suffixes = ["earth", "fire", "metal", "water", "wood"]
+    candidates: list[str] = []
+    for prefix in prefixes:
+        candidates.extend(
+            f"{prefix}_template_historical_{token}_hero_{element}"
+            for element in element_suffixes
+        )
+        candidates.append(f"{prefix}_template_historical_{token}")
+    for candidate in candidates:
+        korean_name = korean_character_name(candidate)
+        if korean_name:
+            return korean_name
+        display_name = _display_name_from_key(candidate, loc_text)
+        if display_name:
+            return display_name
+    return None
+
+
+def _key_prefix_candidates(value: str) -> list[str]:
+    parts = value.split("_")
+    candidates = []
+    if len(parts) >= 2 and parts[0] == "3k":
+        candidates.append("_".join(parts[:2]))
+    if parts and parts[0] in {"ep"}:
+        candidates.append(parts[0])
+    for prefix in ["3k_main", "3k_mtu", "3k_dlc04", "3k_dlc05", "3k_dlc06", "3k_dlc07", "3k_ytr", "ep"]:
+        if prefix not in candidates:
+            candidates.append(prefix)
+    return candidates
+
+
+def _character_token_from_art_or_model_key(value: str) -> str:
+    token = value
+    for marker in (
+        "_art_set_historical_",
+        "_art_set_generated_",
+        "_hero_skin_",
+        "_general_",
+        "_template_historical_",
+    ):
+        if marker in token:
+            token = token.split(marker, 1)[1]
+            break
+    for suffix in (
+        "_general",
+        "_hero",
+        "_earth",
+        "_fire",
+        "_metal",
+        "_water",
+        "_wood",
+    ):
+        token = token.removesuffix(suffix)
+    return token.strip("_")
 
 
 def _primary_art_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -968,33 +1202,170 @@ def _primary_art_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return non_baby_rows[0] if non_baby_rows else rows[0]
 
 
-def _find_character_image(asset_files: list[str], image_key: str, image_kind: str) -> str | None:
+def _build_asset_index(asset_files: list[str]) -> dict[str, Any]:
+    normalized_files = [path.replace("\\", "/") for path in asset_files]
+    lower_to_path: dict[str, str] = {}
+    priority: dict[str, int] = {}
+    stills_by_name: dict[tuple[str, str], list[str]] = {}
+    for index, path in enumerate(normalized_files):
+        lower = path.lower()
+        lower_to_path.setdefault(lower, path)
+        priority.setdefault(lower, index)
+        if "/stills/" in lower and lower.endswith(".png"):
+            parts = lower.rsplit("/", 1)
+            name = parts[-1].removesuffix(".png") if parts else ""
+            kind = lower.split("/stills/", 1)[1].split("/", 1)[0]
+            stills_by_name.setdefault((name, kind), []).append(path)
+    return {
+        "files": normalized_files,
+        "lower_to_path": lower_to_path,
+        "priority": priority,
+        "stills_by_name": stills_by_name,
+        "prefix_cache": {},
+    }
+
+
+def _find_character_image(asset_index: dict[str, Any], image_key: str, image_kind: str) -> str | None:
     if not image_key:
         return None
+    asset_files = asset_index["files"]
     normalized = image_key.strip("/")
+    image_name = normalized.rsplit("/", 1)[-1]
     preferred = [
         f"ui/characters/{normalized}/stills/{image_kind}/{normalized}.png",
         f"ui/characters/{normalized}/stills/{image_kind}/large/{normalized}.png",
+        f"ui/characters/{normalized}/stills/{image_kind}/{image_name}.png",
+        f"ui/characters/{normalized}/stills/{image_kind}/large/{image_name}.png",
         f"ui/characters/{normalized}/composites/large_panel/norm/noanim.png",
         f"ui/characters/{normalized}/composites/large_panel/norm/norm.png",
         f"ui/characters/{normalized}/composites/large_panel/happy/noanim.png",
         f"ui/characters/{normalized}/composites/large_panel/happy/happy.png",
     ]
-    assets = set(asset_files)
+    assets_by_lower = asset_index["lower_to_path"]
     for path in preferred:
-        if path in assets:
-            return path
+        found = assets_by_lower.get(path.lower())
+        if found:
+            return found
+    still_matches = asset_index["stills_by_name"].get((image_name.lower(), image_kind.lower()), [])
+    if still_matches:
+        return sorted(still_matches, key=lambda path: asset_index["priority"].get(path.lower(), 10**9))[0]
+    composite_prefixes = _character_composite_prefixes(normalized)
+    for prefix in composite_prefixes:
+        candidates = [
+            path
+            for path in _asset_files_for_prefix(asset_index, prefix)
+            if "/large_panel/" in path.lower()
+            and path.lower().endswith(("/norm.png", "/happy.png", "/angry.png", "/noanim.png"))
+        ]
+        if candidates:
+            return sorted(candidates, key=lambda path: (*_character_preview_priority(path), asset_index["priority"].get(path.lower(), 10**9)))[0]
+    if "/" in normalized:
+        return None
     matches = [
-        path for path in asset_files
-        if path.startswith(f"ui/characters/{normalized}/")
+        path for path in _asset_files_for_prefix(asset_index, f"ui/characters/{normalized.lower()}/")
+        if path.lower().startswith(f"ui/characters/{normalized.lower()}/")
         and (
-            f"/stills/{image_kind}/" in path
-            or "/composites/large_panel/norm/" in path
-            or "/composites/large_panel/happy/" in path
+            f"/stills/{image_kind.lower()}/" in path.lower()
+            or "/composites/large_panel/norm/" in path.lower()
+            or "/composites/large_panel/happy/" in path.lower()
         )
-        and path.endswith(".png")
+        and path.lower().endswith(".png")
     ]
-    return matches[0] if matches else None
+    return sorted(matches, key=lambda path: asset_index["priority"].get(path.lower(), 10**9))[0] if matches else None
+
+
+def _asset_files_for_prefix(asset_index: dict[str, Any], prefix: str) -> list[str]:
+    normalized_prefix = prefix.lower()
+    cache = asset_index["prefix_cache"]
+    if normalized_prefix not in cache:
+        cache[normalized_prefix] = [
+            path for path in asset_index["files"]
+            if path.lower().startswith(normalized_prefix)
+        ]
+    return cache[normalized_prefix]
+
+
+def _character_composite_prefixes(normalized_key: str) -> list[str]:
+    parts = [part for part in normalized_key.lower().strip("/").split("/") if part]
+    prefixes: list[str] = []
+    if len(parts) >= 2:
+        first, second = parts[0], parts[1]
+        gender = second if second in {"female", "male"} else None
+        element = first.split("_", 1)[0]
+        if gender and element in {"earth", "fire", "metal", "water", "wood"}:
+            if first == "water_strategist":
+                prefixes.append(f"ui/characters/water_strategist_ban/{gender}/")
+            prefixes.append(f"ui/characters/{first}/{gender}/")
+            prefixes.append(f"ui/characters/{element}/{gender}/")
+    if parts:
+        prefixes.append(f"ui/characters/{parts[0]}/")
+    return prefixes
+
+
+def _character_preview_priority(path: str) -> tuple[int, str]:
+    lower = path.lower()
+    if "/large_panel/norm/norm.png" in lower:
+        return (0, lower)
+    if "/large_panel/happy/happy.png" in lower:
+        return (1, lower)
+    if "/large_panel/angry/angry.png" in lower:
+        return (2, lower)
+    return (3, lower)
+
+
+def _character_image_assets(
+    asset_index: dict[str, Any],
+    asset_sources: dict[str, str],
+    portrait_key: str,
+    card_key: str,
+) -> list[dict[str, str]]:
+    asset_files = asset_index["files"]
+    exact_prefixes: list[str] = []
+    for key, kind in ((portrait_key, "halfbody_large"), (card_key, "unitcards")):
+        preview_path = _find_character_image(asset_index, str(key or ""), kind)
+        composite_prefix = _composite_asset_prefix_from_path(preview_path or "")
+        if composite_prefix:
+            exact_prefixes.append(composite_prefix)
+
+    folders = []
+    for key in (portrait_key, card_key):
+        normalized = str(key or "").strip("/")
+        if not normalized:
+            continue
+        folder = normalized.split("/", 1)[0]
+        if folder and folder not in folders:
+            folders.append(folder)
+
+    assets = []
+    seen = set()
+    prefixes = exact_prefixes or [f"ui/characters/{folder.lower()}/" for folder in folders]
+    for prefix in dict.fromkeys(prefixes):
+        for path in _asset_files_for_prefix(asset_index, prefix):
+            normalized_path = path
+            lower_path = normalized_path.lower()
+            if normalized_path in seen:
+                continue
+            if not lower_path.startswith(prefix):
+                continue
+            if not lower_path.endswith((".png", ".jpg", ".jpeg", ".dds")):
+                continue
+            assets.append({
+                "path": normalized_path,
+                "sourcePath": asset_sources.get(path, asset_sources.get(normalized_path, "")),
+            })
+            seen.add(normalized_path)
+    return sorted(assets, key=lambda item: item["path"])
+
+
+def _composite_asset_prefix_from_path(path: str) -> str | None:
+    lower = path.replace("\\", "/").lower()
+    marker = "/large_panel/"
+    if marker in lower and "/composites/" in lower:
+        return lower.split(marker, 1)[0] + "/"
+    marker = "/small_panel/"
+    if marker in lower and "/composites/" in lower:
+        return lower.split(marker, 1)[0] + "/"
+    return None
 
 
 def _unique_options(values: Any) -> list[dict[str, str]]:
@@ -1061,13 +1432,16 @@ def _resolve_reference_character_table(session: Any, alias: str) -> str:
 
 
 def _open_session(payload: dict[str, Any]) -> Any:
-    adapter_name = payload.get("adapter", "mock")
     input_path = payload.get("inputPath")
     if not input_path:
         raise ValueError("inputPath is required.")
+    pack_path = _resolve_user_path(input_path)
+    adapter_name = payload.get("adapter", "auto")
+    if adapter_name == "auto":
+        adapter_name = _detect_adapter(pack_path)
     if adapter_name == "rpfm":
         _ensure_rpfm_server()
-    return adapter_for(adapter_name).open_pack(Path(input_path))
+    return adapter_for(adapter_name).open_pack(pack_path)
 
 
 def _reference_pack_paths(payload: dict[str, Any]) -> list[Path]:
@@ -1078,8 +1452,57 @@ def _reference_pack_paths(payload: dict[str, Any]) -> list[Path]:
     for raw_path in raw_paths:
         if not raw_path:
             continue
-        paths.append(Path(str(raw_path)).expanduser())
-    return paths
+        paths.append(_resolve_user_path(raw_path))
+    return [
+        path
+        for _, path in sorted(
+            enumerate(paths),
+            key=lambda item: (_reference_pack_priority(item[1]), item[0]),
+        )
+    ]
+
+
+def _reference_pack_priority(path: Path) -> int:
+    name = path.name.lower()
+    if name == "data.pack":
+        return 2
+    vanilla_names = {
+        "database.pack",
+        "data_mh.pack",
+        "data_ep.pack",
+        "data_dlc07.pack",
+        "data_dlc06.pack",
+        "data_bl.pack",
+        "data_yt_bl.pack",
+    }
+    return 1 if name in vanilla_names else 0
+
+
+def _detect_adapter(pack_path: Path) -> str:
+    try:
+        with pack_path.open("rb") as handle:
+            prefix = handle.read(64).lstrip()
+    except FileNotFoundError:
+        raise ValueError(f"Pack file not found: {pack_path}")
+    if prefix.startswith(b"{"):
+        return "mock"
+    return "rpfm"
+
+
+def _resolve_user_path(raw_path: Any) -> Path:
+    text = str(raw_path).strip().strip('"')
+    text = text.replace("\u00a5", "\\").replace("\u20a9", "\\")
+    if os.name == "nt":
+        normalized = text.replace("\\", "/")
+        parts = [part for part in normalized.split("/") if part]
+        if len(parts) >= 2 and parts[0].lower() == "users" and ":" not in parts[0]:
+            home_parts = Path.home().parts
+            if len(home_parts) >= 2 and home_parts[-2].lower() == "users":
+                return Path.home().joinpath(*parts[2:])
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+    return path
 
 
 def _ensure_rpfm_server() -> None:

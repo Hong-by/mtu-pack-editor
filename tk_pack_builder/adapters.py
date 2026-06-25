@@ -349,6 +349,7 @@ class RpfmAdapter:
         self.port = port or int(os.environ.get("TK_RPFM_PORT", "45127"))
 
     def open_pack(self, file_path: Path) -> RpfmPackSession:
+        file_path = file_path.expanduser().resolve()
         if file_path.suffix != ".pack":
             raise ValueError("Input path must end with .pack.")
 

@@ -121,7 +121,17 @@ def resolve_stat_target(
     if stat_table == "armour":
         variants_table = resolve_table_name(session, "equipment_variants_armours")
         variants = session.read_table(variants_table)
-        variant = _find_variant(variants, equipment_key, game_mode, "armour")
+        try:
+            variant = _find_variant(variants, equipment_key, game_mode, "armour")
+        except ValueError:
+            if "_ancillary_" not in equipment_key:
+                raise
+            variant = _find_variant(
+                variants,
+                equipment_key.replace("_ancillary_", "_ancilliary_"),
+                game_mode,
+                "armour",
+            )
         row_key = variant["armour"]
         target_table = resolve_table_name(session, "unit_armour_types")
         _require_row(session.read_table(target_table), row_key, column)

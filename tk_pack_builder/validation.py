@@ -191,5 +191,21 @@ def has_errors(messages: list[ValidationMessage]) -> bool:
     return any(message.level == "error" for message in messages)
 
 
+def allow_reference_backed_clone_sources(messages: list[ValidationMessage]) -> list[ValidationMessage]:
+    allowed_fragments = (
+        "Source initial CEO not found:",
+        "Source age range not found:",
+        "Source character art rows not found:",
+    )
+    return [
+        message
+        for message in messages
+        if not (
+            message.code == "invalid_character_clone"
+            and any(fragment in message.message for fragment in allowed_fragments)
+        )
+    ]
+
+
 def messages_to_dicts(messages: list[ValidationMessage]) -> list[dict[str, Any]]:
     return [message.__dict__ for message in messages]

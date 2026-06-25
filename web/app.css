@@ -230,6 +230,16 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(47, 111, 93, 0.14);
 }
 
+.select-search {
+  min-height: 32px;
+  margin-bottom: 6px;
+  background: #fbfdfb;
+}
+
+.select-search::placeholder {
+  color: #8a968e;
+}
+
 .filter-row {
   display: flex;
   gap: 6px;
@@ -712,6 +722,34 @@ label {
   gap: 10px;
 }
 
+.spawn-help {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #bed8cc;
+  border-radius: 8px;
+  background: #f3faf6;
+  padding: 11px 12px;
+}
+
+.spawn-help strong {
+  color: #1f5d49;
+  font-size: 13px;
+}
+
+.spawn-help p,
+.spawn-help ul {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.spawn-help ul {
+  display: grid;
+  gap: 3px;
+  padding-left: 17px;
+}
+
 .equipment-summary {
   display: grid;
   gap: 7px;
@@ -725,6 +763,26 @@ label {
   color: var(--muted);
   font-size: 12px;
   font-weight: 750;
+}
+
+.title-effect {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #d8c97e;
+  border-radius: 8px;
+  background: #fff9df;
+  padding: 9px;
+}
+
+.title-effect strong {
+  color: #7a5d10;
+  font-size: 12px;
+}
+
+.title-effect span {
+  color: #5e573a;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .equipment-row {
@@ -856,6 +914,27 @@ label {
   border-radius: 8px;
   background: #fff;
   padding: 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.queue-item:hover,
+.queue-item:focus-visible {
+  border-color: #9dc7b8;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(45, 122, 97, 0.12);
+}
+
+.queue-item.active {
+  border-color: var(--accent);
+  background: #eef7f2;
+}
+
+.queue-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .queue-item b {
@@ -866,6 +945,21 @@ label {
 .queue-item span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.queue-delete-btn {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid #e2a29a;
+  border-radius: 6px;
+  background: #fff0ee;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.queue-delete-btn:hover {
+  background: #fbe3df;
 }
 
 .empty {

@@ -1,6 +1,7 @@
 work/
 __pycache__/
 *.pyc
+server.*.log
 .DS_Store
 .claude/
 출력팩/

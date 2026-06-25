@@ -17,11 +17,12 @@ def build_pack(
     output_path: Path | None,
     in_place: bool = False,
     delta: bool = False,
+    reference_paths: list[Path] | None = None,
 ) -> list[dict[str, object]]:
     if delta:
         if output_path is None:
             raise ValueError("Delta patch pack output path is required.")
-        return build_delta_pack(session, recipe, output_path)  # type: ignore[arg-type]
+        return build_delta_pack(session, recipe, output_path, reference_paths or [])  # type: ignore[arg-type]
 
     messages = validate(session, recipe, str(output_path) if output_path else None)
     if has_errors(messages):

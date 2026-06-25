@@ -16,19 +16,17 @@
         </div>
       </div>
       <div class="header-actions">
-        <input id="inputPackPath" class="path-input" value="/Users/hong/Downloads/my_hero.pack" aria-label="입력 pack 경로">
-        <input id="outputPackPath" class="path-input" value="/Users/hong/Documents/new_hero/출력팩/my_hero_patch.pack" aria-label="출력 pack 경로">
-        <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">/Users/hong/Downloads/database.pack
-/Users/hong/Downloads/data_mh.pack
-/Users/hong/Downloads/data_ep.pack
-/Users/hong/Downloads/drive-download-20260624T065531Z-3-001/data_dlc07.pack
-/Users/hong/Downloads/drive-download-20260624T065531Z-3-001/data_dlc06.pack
-/Users/hong/Downloads/drive-download-20260624T065531Z-3-001/data_bl.pack
-/Users/hong/Downloads/drive-download-20260624T065531Z-3-001/BFG_for_MTU.pack
-/Users/hong/Downloads/drive-download-20260624T065531Z-3-001/BFG_Originals.pack
-/Users/hong/Downloads/drive-download-20260624T065531Z-3-001/BFG_Astral.pack
-/Users/hong/Downloads/drive-download-20260624T065531Z-3-001/BFG_Nanman2.pack
-/Users/hong/Downloads/drive-download-20260624T065531Z-3-001/BFG_Yellow_Turban.pack</textarea>
+        <input id="inputPackPath" class="path-input" value="work\packs\my_hero.pack" aria-label="입력 pack 경로">
+        <input id="outputPackPath" class="path-input" value="work\packs\my_hero_patch.pack" aria-label="출력 pack 경로">
+        <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">work\packs\refs\BFG_Originals.pack
+work\packs\refs\database.pack
+work\packs\refs\data_mh.pack
+work\packs\refs\data_ep.pack
+work\packs\refs\data_dlc07.pack
+work\packs\refs\data_dlc06.pack
+work\packs\refs\data_bl.pack
+work\packs\refs\data_yt_bl.pack
+work\packs\refs\data.pack</textarea>
         <select id="saveModeSelect" class="save-mode" aria-label="저장 방식">
           <option value="patch_pack" selected>패치 pack</option>
           <option value="save_as">Save As 원본 복사</option>
@@ -175,6 +173,7 @@
           </div>
 
           <div class="tab-section" data-tab-section="edit-spawn">
+            <div id="editSpawnHelp" class="spawn-help"></div>
             <div class="two-col">
               <label>
                 <span>등장 가중치</span>
@@ -187,12 +186,14 @@
             </div>
             <div class="two-col">
               <label>
-                <span>최소 라운드</span>
+                <span id="editMinRoundLabel">최소 라운드</span>
                 <input id="editMinRound" type="number">
+                <small id="editMinRoundNote"></small>
               </label>
               <label>
-                <span>최대 라운드</span>
+                <span id="editMaxRoundLabel">최대 라운드</span>
                 <input id="editMaxRound" type="number">
+                <small id="editMaxRoundNote"></small>
               </label>
             </div>
           </div>
@@ -230,14 +231,14 @@
               <span>새 장수 이름</span>
               <input id="createName" placeholder="예: 홍비">
             </label>
-            <div id="sourceTitleSummary" class="equipment-summary"></div>
-            <label>
-              <span>기본 정보</span>
-              <select id="sourceBase"></select>
-            </label>
+            <select id="sourceBase" hidden></select>
             <label>
               <span>능력치 세트</span>
               <select id="sourceAttributeSet"></select>
+            </label>
+            <label>
+              <span>칭호</span>
+              <select id="sourceTitle"></select>
             </label>
             <label>
               <span>오행/타입</span>
@@ -277,6 +278,7 @@
           </div>
 
           <div class="tab-section" data-tab-section="create-spawn">
+            <div id="createSpawnHelp" class="spawn-help"></div>
             <label>
               <span>등장 조건</span>
               <select id="sourceSpawn"></select>
@@ -288,6 +290,16 @@
             <label>
               <span>등장 가중치</span>
               <input id="createWeight" type="number" step="0.1" value="0">
+            </label>
+            <label>
+              <span id="createMinRoundLabel">최소 등장 턴</span>
+              <input id="createMinRound" type="number" step="1" value="0">
+              <small id="createMinRoundNote"></small>
+            </label>
+            <label>
+              <span id="createMaxRoundLabel">최대 등장 턴</span>
+              <input id="createMaxRound" type="number" step="1" value="999">
+              <small id="createMaxRoundNote"></small>
             </label>
           </div>
 
@@ -327,6 +339,7 @@
       <textarea id="recipeText" spellcheck="false"></textarea>
     </dialog>
 
+    <script src="./reference_names.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

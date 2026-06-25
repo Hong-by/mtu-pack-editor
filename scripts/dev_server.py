@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import subprocess
 import sys
@@ -10,7 +11,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_RPFM_SERVER = ROOT / "work" / "rpfm-master" / "target" / "debug" / "rpfm_server"
+DEFAULT_RPFM_SERVER = (
+    ROOT / "work" / "rpfm-dist" / "rpfm_server.exe"
+    if os.name == "nt"
+    else ROOT / "work" / "rpfm-master" / "target" / "debug" / "rpfm_server"
+)
 
 
 def main() -> int:

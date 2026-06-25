@@ -38,6 +38,9 @@ class CharacterClone:
     art_set_overrides: dict[str, Any]
     art_overrides: dict[str, Any]
     age_range_overrides: dict[str, Any]
+    spawn_event: str | None = None
+    display_name: str | None = None
+    image_assets: list[dict[str, str]] | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,9 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             art_set_overrides=item.get("artSetOverrides", {}),
             art_overrides=item.get("artOverrides", {}),
             age_range_overrides=item.get("ageRangeOverrides", {}),
+            spawn_event=item.get("spawnEvent"),
+            display_name=item.get("displayName") or item.get("newName"),
+            image_assets=item.get("imageAssets") or [],
         )
         for item in data.get("characterCloneRecipes", [])
     ]

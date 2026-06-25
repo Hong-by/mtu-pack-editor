@@ -3,22 +3,29 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 from typing import Any
+import zlib
 
-from .adapters import RpfmPackSession, _encode_rpfm_cell
+from .adapters import RpfmPackSession, _decode_rpfm_cell, _encode_rpfm_cell
 from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_name
 from .land_units import validate_land_unit_clone
 from .recipe import CharacterClone, CharacterPatch, Recipe
 from .stat_tables import resolve_stat_target, resolve_table_name
-from .validation import has_errors, validate
+from .validation import allow_reference_backed_clone_sources, has_errors, validate
+
+
+LEGACY_TEMPLATE_PACK = Path("work/legacy_template/8King_4P_1.7_up.pack")
 
 
 def build_delta_pack(
     session: RpfmPackSession,
     recipe: Recipe,
     output_path: Path,
+    reference_paths: list[Path] | None = None,
 ) -> list[dict[str, object]]:
     output_path = output_path.resolve()
     messages = validate(session, recipe, str(output_path))
+    if reference_paths:
+        messages = allow_reference_backed_clone_sources(messages)
     if has_errors(messages):
         return [
             {"level": message.level, "code": message.code, "message": message.message}
@@ -28,28 +35,55 @@ def build_delta_pack(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     source_dbs: dict[str, dict[str, Any]] = {}
     rows_by_table: dict[str, list[dict[str, Any]]] = {}
+    loc_rows: dict[str, str] = {}
+    opened_pack_keys = {str(session.pack_path.resolve()): session.pack_key}
 
     changed_stats = _collect_stat_patch_rows(session, recipe, source_dbs, rows_by_table)
     cloned_land_units = _collect_land_unit_clone_rows(session, recipe, source_dbs, rows_by_table)
     changed_character_fields = _collect_character_patch_rows(session, recipe.character_patches, source_dbs, rows_by_table)
-    cloned_characters = _collect_character_clone_rows(session, recipe.character_clones, source_dbs, rows_by_table)
+    cloned_characters = _collect_character_clone_rows(
+        session,
+        recipe.character_clones,
+        source_dbs,
+        rows_by_table,
+        loc_rows,
+        reference_paths or [],
+        opened_pack_keys,
+    )
+    copied_dependency_rows = _collect_character_dependency_rows(
+        session,
+        recipe.character_clones,
+        source_dbs,
+        rows_by_table,
+        reference_paths or [],
+        opened_pack_keys,
+    )
+    campaign_script = _campaign_start_spawn_script(recipe.character_clones)
 
     target_key = _new_delta_pack(session)
     try:
         for table_path, rows in rows_by_table.items():
             source_db = source_dbs[table_path]
-            delta_db = _db_with_rows(source_db, rows)
-            table = delta_db["table"]
-            _raise_rpfm_error(session.client.send({
-                "NewPackedFile": [
-                    target_key,
-                    table_path,
-                    {"DB": [table_path, table["table_name"], table["definition"]["version"]]},
-                ]
-            }))
-            _raise_rpfm_error(session.client.send({
-                "SavePackedFileFromView": [target_key, table_path, {"DB": delta_db}]
-            }))
+            _write_db_file(session, target_key, table_path, source_db, rows)
+
+        if campaign_script:
+            _write_lua_text_file(
+                session,
+                target_key,
+                "script/campaign/mod/hby_mtu_pack_editor_player_spawn.lua",
+                campaign_script,
+            )
+
+        if loc_rows:
+            _write_loc_file(
+                session,
+                target_key,
+                "text/hby_mtu_pack_editor_names.loc",
+                loc_rows,
+            )
+
+        incident_tables = _write_spawn_incident_tables(session, target_key, recipe.character_clones)
+        copied_assets = _copy_image_assets(session, target_key, recipe.character_clones, opened_pack_keys)
 
         _raise_rpfm_error(session.client.send({"SavePackAs": [target_key, str(output_path)]}))
     except Exception:
@@ -68,7 +102,11 @@ def build_delta_pack(
                 f"Wrote delta patch pack {output_path} ({output_path.stat().st_size} bytes) "
                 f"with {len(rows_by_table)} DB table(s), {changed_stats} edited equipment stat value(s), "
                 f"{cloned_land_units} cloned land unit row(s), "
-                f"{changed_character_fields} edited character field(s), and {cloned_characters} cloned character(s)."
+                f"{changed_character_fields} edited character field(s), {cloned_characters} cloned character(s), "
+                f"{copied_dependency_rows} referenced DB row(s), "
+                f"{len(loc_rows)} name loc row(s), {incident_tables} spawn incident table(s), "
+                f"{copied_assets} image asset(s), "
+                f"and {1 if campaign_script else 0} campaign script(s)."
             ),
         }
     ]
@@ -172,18 +210,43 @@ def _collect_character_clone_rows(
     clones: list[CharacterClone],
     source_dbs: dict[str, dict[str, Any]],
     rows_by_table: dict[str, list[dict[str, Any]]],
+    loc_rows: dict[str, str],
+    reference_paths: list[Path] | None = None,
+    opened_pack_keys: dict[str, str] | None = None,
 ) -> int:
     if not clones:
         return 0
 
-    table_names = {
-        alias: resolve_character_table_name(session, alias)
-        for alias in CHARACTER_TABLE_ALIASES
-    }
+    table_names = {}
+    for alias in CHARACTER_TABLE_ALIASES:
+        try:
+            table_names[alias] = resolve_character_table_name(session, alias)
+        except ValueError:
+            if alias != "ceo_initial_datas":
+                raise
     tables = {
         alias: _read_rows(session, table_name, source_dbs)
         for alias, table_name in table_names.items()
     }
+    opened_pack_keys = opened_pack_keys or {str(session.pack_path.resolve()): session.pack_key}
+    dependency_aliases = _character_dependency_aliases()
+    dependency_aliases.update({
+        alias: CHARACTER_TABLE_ALIASES[alias]
+        for alias in CHARACTER_TABLE_ALIASES
+    })
+    _merge_dependency_tables_from_pack(session, session.pack_key, session.list_tables(), dependency_aliases, tables, source_dbs)
+    _merge_vanilla_dependency_tables(session, dependency_aliases, table_names, tables, source_dbs)
+    _merge_reference_dependency_tables(
+        session,
+        dependency_aliases,
+        reference_paths or [],
+        table_names,
+        tables,
+        source_dbs,
+        opened_pack_keys,
+    )
+    names = _read_rows(session, "names", source_dbs)
+    names_table = session._resolve_table_path("names")
 
     created = 0
     for clone in clones:
@@ -197,11 +260,31 @@ def _collect_character_clone_rows(
             "key": clone.new_template_key,
             **clone.template_overrides,
         }
+        if clone.display_name:
+            name_id = _name_id_for_clone(clone, names)
+            source_name_id = str(source_template.get("forename") or "")
+            source_name = _find_row(names, "id", source_name_id) or (names[0] if names else {})
+            name_row = {
+                **source_name,
+                "id": str(name_id),
+                "frequency": 1,
+            }
+            _upsert_delta_row(rows_by_table, names_table, "id", name_row)
+            names.append(name_row)
+            new_template["forename"] = name_id
+            new_template["family_name"] = 0
+            new_template["clan_name"] = 0
+            new_template["other_name"] = 0
+            loc_rows[f"names_name_{name_id}"] = clone.display_name
+            loc_rows[f"names_alt_name_{name_id}"] = clone.display_name
 
         if clone.new_art_set_id:
-            new_template["art_set_override"] = clone.new_art_set_id
             source_art_set = clone.art_set_source_id or source_template["art_set_override"]
-            _clone_art_set_delta(tables, table_names, rows_by_table, source_art_set, clone)
+            if _find_row(tables["campaign_character_art_sets"], "art_set_id", source_art_set):
+                new_template["art_set_override"] = clone.new_art_set_id
+                _clone_art_set_delta(tables, table_names, rows_by_table, source_art_set, clone)
+            else:
+                new_template["art_set_override"] = source_art_set
 
         if clone.new_age_range_key:
             new_template["spawn_age_range"] = clone.new_age_range_key
@@ -229,6 +312,8 @@ def _collect_character_clone_rows(
             if row.get("character_generation_template") == clone.detail_source_template_key
         ]
         if clone.new_initial_ceo_key:
+            if "ceo_initial_datas" not in tables:
+                raise ValueError("Source initial CEO table not found.")
             source_ceo = clone.initial_ceo_source_key or source_details[0]["initial_ceos"]
             _clone_keyed_delta(
                 tables["ceo_initial_datas"],
@@ -309,6 +394,469 @@ def _clone_keyed_delta(
     )
 
 
+def _collect_character_dependency_rows(
+    session: RpfmPackSession,
+    clones: list[CharacterClone],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    reference_paths: list[Path],
+    opened_pack_keys: dict[str, str],
+) -> int:
+    if not clones:
+        return 0
+
+    aliases = _character_dependency_aliases()
+    table_names = _optional_table_names(session, aliases)
+    tables = {
+        alias: _read_rows(session, table_name, source_dbs)
+        for alias, table_name in table_names.items()
+    }
+    _merge_dependency_tables_from_pack(session, session.pack_key, session.list_tables(), aliases, tables, source_dbs)
+    _merge_vanilla_dependency_tables(session, aliases, table_names, tables, source_dbs)
+    _merge_reference_dependency_tables(session, aliases, reference_paths, table_names, tables, source_dbs, opened_pack_keys)
+
+    before = sum(len(rows) for rows in rows_by_table.values())
+    for clone in clones:
+        source_template = _find_row(
+            tables.get("character_generation_templates", []),
+            "key",
+            clone.source_template_key,
+        ) or {}
+        art_set_id = str(
+            clone.template_overrides.get("art_set_override")
+            or clone.new_art_set_id
+            or source_template.get("art_set_override")
+            or ""
+        )
+        age_range = str(
+            clone.template_overrides.get("spawn_age_range")
+            or clone.new_age_range_key
+            or source_template.get("spawn_age_range")
+            or ""
+        )
+        if art_set_id:
+            _copy_matching_rows(
+                tables,
+                table_names,
+                rows_by_table,
+                "campaign_character_art_sets",
+                lambda row, key=art_set_id: row.get("art_set_id") == key,
+                "art_set_id",
+            )
+            _copy_matching_rows(
+                tables,
+                table_names,
+                rows_by_table,
+                "campaign_character_arts",
+                lambda row, key=art_set_id: row.get("art_set_id") == key,
+                _art_key,
+            )
+        if age_range:
+            _copy_matching_rows(
+                tables,
+                table_names,
+                rows_by_table,
+                "character_generation_spawn_age_ranges",
+                lambda row, key=age_range: row.get("key") == key,
+                "key",
+            )
+
+        source_details = [
+            row for row in tables.get("character_generation_template_game_mode_details", [])
+            if row.get("character_generation_template") == clone.detail_source_template_key
+        ]
+        merged_details = []
+        for source_detail in source_details:
+            game_mode = str(source_detail.get("game_mode", ""))
+            merged_details.append({
+                **source_detail,
+                **clone.detail_overrides.get(game_mode, {}),
+            })
+
+        for detail in merged_details:
+            _copy_initial_ceo_dependency(tables, table_names, rows_by_table, detail.get("initial_ceos"))
+            _copy_attribute_dependency(tables, table_names, rows_by_table, detail.get("attribute_set"))
+            _copy_skill_dependency(tables, table_names, rows_by_table, detail.get("skill_set_override"))
+            _copy_retinue_dependency(tables, table_names, rows_by_table, detail.get("retinue"))
+
+    after = sum(len(rows) for rows in rows_by_table.values())
+    return max(0, after - before)
+
+
+def _character_dependency_aliases() -> dict[str, list[str]]:
+    return {
+        "character_generation_templates": [
+            "character_generation_templates",
+            "db/character_generation_templates_tables/_mtu_characters",
+        ],
+        "character_generation_template_game_mode_details": [
+            "character_generation_template_game_mode_details",
+            "db/character_generation_template_game_mode_details_tables/_mtu_characters",
+        ],
+        "campaign_character_art_sets": [
+            "campaign_character_art_sets",
+            "db/campaign_character_art_sets_tables/_mtu_characters",
+        ],
+        "campaign_character_arts": [
+            "campaign_character_arts",
+            "db/campaign_character_arts_tables/_mtu_characters",
+        ],
+        "character_generation_spawn_age_ranges": [
+            "character_generation_spawn_age_ranges",
+            "db/character_generation_spawn_age_ranges_tables/_mtu_characters",
+        ],
+        "ceo_initial_datas": [
+            "ceo_initial_datas",
+            "db/ceo_initial_datas_tables/_mtu_characters_ceo",
+        ],
+        "retinues": ["retinues"],
+        "retinue_slot_initial_units": ["retinue_slot_initial_units"],
+        "cai_retinues_to_aspects": ["cai_retinues_to_aspects"],
+        "character_attribute_sets": ["character_attribute_sets"],
+        "character_attributes": ["character_attributes"],
+        "character_skill_node_sets": ["character_skill_node_sets"],
+        "character_skill_nodes": ["character_skill_nodes"],
+        "character_skill_node_links": ["character_skill_node_links"],
+        "land_units": [
+            "land_units",
+            "db/land_units_tables/_mtu_characters_custom_battles_land_units",
+        ],
+        "land_units_to_unit_abilites_junctions": ["land_units_to_unit_abilites_junctions"],
+    }
+
+
+def _copy_initial_ceo_dependency(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    initial_ceo: Any,
+) -> None:
+    key = str(initial_ceo or "")
+    if not key:
+        return
+    _copy_matching_rows(tables, table_names, rows_by_table, "ceo_initial_datas", lambda row: row.get("key") == key, "key")
+
+
+def _copy_attribute_dependency(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    attribute_set: Any,
+) -> None:
+    key = str(attribute_set or "")
+    if not key:
+        return
+    _copy_matching_rows(tables, table_names, rows_by_table, "character_attribute_sets", lambda row: row.get("set_name") == key, "set_name")
+    _copy_matching_rows(tables, table_names, rows_by_table, "character_attributes", lambda row: row.get("set_name") == key, _attribute_key)
+
+
+def _copy_skill_dependency(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    skill_set: Any,
+) -> None:
+    key = str(skill_set or "")
+    if not key:
+        return
+    _copy_matching_rows(tables, table_names, rows_by_table, "character_skill_node_sets", lambda row: row.get("key") == key, "key")
+    skill_nodes = [
+        row for row in tables.get("character_skill_nodes", [])
+        if row.get("character_skill_node_set_key") == key
+    ]
+    node_keys = {str(row.get("key")) for row in skill_nodes if row.get("key")}
+    for row in skill_nodes:
+        table_path = row.get("_sourceTablePath") or table_names.get("character_skill_nodes")
+        if table_path:
+            clean_row = {key: value for key, value in row.items() if not key.startswith("_source")}
+            _upsert_delta_row(rows_by_table, table_path, "key", clean_row)
+    if node_keys:
+        _copy_matching_rows(
+            tables,
+            table_names,
+            rows_by_table,
+            "character_skill_node_links",
+            lambda row, keys=node_keys: str(row.get("parent_key")) in keys or str(row.get("child_key")) in keys,
+            _skill_link_key,
+        )
+
+
+def _copy_retinue_dependency(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    retinue: Any,
+) -> None:
+    key = str(retinue or "")
+    if not key:
+        return
+    _copy_matching_rows(tables, table_names, rows_by_table, "retinues", lambda row: row.get("key") == key, "key")
+    _copy_matching_rows(tables, table_names, rows_by_table, "cai_retinues_to_aspects", lambda row: row.get("retinue") == key, _retinue_aspect_key)
+    slot_rows = [
+        row for row in tables.get("retinue_slot_initial_units", [])
+        if row.get("retinue") == key
+    ]
+    unit_keys = {str(row.get("initial_unit_record")) for row in slot_rows if row.get("initial_unit_record")}
+    for row in slot_rows:
+        table_path = row.get("_sourceTablePath") or table_names.get("retinue_slot_initial_units")
+        if table_path:
+            clean_row = {key: value for key, value in row.items() if not key.startswith("_source")}
+            _upsert_delta_row(rows_by_table, table_path, _retinue_slot_key, clean_row)
+    for unit_key in unit_keys:
+        _copy_matching_rows(tables, table_names, rows_by_table, "land_units", lambda row, key=unit_key: row.get("key") == key, "key")
+        _copy_matching_rows(
+            tables,
+            table_names,
+            rows_by_table,
+            "land_units_to_unit_abilites_junctions",
+            lambda row, key=unit_key: row.get("land_unit") == key,
+            _land_unit_ability_key,
+        )
+
+
+def _copy_matching_rows(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    alias: str,
+    predicate: Any,
+    key_field: str | Any,
+) -> None:
+    if alias not in tables:
+        return
+    for row in tables[alias]:
+        if predicate(row):
+            table_path = row.get("_sourceTablePath") or table_names.get(alias)
+            if not table_path:
+                continue
+            clean_row = {key: value for key, value in row.items() if not key.startswith("_source")}
+            _upsert_delta_row(rows_by_table, table_path, key_field, clean_row)
+
+
+def _optional_table_names(session: RpfmPackSession, aliases: dict[str, list[str]]) -> dict[str, str]:
+    table_list = session.list_tables()
+    tables = set(table_list)
+    resolved: dict[str, str] = {}
+    for alias, candidates in aliases.items():
+        for candidate in candidates:
+            if candidate in tables:
+                resolved[alias] = candidate
+                break
+        if alias in resolved:
+            continue
+        folder = f"{alias}_tables"
+        matches = [path for path in table_list if f"/{folder}/" in path]
+        if len(matches) == 1:
+            resolved[alias] = matches[0]
+    return resolved
+
+
+def _merge_reference_dependency_tables(
+    session: RpfmPackSession,
+    aliases: dict[str, list[str]],
+    reference_paths: list[Path],
+    table_names: dict[str, str],
+    tables: dict[str, list[dict[str, Any]]],
+    source_dbs: dict[str, dict[str, Any]],
+    opened_pack_keys: dict[str, str],
+) -> None:
+    for reference_path in reference_paths:
+        resolved = reference_path.expanduser()
+        if not resolved.exists():
+            continue
+        try:
+            reference_key = _open_pack_reusing_existing(session, resolved, opened_pack_keys)
+            tree = session.client.send({"GetPackFileDataForTreeView": reference_key})
+            _raise_rpfm_error(tree)
+            file_infos = tree["data"]["ContainerInfoVecRFileInfo"][1]
+            reference_tables = sorted(
+                info["path"]
+                for info in file_infos
+                if info.get("path", "").startswith(("db/", "ceo_db/"))
+            )
+            _merge_dependency_tables_from_pack(session, reference_key, reference_tables, aliases, tables, source_dbs)
+            for alias, table_path in _optional_table_names_from_list(reference_tables, aliases).items():
+                table_names.setdefault(alias, table_path)
+        except Exception:
+            continue
+
+
+def _merge_vanilla_dependency_tables(
+    session: RpfmPackSession,
+    aliases: dict[str, list[str]],
+    table_names: dict[str, str],
+    tables: dict[str, list[dict[str, Any]]],
+    source_dbs: dict[str, dict[str, Any]],
+) -> None:
+    try:
+        vanilla_tables = session.list_tables("vanilla")
+        vanilla_key = session._pack_key_for_source("vanilla")
+    except Exception:
+        return
+    _merge_dependency_tables_from_pack(session, vanilla_key, vanilla_tables, aliases, tables, source_dbs)
+    for alias, table_path in _optional_table_names_from_list(vanilla_tables, aliases).items():
+        table_names.setdefault(alias, table_path)
+
+
+def _merge_dependency_tables_from_pack(
+    session: RpfmPackSession,
+    pack_key: str,
+    table_list: list[str],
+    aliases: dict[str, list[str]],
+    tables: dict[str, list[dict[str, Any]]],
+    source_dbs: dict[str, dict[str, Any]],
+) -> None:
+    for alias in aliases:
+        for table_path in _matching_table_paths(table_list, alias, aliases[alias]):
+            try:
+                rows = _read_rows_from_pack_key(session, pack_key, table_path, source_dbs)
+            except Exception:
+                continue
+            _append_dependency_rows(tables.setdefault(alias, []), rows, _dependency_key_for_alias(alias))
+
+
+def _matching_table_paths(table_list: list[str], alias: str, candidates: list[str]) -> list[str]:
+    matches = []
+    tables = set(table_list)
+    for candidate in candidates:
+        if candidate in tables:
+            matches.append(candidate)
+    folder = f"/{alias}_tables/"
+    matches.extend(path for path in table_list if folder in path and path not in matches)
+    return sorted(matches)
+
+
+def _open_pack_reusing_existing(
+    session: RpfmPackSession,
+    path: Path,
+    opened_pack_keys: dict[str, str],
+) -> str:
+    resolved = path.resolve()
+    for key in (str(path), str(resolved)):
+        if key in opened_pack_keys:
+            return opened_pack_keys[key]
+
+    existing_key = _open_pack_key_for_path(session, resolved)
+    if existing_key:
+        opened_pack_keys[str(path)] = existing_key
+        opened_pack_keys[str(resolved)] = existing_key
+        return existing_key
+
+    opened = session.client.send({"OpenPackFiles": [str(resolved)]})
+    try:
+        _raise_rpfm_error(opened)
+    except ValueError:
+        existing_key = _open_pack_key_for_path(session, resolved)
+        if existing_key:
+            opened_pack_keys[str(path)] = existing_key
+            opened_pack_keys[str(resolved)] = existing_key
+            return existing_key
+        raise
+    pack_key = opened["data"]["StringContainerInfo"][0]
+    opened_pack_keys[str(path)] = pack_key
+    opened_pack_keys[str(resolved)] = pack_key
+    return pack_key
+
+
+def _open_pack_key_for_path(session: RpfmPackSession, path: Path) -> str | None:
+    response = session.client.send("ListOpenPacks")
+    _raise_rpfm_error(response)
+    for item in response.get("data", {}).get("VecStringContainerInfo", []):
+        if not isinstance(item, list) or len(item) < 2:
+            continue
+        pack_key, info = item[0], item[1]
+        file_path = str((info or {}).get("file_path") or "")
+        if not file_path:
+            continue
+        try:
+            if Path(file_path).resolve() == path.resolve():
+                return str(pack_key)
+        except OSError:
+            if file_path.replace("\\", "/").lower() == str(path).replace("\\", "/").lower():
+                return str(pack_key)
+    return None
+
+
+def _optional_table_names_from_list(table_list: list[str], aliases: dict[str, list[str]]) -> dict[str, str]:
+    tables = set(table_list)
+    resolved: dict[str, str] = {}
+    for alias, candidates in aliases.items():
+        for candidate in candidates:
+            if candidate in tables:
+                resolved[alias] = candidate
+                break
+        if alias in resolved:
+            continue
+        folder = f"{alias}_tables"
+        matches = [path for path in table_list if f"/{folder}/" in path]
+        if len(matches) == 1:
+            resolved[alias] = matches[0]
+    return resolved
+
+
+def _read_rows_from_pack_key(
+    session: RpfmPackSession,
+    pack_key: str,
+    table_name: str,
+    source_dbs: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    response = session.client.send({"DecodePackedFile": [pack_key, table_name, "PackFile"]})
+    _raise_rpfm_error(response)
+    data = response.get("data", {})
+    if "DBRFileInfo" not in data:
+        return []
+    source_dbs.setdefault(table_name, copy.deepcopy(data["DBRFileInfo"][0]))
+    table = data["DBRFileInfo"][0]["table"]
+    fields = [field["name"] for field in table["definition"]["fields"]]
+    rows = [
+        {
+            field_name: _decode_rpfm_cell(value)
+            for field_name, value in zip(fields, row, strict=False)
+        }
+        for row in table["table_data"]
+    ]
+    for row in rows:
+        row["_sourceTablePath"] = table_name
+    return rows
+
+
+def _append_dependency_rows(
+    target: list[dict[str, Any]],
+    source: list[dict[str, Any]],
+    key_field: str | Any,
+) -> None:
+    existing = {
+        key_field(row) if callable(key_field) else row.get(key_field)
+        for row in target
+    }
+    for row in source:
+        key = key_field(row) if callable(key_field) else row.get(key_field)
+        if key in existing:
+            continue
+        target.append(row)
+        existing.add(key)
+
+
+def _dependency_key_for_alias(alias: str) -> str | Any:
+    if alias == "campaign_character_art_sets":
+        return "art_set_id"
+    if alias == "campaign_character_arts":
+        return _art_key
+    if alias == "character_attributes":
+        return _attribute_key
+    if alias == "character_attribute_sets":
+        return "set_name"
+    if alias == "character_skill_node_links":
+        return _skill_link_key
+    if alias == "retinue_slot_initial_units":
+        return _retinue_slot_key
+    if alias == "cai_retinues_to_aspects":
+        return _retinue_aspect_key
+    if alias == "land_units_to_unit_abilites_junctions":
+        return _land_unit_ability_key
+    return "key"
+
+
 def _read_rows(
     session: RpfmPackSession,
     table_name: str,
@@ -317,6 +865,8 @@ def _read_rows(
     rows = session.read_table(table_name)
     path = session._resolve_table_path(table_name)
     source_dbs[path] = copy.deepcopy(session.decoded_db_by_path[path])
+    for row in rows:
+        row["_sourceTablePath"] = path
     return rows
 
 
@@ -343,6 +893,373 @@ def _new_delta_pack(session: RpfmPackSession) -> str:
     return target_key
 
 
+def _write_lua_text_file(session: RpfmPackSession, target_key: str, path: str, contents: str) -> None:
+    file_name = path.rsplit("/", 1)[-1]
+    _raise_rpfm_error(session.client.send({
+        "NewPackedFile": [target_key, path, {"Text": [file_name, "Lua"]}]
+    }))
+    _raise_rpfm_error(session.client.send({
+        "SavePackedFileFromView": [
+            target_key,
+            path,
+            {
+                "Text": {
+                    "encoding": "Utf8",
+                    "format": "Lua",
+                    "contents": contents,
+                }
+            },
+        ]
+    }))
+
+
+def _write_loc_file(session: RpfmPackSession, target_key: str, path: str, rows: dict[str, str]) -> None:
+    file_name = path.rsplit("/", 1)[-1].removesuffix(".loc")
+    loc_db = _loc_db_with_rows(session, rows)
+    _raise_rpfm_error(session.client.send({
+        "NewPackedFile": [target_key, path, {"Loc": file_name}]
+    }))
+    _raise_rpfm_error(session.client.send({
+        "SavePackedFileFromView": [target_key, path, {"Loc": loc_db}]
+    }))
+
+
+def _write_spawn_incident_tables(
+    session: RpfmPackSession,
+    target_key: str,
+    clones: list[CharacterClone],
+) -> int:
+    spawn_clones = [
+        clone
+        for clone in clones
+        if clone.spawn_event == "campaign_start" and clone.template_overrides.get("subtype")
+    ]
+    if not spawn_clones:
+        return 0
+
+    template_path = (Path.cwd() / LEGACY_TEMPLATE_PACK).resolve()
+    if not template_path.exists():
+        return 0
+
+    template_key = _open_pack_reusing_existing(session, template_path, {})
+
+    incident_key = _incident_key_for_clones(spawn_clones)
+    title = "신규 장수 합류"
+    description = "신규 장수가 플레이어 세력에 합류했습니다."
+
+    source_paths = {
+        "incidents": "db/incidents_tables/event",
+        "payloads": "db/cdir_events_incident_payloads_tables/event",
+        "options": "db/cdir_events_incident_option_junctions_tables/event",
+    }
+    source_dbs = {
+        name: _decode_db_from_pack(session, template_key, path)
+        for name, path in source_paths.items()
+    }
+
+    incidents_source = _rows_from_db(source_dbs["incidents"])
+    payloads_source = _rows_from_db(source_dbs["payloads"])
+    options_source = _rows_from_db(source_dbs["options"])
+
+    incident_row = {
+        **incidents_source[0],
+        "key": incident_key,
+        "generate": True,
+        "prioritised": True,
+    }
+
+    base_id = 1_820_000_000 + (zlib.crc32(incident_key.encode("utf-8")) % 100_000)
+    options = []
+    for index, source_row in enumerate(options_source):
+        options.append({
+            **source_row,
+            "id": base_id + index,
+            "incident_key": incident_key,
+        })
+
+    payloads = []
+    payload_id = base_id + 100
+    located_source = _find_row(payloads_source, "payload_key", "LOCATED") or payloads_source[0]
+    spawn_source = _find_row(payloads_source, "payload_key", "SPAWN_AGENT_OFF_MAP") or payloads_source[0]
+    for clone in spawn_clones:
+        subtype = str(clone.template_overrides["subtype"])
+        payloads.append({
+            **spawn_source,
+            "id": payload_id,
+            "incident_key": incident_key,
+            "payload_key": "SPAWN_AGENT_OFF_MAP",
+            "value": (
+                f"AGENT[general];AGENT_SUBTYPE[{subtype}];"
+                f"CHARACTER_TEMPLATE[{clone.new_template_key}]"
+            ),
+            "target_key": "default",
+        })
+        payload_id += 1
+    payloads.append({
+        **located_source,
+        "id": payload_id,
+        "incident_key": incident_key,
+        "payload_key": "LOCATED",
+        "value": "FACTION",
+        "target_key": "default",
+    })
+
+    _write_db_file(session, target_key, source_paths["incidents"], source_dbs["incidents"], [incident_row])
+    _write_db_file(session, target_key, source_paths["options"], source_dbs["options"], options)
+    _write_db_file(session, target_key, source_paths["payloads"], source_dbs["payloads"], payloads)
+    _write_loc_file(
+        session,
+        target_key,
+        "text/db/hby_mtu_pack_editor_event.loc",
+        {
+            f"incidents_localised_title_{incident_key}": title,
+            f"incidents_localised_description_{incident_key}": description,
+        },
+    )
+    return 3
+
+
+def _decode_db_from_pack(session: RpfmPackSession, pack_key: str, path: str) -> dict[str, Any]:
+    response = session.client.send({"DecodePackedFile": [pack_key, path, "PackFile"]})
+    _raise_rpfm_error(response)
+    data = response.get("data", {})
+    if "DBRFileInfo" not in data:
+        raise ValueError(f"RPFM did not decode '{path}' as a DB table.")
+    return copy.deepcopy(data["DBRFileInfo"][0])
+
+
+def _rows_from_db(db: dict[str, Any]) -> list[dict[str, Any]]:
+    table = db["table"]
+    fields = [field["name"] for field in table["definition"]["fields"]]
+    return [
+        {
+            field_name: _decode_rpfm_cell(value)
+            for field_name, value in zip(fields, row, strict=False)
+        }
+        for row in table["table_data"]
+    ]
+
+
+def _write_db_file(
+    session: RpfmPackSession,
+    target_key: str,
+    path: str,
+    source_db: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> None:
+    output_path = _delta_table_path(path)
+    delta_db = _db_with_rows(source_db, rows)
+    table = delta_db["table"]
+    _raise_rpfm_error(session.client.send({
+        "NewPackedFile": [
+            target_key,
+            output_path,
+            {"DB": [output_path, table["table_name"], table["definition"]["version"]]},
+        ]
+    }))
+    _raise_rpfm_error(session.client.send({
+        "SavePackedFileFromView": [target_key, output_path, {"DB": delta_db}]
+    }))
+
+
+def _delta_table_path(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    if "/" not in normalized:
+        return f"hby_mtu_pack_editor_{_safe_table_leaf(normalized)}"
+    folder, leaf = normalized.rsplit("/", 1)
+    if leaf.startswith("hby_mtu_pack_editor"):
+        return normalized
+    return f"{folder}/hby_mtu_pack_editor_{_safe_table_leaf(leaf)}"
+
+
+def _safe_table_leaf(value: str) -> str:
+    safe = []
+    for char in value:
+        if char.isalnum() or char in {"_", "-"}:
+            safe.append(char)
+        else:
+            safe.append("_")
+    return "".join(safe).strip("_") or "data"
+
+
+def _incident_key_for_clones(clones: list[CharacterClone]) -> str:
+    seed = "|".join(clone.new_template_key for clone in clones)
+    return f"hby_mtu_pack_editor_spawn_{zlib.crc32(seed.encode('utf-8')):08x}"
+
+
+def _loc_db_with_rows(session: RpfmPackSession, rows: dict[str, str]) -> dict[str, Any]:
+    loc_files = session.list_loc_files()
+    if not loc_files:
+        raise ValueError("Source pack has no loc file to use as a loc table template.")
+    response = session.client.send({"DecodePackedFile": [session.pack_key, loc_files[0], "PackFile"]})
+    _raise_rpfm_error(response)
+    source = copy.deepcopy(response["data"]["LocRFileInfo"][0])
+    table = source["table"]
+    template_row = table["table_data"][0]
+    fields = [field["name"] for field in table["definition"]["fields"]]
+    table["table_data"] = [
+        [
+            _encode_rpfm_cell(template_cell, {"key": key, "text": text, "tooltip": True}.get(field_name))
+            for field_name, template_cell in zip(fields, template_row, strict=True)
+        ]
+        for key, text in sorted(rows.items())
+    ]
+    return source
+
+
+def _copy_image_assets(
+    session: RpfmPackSession,
+    target_key: str,
+    clones: list[CharacterClone],
+    opened_sources: dict[str, str] | None = None,
+) -> int:
+    assets_by_source: dict[str, set[str]] = {}
+    for clone in clones:
+        for asset in clone.image_assets or []:
+            packed_path = _normalize_pack_path(asset.get("path", ""))
+            if not packed_path:
+                continue
+            source_path = str(asset.get("sourcePath") or session.pack_path)
+            assets_by_source.setdefault(source_path, set()).add(packed_path)
+
+    copied = 0
+    opened_sources = dict(opened_sources or {})
+    opened_sources.setdefault(str(session.pack_path), session.pack_key)
+    opened_sources.setdefault(str(session.pack_path.resolve()), session.pack_key)
+    for source_path, packed_paths in assets_by_source.items():
+        source_key = opened_sources.get(source_path)
+        if source_key is None:
+            resolved = str(Path(source_path).resolve())
+            source_key = opened_sources.get(resolved)
+        if source_key is None:
+            resolved_path = Path(source_path).resolve()
+            source_key = _open_pack_reusing_existing(session, resolved_path, opened_sources)
+            opened_sources[source_path] = source_key
+            opened_sources[str(resolved_path)] = source_key
+
+        paths = [{"File": path} for path in sorted(packed_paths)]
+        if not paths:
+            continue
+        response = session.client.send({
+            "AddPackedFilesFromPackFile": [target_key, source_key, paths]
+        })
+        _raise_rpfm_error(response)
+        copied += len(paths)
+    return copied
+
+
+def _normalize_pack_path(path: str) -> str:
+    return path.replace("\\", "/").strip("/")
+
+
+def _campaign_start_spawn_script(clones: list[CharacterClone]) -> str | None:
+    spawn_clones = [
+        clone
+        for clone in clones
+        if clone.spawn_event in {"campaign_start", "delayed_join"}
+    ]
+    if not spawn_clones:
+        return None
+
+    entries = []
+    for clone in spawn_clones:
+        subtype = clone.template_overrides.get("subtype")
+        if not subtype:
+            continue
+        min_turn = 0
+        if clone.spawn_event == "delayed_join":
+            try:
+                min_turn = max(0, int(float(clone.template_overrides.get("min_spawn_round") or 0)))
+            except (TypeError, ValueError):
+                min_turn = 0
+        save_seed = f"{clone.new_template_key}:{clone.spawn_event}".encode("utf-8")
+        save_key = f"hby_mtu_pack_editor_player_spawn_{zlib.crc32(save_seed) & 0xffffffff:08x}"
+        entries.append((clone.new_template_key, str(subtype), min_turn, save_key))
+
+    if not entries:
+        return None
+
+    lines = [
+        "-- Auto-generated by MTU Pack Editor.",
+        "-- Gives selected generated characters to the local player's faction.",
+        "local hby_mtu_player_spawn_characters = {",
+    ]
+    for template_key, subtype, min_turn, save_key in entries:
+        lines.append(
+            f'    {{ template = "{_lua_escape(template_key)}", subtype = "{_lua_escape(subtype)}", turn = {min_turn}, save_key = "{_lua_escape(save_key)}" }},'
+        )
+    lines.extend([
+        "}",
+        "",
+        "local function hby_mtu_all_player_spawns_done()",
+        "    for i = 1, #hby_mtu_player_spawn_characters do",
+        "        local item = hby_mtu_player_spawn_characters[i]",
+        "        if not cm:get_saved_value(item.save_key) then",
+        "            return false",
+        "        end",
+        "    end",
+        "    return true",
+        "end",
+        "",
+        "local function hby_mtu_spawn_for_player(faction_key)",
+        "    if hby_mtu_all_player_spawns_done() then",
+        "        return",
+        "    end",
+        "",
+        "    if not cdir_events_manager or not cdir_events_manager.spawn_character_subtype_template_in_faction then",
+        '        output("MTU Pack Editor: cdir_events_manager spawn API not ready.")',
+        "        return",
+        "    end",
+        "",
+        '    if not faction_key or faction_key == "" then',
+        '        output("MTU Pack Editor: no local player faction found.")',
+        "        return",
+        "    end",
+        "",
+        "    local turn_number = cm:turn_number() or 0",
+        "    for i = 1, #hby_mtu_player_spawn_characters do",
+        "        local item = hby_mtu_player_spawn_characters[i]",
+        "        if not cm:get_saved_value(item.save_key) and turn_number >= item.turn then",
+        "            cdir_events_manager:spawn_character_subtype_template_in_faction(faction_key, item.subtype, item.template)",
+        "            cm:set_saved_value(item.save_key, true)",
+        "        end",
+        "    end",
+        "end",
+        "",
+        "cm:add_first_tick_callback(function()",
+        "    local faction_key = cm:get_local_faction(true) or cm:get_local_faction()",
+        "    hby_mtu_spawn_for_player(faction_key)",
+        "end)",
+        "",
+        "core:add_listener(",
+        '    "hby_mtu_pack_editor_player_spawn_turn_start",',
+        '    "FactionTurnStart",',
+        "    function(context)",
+        "        return context:faction():is_human() and not hby_mtu_all_player_spawns_done()",
+        "    end,",
+        "    function(context)",
+        "        hby_mtu_spawn_for_player(context:faction():name())",
+        "    end,",
+        "    true",
+        ")",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def _lua_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _name_id_for_clone(clone: CharacterClone, names: list[dict[str, Any]]) -> int:
+    used = {str(row.get("id")) for row in names}
+    seed = f"{clone.new_template_key}:{clone.display_name or ''}".encode("utf-8")
+    value = 2_000_000_000 + (zlib.crc32(seed) % 100_000_000)
+    while str(value) in used:
+        value += 1
+    return value
+
+
 def _upsert_delta_row(
     rows_by_table: dict[str, list[dict[str, Any]]],
     table_name: str,
@@ -366,6 +1283,13 @@ def _find_required(rows: list[dict[str, Any]], key_field: str, key: str) -> dict
     raise ValueError(f"Row not found: {key_field}={key}")
 
 
+def _find_row(rows: list[dict[str, Any]], key_field: str, key: str) -> dict[str, Any] | None:
+    for row in rows:
+        if str(row.get(key_field)) == str(key):
+            return row
+    return None
+
+
 def _detail_key(row: dict[str, Any]) -> tuple[Any, Any]:
     return row.get("character_generation_template"), row.get("game_mode")
 
@@ -377,6 +1301,26 @@ def _art_key(row: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
         row.get("is_female"),
         row.get("has_come_of_age"),
     )
+
+
+def _attribute_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return row.get("set_name"), row.get("attribute_type")
+
+
+def _skill_link_key(row: dict[str, Any]) -> tuple[Any, Any, Any]:
+    return row.get("parent_key"), row.get("child_key"), row.get("link_type")
+
+
+def _retinue_aspect_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return row.get("retinue"), row.get("aspect")
+
+
+def _retinue_slot_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return row.get("retinue"), row.get("slot_index")
+
+
+def _land_unit_ability_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return row.get("land_unit"), row.get("ability")
 
 
 def _raise_rpfm_error(response: dict[str, Any]) -> None:

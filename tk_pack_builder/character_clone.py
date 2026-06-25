@@ -60,21 +60,18 @@ def validate_character_clone(session: PackSession, clone: CharacterClone) -> Non
             "key",
             clone.source_template_key,
         )["art_set_override"]
-        _require_missing(
-            _find_row(tables["campaign_character_art_sets"], "art_set_id", source_art_set),
-            f"Source art set not found: {source_art_set}",
-        )
-        _require_absent(
-            tables["campaign_character_art_sets"],
-            "art_set_id",
-            clone.new_art_set_id,
-            f"New art set already exists: {clone.new_art_set_id}",
-        )
-        if not [
-            row for row in tables["campaign_character_arts"]
-            if row.get("art_set_id") == source_art_set
-        ]:
-            raise ValueError(f"Source character art rows not found: {source_art_set}")
+        if _find_row(tables["campaign_character_art_sets"], "art_set_id", source_art_set):
+            _require_absent(
+                tables["campaign_character_art_sets"],
+                "art_set_id",
+                clone.new_art_set_id,
+                f"New art set already exists: {clone.new_art_set_id}",
+            )
+            if not [
+                row for row in tables["campaign_character_arts"]
+                if row.get("art_set_id") == source_art_set
+            ]:
+                raise ValueError(f"Source character art rows not found: {source_art_set}")
 
     if clone.new_age_range_key:
         source_age = clone.age_range_source_key or _find_row(
@@ -190,10 +187,13 @@ def apply_character_clones(session: PackSession, clones: list[CharacterClone]) -
     if not clones:
         return 0
 
-    table_names = {
-        alias: resolve_character_table_name(session, alias)
-        for alias in CHARACTER_TABLE_ALIASES
-    }
+    table_names = {}
+    for alias in CHARACTER_TABLE_ALIASES:
+        try:
+            table_names[alias] = resolve_character_table_name(session, alias)
+        except ValueError:
+            if alias != "ceo_initial_datas":
+                raise
     tables = {
         alias: session.read_table(table_name)
         for alias, table_name in table_names.items()
@@ -215,9 +215,12 @@ def apply_character_clones(session: PackSession, clones: list[CharacterClone]) -
         }
 
         if clone.new_art_set_id:
-            new_template["art_set_override"] = clone.new_art_set_id
             source_art_set = clone.art_set_source_id or source_template["art_set_override"]
-            _clone_art_set_rows(tables, source_art_set, clone)
+            if _find_row(tables["campaign_character_art_sets"], "art_set_id", source_art_set):
+                new_template["art_set_override"] = clone.new_art_set_id
+                _clone_art_set_rows(tables, source_art_set, clone)
+            else:
+                new_template["art_set_override"] = source_art_set
 
         if clone.new_age_range_key:
             new_template["spawn_age_range"] = clone.new_age_range_key
@@ -234,6 +237,8 @@ def apply_character_clones(session: PackSession, clones: list[CharacterClone]) -
         created += 1
 
         if clone.new_initial_ceo_key:
+            if "ceo_initial_datas" not in tables:
+                raise ValueError("Source initial CEO table not found.")
             source_details = [
                 row for row in tables["character_generation_template_game_mode_details"]
                 if row.get("character_generation_template") == clone.detail_source_template_key
@@ -268,18 +273,28 @@ def apply_character_clones(session: PackSession, clones: list[CharacterClone]) -
 
 
 def resolve_character_table_name(session: PackSession, alias: str) -> str:
-    tables = set(session.list_tables())
+    table_list = session.list_tables()
+    tables = set(table_list)
     for candidate in CHARACTER_TABLE_ALIASES[alias]:
         if candidate in tables:
             return candidate
+    table_folder = f"{alias}_tables"
+    matches = [path for path in table_list if f"/{table_folder}/" in path]
+    if len(matches) == 1:
+        return matches[0]
     raise ValueError(f"Required character table is missing: {alias}")
 
 
 def _load_tables(session: PackSession) -> dict[str, list[dict[str, Any]]]:
-    return {
-        alias: session.read_table(resolve_character_table_name(session, alias))
-        for alias in CHARACTER_TABLE_ALIASES
-    }
+    tables: dict[str, list[dict[str, Any]]] = {}
+    for alias in CHARACTER_TABLE_ALIASES:
+        try:
+            tables[alias] = session.read_table(resolve_character_table_name(session, alias))
+        except ValueError:
+            if alias != "ceo_initial_datas":
+                raise
+            tables[alias] = []
+    return tables
 
 
 def _clone_art_set_rows(
