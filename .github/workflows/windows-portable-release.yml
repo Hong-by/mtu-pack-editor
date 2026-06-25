@@ -1,0 +1,78 @@
+name: Build Windows portable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to package"
+        required: true
+        default: "v0.1.1"
+      upload_to_release:
+        description: "Upload zip to the GitHub Release"
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up Python runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download RPFM source
+        shell: pwsh
+        run: |
+          $url = "https://github.com/Frodo45127/rpfm/archive/f59641d3a59c81f197794f4c7ded8882d24c8065.zip"
+          New-Item -ItemType Directory -Force -Path work | Out-Null
+          Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile work\rpfm-source.zip
+          Expand-Archive -LiteralPath work\rpfm-source.zip -DestinationPath work -Force
+          $dir = Get-ChildItem work -Directory | Where-Object { $_.Name -like "rpfm-*" } | Select-Object -First 1
+          if (!$dir) { throw "RPFM source directory was not extracted." }
+          Move-Item -LiteralPath $dir.FullName -Destination work\rpfm-master -Force
+
+      - name: Build RPFM server
+        shell: pwsh
+        run: |
+          Push-Location work\rpfm-master
+          cargo build -p rpfm_server --release
+          Pop-Location
+          New-Item -ItemType Directory -Force -Path work\rpfm-dist | Out-Null
+          Copy-Item work\rpfm-master\target\release\rpfm_server.exe work\rpfm-dist\rpfm_server.exe -Force
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $package = "MTU-Pack-Editor-${{ inputs.tag }}-windows-portable"
+          powershell -ExecutionPolicy Bypass -File scripts\package_windows_release.ps1 `
+            -PackageName $package `
+            -PythonRoot "$env:pythonLocation" `
+            -RpfmServer "work\rpfm-dist\rpfm_server.exe"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MTU-Pack-Editor-${{ inputs.tag }}-windows-portable
+          path: dist/MTU-Pack-Editor-${{ inputs.tag }}-windows-portable.zip
+
+      - name: Upload to GitHub Release
+        if: ${{ inputs.upload_to_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.tag }}" "dist/MTU-Pack-Editor-${{ inputs.tag }}-windows-portable.zip" --clobber

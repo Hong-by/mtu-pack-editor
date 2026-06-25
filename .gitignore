@@ -1,4 +1,12 @@
 work/
+!work/
+work/*
+!work/packs/
+work/packs/*
+!work/packs/README.txt
+!work/packs/refs/
+work/packs/refs/*
+!work/packs/refs/README.txt
 __pycache__/
 *.pyc
 server.*.log

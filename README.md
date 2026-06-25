@@ -8,6 +8,41 @@ UI 없이 `recipe.json + starter.pack -> output.pack` 흐름을 검증하는 CLI
 
 ## 사용법
 
+## Windows portable release
+
+GitHub Releases에서 `MTU-Pack-Editor-...-windows-portable.zip`을 받았다면 Python이나 RPFM을 따로 설치하지 않고 실행할 수 있습니다.
+
+1. zip을 원하는 폴더에 풉니다.
+2. 보유 중인 pack 파일을 아래 위치에 넣습니다.
+3. `MTU Pack Editor.bat`을 실행합니다.
+4. 웹 UI에서 `팩 읽기`를 누릅니다.
+5. 작업을 추가하고 `저장`을 누르면 기본값 기준 `work\packs\my_hero_patch.pack`이 생성됩니다.
+6. 생성된 `.pack` 파일을 Total War: THREE KINGDOMS 설치 폴더의 `data` 폴더에 넣고, 런처/모드 매니저에서 원본 MTU 모드와 함께 활성화합니다.
+
+필수 기본 입력 pack:
+
+```text
+work\packs\my_hero.pack
+```
+
+참조 pack 기본 위치:
+
+```text
+work\packs\refs\BFG_Originals.pack
+work\packs\refs\database.pack
+work\packs\refs\data_mh.pack
+work\packs\refs\data_ep.pack
+work\packs\refs\data_dlc07.pack
+work\packs\refs\data_dlc06.pack
+work\packs\refs\data_bl.pack
+work\packs\refs\data_yt_bl.pack
+work\packs\refs\data.pack
+```
+
+공개 릴리즈에는 Total War: THREE KINGDOMS 원본 데이터나 타 모드 원본 `.pack` 파일이 포함되지 않습니다. 본인이 보유하거나 사용 권한이 있는 pack 파일을 직접 배치해야 합니다.
+
+## 개발 실행
+
 웹 UI 실행:
 
 ```bash
