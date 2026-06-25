@@ -40,7 +40,6 @@ OFFICIAL_GAME_PACKS = [
     "data_dlc07.pack",
     "data_dlc06.pack",
     "data_bl.pack",
-    "data_yt_bl.pack",
     "data.pack",
 ]
 DEFAULT_GAME_DATA_PATHS = [
@@ -1525,7 +1524,7 @@ def _is_data_pack(path: Path) -> bool:
 
 def _skip_bfg_resource_pack_for_fast_open(path: Path) -> bool:
     name = path.name.lower()
-    return name.startswith("bfg_") and name not in {"bfg_astral.pack", "bfg_originals.pack"}
+    return name == "bfg_astral.pack"
 
 
 def _is_bfg_pack(path: Path) -> bool:
@@ -1936,7 +1935,10 @@ def _find_character_image(asset_index: dict[str, Any], image_key: str, image_kin
         f"ui/characters/{normalized}/composites/large_panel/norm/norm.png",
         f"ui/characters/{normalized}/composites/large_panel/happy/noanim.png",
         f"ui/characters/{normalized}/composites/large_panel/happy/happy.png",
+        f"ui/eventpics/{image_name}.png",
     ]
+    if image_name.startswith("ep_"):
+        preferred.append(f"ui/eventpics/ep_event_{image_name.removeprefix('ep_')}.png")
     assets_by_lower = asset_index["lower_to_path"]
     for path in preferred:
         found = assets_by_lower.get(path.lower())

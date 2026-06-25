@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 
 
 class PackCache:

@@ -2030,7 +2030,6 @@ const OFFICIAL_GAME_PACK_NAMES = new Set([
   'data_dlc07.pack',
   'data_dlc06.pack',
   'data_bl.pack',
-  'data_yt_bl.pack',
   'data.pack',
 ]);
 
@@ -2343,6 +2342,3 @@ $('referencePackPaths').addEventListener('change', renderValidation);
 
 suggestGamePath();
 renderAll();
-if (location.protocol !== 'file:' && $('inputPackPath').value.trim()) {
-  queueMicrotask(loadPack);
-}
