@@ -37,13 +37,10 @@ jobs:
       - name: Download RPFM source
         shell: pwsh
         run: |
-          $url = "https://github.com/Frodo45127/rpfm/archive/f59641d3a59c81f197794f4c7ded8882d24c8065.zip"
           New-Item -ItemType Directory -Force -Path work | Out-Null
-          Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile work\rpfm-source.zip
-          Expand-Archive -LiteralPath work\rpfm-source.zip -DestinationPath work -Force
-          $dir = Get-ChildItem work -Directory | Where-Object { $_.Name -like "rpfm-*" } | Select-Object -First 1
-          if (!$dir) { throw "RPFM source directory was not extracted." }
-          Move-Item -LiteralPath $dir.FullName -Destination work\rpfm-master -Force
+          git clone --recurse-submodules https://github.com/Frodo45127/rpfm.git work\rpfm-master
+          git -C work\rpfm-master checkout f59641d3a59c81f197794f4c7ded8882d24c8065
+          git -C work\rpfm-master submodule update --init --recursive
 
       - name: Build RPFM server
         shell: pwsh
