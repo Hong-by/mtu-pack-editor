@@ -33,6 +33,29 @@ DEFAULT_RPFM_SERVER = (
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
 RPFM_PROCESS: subprocess.Popen[bytes] | None = None
 
+SKILL_TABLE_ALIASES = {
+    "character_skill_node_sets": [
+        "character_skill_node_sets",
+        "db/character_skill_node_sets_tables/_mtu_characters",
+    ],
+    "character_skill_nodes": [
+        "character_skill_nodes",
+        "db/character_skill_nodes_tables/_mtu_characters",
+    ],
+    "character_skill_node_links": [
+        "character_skill_node_links",
+        "db/character_skill_node_links_tables/_mtu_characters",
+    ],
+    "character_skill_level_to_effects_junctions": [
+        "character_skill_level_to_effects_junctions",
+        "db/character_skill_level_to_effects_junctions_tables/_mtu_characters_skills",
+    ],
+    "effects": [
+        "effects",
+        "db/effects_tables/_mtu_characters_skills_effects",
+    ],
+}
+
 
 def _elapsed(started_at: float) -> float:
     return round(time.perf_counter() - started_at, 4)
@@ -480,6 +503,7 @@ def summarize_character_tables(
         )
 
     detail_rows = tables["character_generation_template_game_mode_details"]
+    skill_trees = _summarize_skill_trees(tables, loc_text, characters)
     return {
         "characters": sorted(characters, key=lambda item: (item["displayName"] or item["key"], item["key"])),
         "artSets": sorted(art_sets, key=lambda item: str(item["key"])),
@@ -492,9 +516,198 @@ def summarize_character_tables(
         "retinues": _unique_options(row.get("retinue") for row in detail_rows),
         "attributeSets": _unique_options(row.get("attribute_set") for row in detail_rows),
         "skillSets": _unique_options(row.get("skill_set_override") for row in detail_rows),
+        "skillTrees": skill_trees,
         "subtypes": _unique_options(row.get("subtype") for row in tables["character_generation_templates"]),
         "locKeys": sorted(loc_text.keys()),
     }
+
+
+def _summarize_skill_trees(
+    tables: dict[str, list[dict[str, Any]]],
+    loc_text: dict[str, str],
+    characters: list[dict[str, Any]],
+) -> dict[str, Any]:
+    node_sets = {str(row.get("key")): row for row in tables.get("character_skill_node_sets", []) if row.get("key")}
+    nodes_by_set: dict[str, list[dict[str, Any]]] = {}
+    node_by_key: dict[str, dict[str, Any]] = {}
+    for row in tables.get("character_skill_nodes", []):
+        set_key = str(row.get("character_skill_node_set_key") or "")
+        key = str(row.get("key") or "")
+        if not set_key or not key:
+            continue
+        nodes_by_set.setdefault(set_key, []).append(row)
+        node_by_key[key] = row
+
+    links_by_set: dict[str, list[dict[str, Any]]] = {}
+    for row in tables.get("character_skill_node_links", []):
+        parent = str(row.get("parent_key") or "")
+        child = str(row.get("child_key") or "")
+        node = node_by_key.get(parent) or node_by_key.get(child)
+        set_key = str(node.get("character_skill_node_set_key") or "") if node else ""
+        if set_key:
+            links_by_set.setdefault(set_key, []).append(row)
+
+    effects_by_skill: dict[str, list[dict[str, Any]]] = {}
+    effects = {str(row.get("key")): row for row in tables.get("effects", []) if row.get("key")}
+    for row in tables.get("character_skill_level_to_effects_junctions", []):
+        skill_key = str(row.get("character_skill_key") or "")
+        if not skill_key:
+            continue
+        effect_key = str(row.get("effect_key") or "")
+        effect_row = effects.get(effect_key, {})
+        effects_by_skill.setdefault(skill_key, []).append({
+            "effectKey": effect_key,
+            "name": _effect_label(effect_key, effect_row, loc_text),
+            "scope": row.get("effect_scope"),
+            "level": row.get("level"),
+            "value": row.get("value"),
+        })
+
+    owners_by_skill: dict[str, list[dict[str, str]]] = {}
+    for character in characters:
+        for detail in character.get("details", []):
+            if detail.get("gameMode") != "romance":
+                continue
+            skill_set = str(detail.get("skillSet") or "")
+            if not skill_set:
+                continue
+            owners_by_skill.setdefault(skill_set, []).append({
+                "key": str(character.get("key") or ""),
+                "name": str(character.get("label") or character.get("displayName") or character.get("key") or ""),
+            })
+
+    trees = []
+    for set_key, rows in sorted(nodes_by_set.items()):
+        owners = owners_by_skill.get(set_key, [])
+        if not owners:
+            continue
+        nodes = [
+            _skill_node_summary(row, loc_text, effects_by_skill.get(str(row.get("character_skill_key") or ""), []))
+            for row in rows
+        ]
+        trees.append({
+            "key": set_key,
+            "name": _skill_set_label(set_key, node_sets.get(set_key), loc_text),
+            "owners": owners,
+            "nodes": sorted(nodes, key=lambda item: (item["position"]["x"], item["position"]["y"], item["key"])),
+            "links": [
+                {
+                    "parent": row.get("parent_key"),
+                    "child": row.get("child_key"),
+                    "type": row.get("link_type"),
+                }
+                for row in links_by_set.get(set_key, [])
+            ],
+        })
+    return {
+        "romance": trees,
+        "nodeCount": sum(len(tree["nodes"]) for tree in trees),
+    }
+
+
+def _skill_node_summary(
+    row: dict[str, Any],
+    loc_text: dict[str, str],
+    effects: list[dict[str, Any]],
+) -> dict[str, Any]:
+    key = str(row.get("key") or "")
+    return {
+        "key": key,
+        "skillKey": row.get("character_skill_key"),
+        "setKey": row.get("character_skill_node_set_key"),
+        "name": _skill_node_label(key, row, loc_text),
+        "icon": row.get("icon") or row.get("icon_path") or row.get("onscreen_name"),
+        "position": _skill_node_position(row),
+        "tier": _first_present(row, ("tier", "required_level", "level", "min_level")),
+        "row": row,
+        "effects": effects,
+        "effectSummary": _effect_summary(effects),
+    }
+
+
+def _skill_node_position(row: dict[str, Any]) -> dict[str, int | float]:
+    x = _number_or_none(_first_present(row, ("x", "ui_x", "column", "indent", "position_x", "tree_position_x")))
+    y = _number_or_none(_first_present(row, ("y", "ui_y", "row", "tier", "position_y", "tree_position_y")))
+    return {"x": x if x is not None else 0, "y": y if y is not None else 0}
+
+
+def _first_present(row: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        if key in row and row.get(key) not in {None, ""}:
+            return row.get(key)
+    return None
+
+
+def _skill_set_label(key: str, row: dict[str, Any] | None, loc_text: dict[str, str]) -> str:
+    for loc_key in (
+        f"character_skill_node_sets_name_{key}",
+        f"character_skill_node_set_name_{key}",
+        f"character_skillsets_name_{key}",
+    ):
+        if loc_text.get(loc_key):
+            return loc_text[loc_key]
+    if row:
+        for field in ("onscreen_name", "name", "loc_key"):
+            value = row.get(field)
+            if value and loc_text.get(str(value)):
+                return loc_text[str(value)]
+            if value:
+                return _friendly_key(str(value))
+    return _friendly_key(key)
+
+
+def _skill_node_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> str:
+    skill_key = str(row.get("character_skill_key") or "")
+    for loc_key in (
+        f"character_skills_localised_name_{skill_key}",
+        f"character_skills_name_{skill_key}",
+        f"character_skill_names_{skill_key}",
+        f"character_skills_localised_name_{key}",
+        f"character_skill_nodes_name_{key}",
+        f"character_skill_node_name_{key}",
+        f"character_skills_name_{key}",
+    ):
+        if loc_text.get(loc_key):
+            return loc_text[loc_key]
+    for field in ("onscreen_name", "name", "loc_key"):
+        value = row.get(field)
+        if value and loc_text.get(str(value)):
+            return loc_text[str(value)]
+        if value:
+            return _friendly_key(str(value))
+    return _friendly_key(key)
+
+
+def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> str:
+    for loc_key in (
+        f"effects_description_{key}",
+        f"effects_localised_description_{key}",
+        f"effects_localised_title_{key}",
+        f"effects_name_{key}",
+    ):
+        if loc_text.get(loc_key):
+            return loc_text[loc_key]
+    for field in ("description", "onscreen_name", "name", "icon"):
+        value = row.get(field)
+        if value and loc_text.get(str(value)):
+            return loc_text[str(value)]
+        if value and field != "icon":
+            return _friendly_key(str(value))
+    return _friendly_key(key)
+
+
+def _effect_summary(effects: list[dict[str, Any]]) -> str:
+    if not effects:
+        return "효과 정보 미확인"
+    pieces = []
+    for effect in effects[:4]:
+        value = effect.get("value")
+        suffix = f" {value:+g}" if isinstance(value, (int, float)) else f" {value}" if value not in {None, ""} else ""
+        scope = f" ({effect.get('scope')})" if effect.get("scope") else ""
+        pieces.append(f"{effect.get('name')}{suffix}{scope}")
+    if len(effects) > 4:
+        pieces.append(f"외 {len(effects) - 4}개")
+    return " · ".join(pieces)
 
 
 def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
@@ -720,6 +933,12 @@ def _read_character_tables(session: Any, source: str) -> dict[str, list[dict[str
             tables[alias] = session.read_table(table_name, source)
         except ValueError:
             tables[alias] = []
+    for alias in SKILL_TABLE_ALIASES:
+        try:
+            table_name = _resolve_skill_table(session, alias, source)
+            tables[alias] = session.read_table(table_name, source)
+        except ValueError:
+            tables[alias] = []
     return tables
 
 
@@ -777,6 +996,20 @@ def _merge_reference_packs(
                         tables.setdefault(alias, []),
                         rows,
                         ("character_generation_template", "game_mode"),
+                        str(resolved),
+                    )
+                elif alias == "character_skill_node_links":
+                    _append_missing_rows_by_fields(
+                        tables.setdefault(alias, []),
+                        rows,
+                        ("parent_key", "child_key", "link_type"),
+                        str(resolved),
+                    )
+                elif alias == "character_skill_level_to_effects_junctions":
+                    _append_missing_rows_by_fields(
+                        tables.setdefault(alias, []),
+                        rows,
+                        ("character_skill_key", "effect_key", "effect_scope", "level"),
                         str(resolved),
                     )
                 else:
@@ -870,6 +1103,12 @@ def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
                 table_name = _resolve_reference_character_table(session, alias)
             else:
                 table_name = _resolve_stat_table(session, alias, "pack")
+            tables[alias] = session.read_table(table_name)
+        except ValueError:
+            continue
+    for alias in SKILL_TABLE_ALIASES:
+        try:
+            table_name = _resolve_skill_table(session, alias, "pack")
             tables[alias] = session.read_table(table_name)
         except ValueError:
             continue
@@ -1412,6 +1651,23 @@ def _resolve_stat_table(session: Any, alias: str, source: str) -> str:
             return preferred[0]
         return matches[0]
     raise ValueError(f"Required stat table is missing in {source}: {alias}")
+
+
+def _resolve_skill_table(session: Any, alias: str, source: str) -> str:
+    tables = set(session.list_tables(source))
+    for candidate in SKILL_TABLE_ALIASES[alias]:
+        if candidate in tables:
+            return candidate
+    matches = sorted(table for table in tables if table.startswith(f"db/{alias}_tables/"))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        preferred = [
+            table for table in matches
+            if "/_mtu" in table or "/data__" in table or "/data_" in table
+        ]
+        return preferred[0] if preferred else matches[0]
+    raise ValueError(f"Required skill table is missing in {source}: {alias}")
 
 
 def _resolve_reference_character_table(session: Any, alias: str) -> str:
