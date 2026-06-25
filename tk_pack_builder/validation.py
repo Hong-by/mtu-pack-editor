@@ -77,6 +77,7 @@ def validate(session: PackSession, recipe: Recipe, output_path: str | None = Non
     if (
         not recipe.equipment_stat_patches
         and not recipe.land_unit_clones
+        and not recipe.skill_set_clones
         and not recipe.character_clones
         and not recipe.character_patches
     ):

@@ -240,6 +240,144 @@ textarea:focus {
   color: #8a968e;
 }
 
+.skill-tree-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.skill-tree-head,
+.skill-picker-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.skill-tree-head div,
+.skill-picker-title {
+  display: grid;
+  gap: 2px;
+}
+
+.skill-tree-head span,
+.skill-picker-title span,
+.skill-tree-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mini {
+  min-height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.skill-tree-board {
+  display: grid;
+  grid-template-columns: repeat(var(--skill-cols), minmax(82px, 1fr));
+  grid-auto-rows: 72px;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #1f2622;
+}
+
+.skill-node,
+.skill-candidate {
+  min-height: 0;
+  border: 1px solid #576158;
+  border-radius: 6px;
+  background: #f8f8f3;
+  color: var(--ink);
+  text-align: left;
+}
+
+.skill-node {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  padding: 7px;
+  overflow: hidden;
+}
+
+.skill-node b,
+.skill-candidate b {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.skill-node small,
+.skill-candidate span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.skill-node.active {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(198, 154, 49, 0.35);
+}
+
+.skill-node.changed {
+  border-color: var(--accent);
+}
+
+.skill-node.element-earth,
+.skill-candidate.element-earth {
+  background: var(--earth-bg);
+}
+
+.skill-node.element-fire,
+.skill-candidate.element-fire {
+  background: var(--fire-bg);
+}
+
+.skill-node.element-wood,
+.skill-candidate.element-wood {
+  background: var(--wood-bg);
+}
+
+.skill-node.element-water,
+.skill-candidate.element-water {
+  background: var(--water-bg);
+}
+
+.skill-node.element-metal,
+.skill-candidate.element-metal {
+  background: var(--metal-bg);
+}
+
+.skill-picker {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+
+.skill-search {
+  min-height: 32px;
+}
+
+.skill-candidates {
+  max-height: 260px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.skill-candidate {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+}
+
 .filter-row {
   display: flex;
   gap: 6px;

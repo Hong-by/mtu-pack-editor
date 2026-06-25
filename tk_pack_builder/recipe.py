@@ -23,6 +23,13 @@ class LandUnitClone:
 
 
 @dataclass(frozen=True)
+class SkillSetClone:
+    source_set_key: str
+    new_set_key: str
+    replacements: dict[str, str]
+
+
+@dataclass(frozen=True)
 class CharacterClone:
     new_template_key: str
     source_template_key: str
@@ -55,6 +62,7 @@ class Recipe:
     mod_name: str
     equipment_stat_patches: list[StatPatch]
     land_unit_clones: list[LandUnitClone]
+    skill_set_clones: list[SkillSetClone]
     character_clones: list[CharacterClone]
     character_patches: list[CharacterPatch]
     raw: dict[str, Any]
@@ -83,6 +91,18 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             overrides=item.get("overrides", {}),
         )
         for item in data.get("landUnitClones", [])
+    ]
+    skill_set_clones = [
+        SkillSetClone(
+            source_set_key=item["sourceSetKey"],
+            new_set_key=item["newSetKey"],
+            replacements={
+                str(replacement["nodeKey"]): str(replacement["skillKey"])
+                for replacement in item.get("replacements", [])
+                if replacement.get("nodeKey") and replacement.get("skillKey")
+            },
+        )
+        for item in data.get("skillSetClones", [])
     ]
     character_clones = [
         CharacterClone(
@@ -118,6 +138,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
         mod_name=data.get("modName", "unnamed_mod"),
         equipment_stat_patches=patches,
         land_unit_clones=land_unit_clones,
+        skill_set_clones=skill_set_clones,
         character_clones=character_clones,
         character_patches=character_patches,
         raw=data,

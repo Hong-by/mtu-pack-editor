@@ -180,6 +180,8 @@ const state = {
   lastRecipe: null,
   loadingPack: false,
   editingQueueIndex: null,
+  skillTreeDrafts: {},
+  activeSkillNode: null,
 };
 
 const MANUAL_TITLE_EFFECTS = [
@@ -521,6 +523,8 @@ function hydrateFromPackData(characterData) {
   state.selectedKey = (browsableCharacters()[0] || state.characters[0]).key;
   state.queue = [];
   state.editingQueueIndex = null;
+  state.skillTreeDrafts = {};
+  state.activeSkillNode = null;
 }
 
 function normalizePackCharacter(item, summary) {
@@ -905,6 +909,7 @@ function fillForms(character) {
   syncUnitSummary('source', 'sourceUnitProfile');
   updateImagePreviews();
   updateAllSpawnFieldLabels();
+  renderSkillTreeEditors();
 }
 
 function option(value, label) {
@@ -1280,6 +1285,7 @@ function stageEdit() {
       historical: hist?.key,
       romance: romance?.key,
     },
+    skillTree: skillTreeSnapshot('edit'),
   };
   commitQueueItem({
     kind: 'patch_character',
@@ -1333,6 +1339,7 @@ function stageCreate() {
       maxRound: Number($('createMaxRound').value),
       event: $('sourceSpawnEvent').value,
     },
+    skillTree: skillTreeSnapshot('source'),
   };
   commitQueueItem({
     kind: 'clone_character',
@@ -1411,8 +1418,10 @@ function loadPatchQueueItem(item) {
   setSelectValue('editSpawnEvent', payload.spawn?.event);
   setSelectValue('editHistoricalSkill', payload.skillSources?.historical);
   setSelectValue('editRomanceSkill', payload.skillSources?.romance);
+  restoreSkillTreeDraft('edit', payload.skillTree);
   updateImagePreviews();
   updateAllSpawnFieldLabels();
+  renderSkillTreeEditors();
 }
 
 function loadCloneQueueItem(item) {
@@ -1438,8 +1447,18 @@ function loadCloneQueueItem(item) {
   $('createMinRound').value = payload.spawn?.minRound ?? $('createMinRound').value;
   $('createMaxRound').value = payload.spawn?.maxRound ?? $('createMaxRound').value;
   setSelectValue('sourceSpawnEvent', payload.spawn?.event);
+  restoreSkillTreeDraft('source', payload.skillTree);
   updateImagePreviews();
   updateAllSpawnFieldLabels();
+  renderSkillTreeEditors();
+}
+
+function restoreSkillTreeDraft(prefix, snapshot) {
+  if (!snapshot?.sourceSetKey) return;
+  state.skillTreeDrafts[skillDraftKey(prefix, snapshot.sourceSetKey)] = {
+    sourceSetKey: snapshot.sourceSetKey,
+    replacements: { ...(snapshot.replacements || {}) },
+  };
 }
 
 function applyLandUnitCloneToInputs(prefix, clone) {
@@ -1475,6 +1494,154 @@ function detailsByMode(character) {
   return details;
 }
 
+function skillTreesData() {
+  return state.options?.skillTrees || {};
+}
+
+function skillIndexList() {
+  return Object.values(skillTreesData().skillIndex || {});
+}
+
+function skillTreeBySet(setKey) {
+  return (skillTreesData().romance || []).find((tree) => tree.key === setKey) || null;
+}
+
+function selectedSkillCharacter(prefix) {
+  const selectId = prefix === 'edit' ? 'editRomanceSkill' : 'sourceSkill';
+  return characters().find((item) => item.key === $(selectId)?.value) || selectedCharacter();
+}
+
+function selectedSkillSetKey(prefix) {
+  return selectedSkillCharacter(prefix)?.romanceSkill || '';
+}
+
+function skillDraftKey(prefix, setKey = selectedSkillSetKey(prefix)) {
+  return `${prefix}:${setKey || 'none'}`;
+}
+
+function skillTreeDraft(prefix, setKey = selectedSkillSetKey(prefix)) {
+  const key = skillDraftKey(prefix, setKey);
+  if (!state.skillTreeDrafts[key]) {
+    state.skillTreeDrafts[key] = { sourceSetKey: setKey, replacements: {} };
+  }
+  return state.skillTreeDrafts[key];
+}
+
+function skillTreeSnapshot(prefix) {
+  const setKey = selectedSkillSetKey(prefix);
+  const draft = skillTreeDraft(prefix, setKey);
+  return {
+    sourceSetKey: setKey,
+    replacements: { ...draft.replacements },
+  };
+}
+
+function skillInfo(skillKey) {
+  return skillTreesData().skillIndex?.[skillKey] || {
+    key: skillKey,
+    name: friendlyKey(skillKey),
+    description: '',
+    effectSummary: '',
+    element: '',
+  };
+}
+
+function skillNodeLabel(node, draft) {
+  const replacement = draft?.replacements?.[node.key];
+  const info = skillInfo(replacement || node.skillKey);
+  return replacement ? `${info.name} *` : info.name;
+}
+
+function renderSkillTreeEditors() {
+  renderSkillTreeEditor('edit');
+  renderSkillTreeEditor('source');
+}
+
+function renderSkillTreeEditor(prefix) {
+  const container = $(`${prefix}SkillTreeEditor`);
+  if (!container) return;
+  const setKey = selectedSkillSetKey(prefix);
+  const tree = skillTreeBySet(setKey);
+  if (!tree) {
+    container.innerHTML = '<p class="skill-tree-empty">낭만 스킬트리 데이터를 찾지 못했습니다. 참조 pack을 다시 읽어주세요.</p>';
+    return;
+  }
+  const draft = skillTreeDraft(prefix, setKey);
+  const activeNodeKey = state.activeSkillNode?.prefix === prefix ? state.activeSkillNode.nodeKey : '';
+  const xs = [...new Set(tree.nodes.map((node) => Number(node.position?.x ?? 0)))].sort((a, b) => a - b);
+  const ys = [...new Set(tree.nodes.map((node) => Number(node.position?.y ?? 0)))].sort((a, b) => a - b);
+  const gridStyle = `--skill-cols:${Math.max(xs.length, 1)};--skill-rows:${Math.max(ys.length, 1)}`;
+  const activeNode = tree.nodes.find((node) => node.key === activeNodeKey) || tree.nodes[0];
+  const activeInfo = activeNode ? skillInfo(draft.replacements[activeNode.key] || activeNode.skillKey) : null;
+  container.innerHTML = `
+    <div class="skill-tree-head">
+      <div>
+        <strong>낭만 스킬트리</strong>
+        <span>${escapeHtml(tree.name)} · ${tree.nodes.length}개 노드</span>
+      </div>
+      <button type="button" class="ghost-btn mini" data-skill-reset="${prefix}">초기화</button>
+    </div>
+    <div class="skill-tree-board" style="${gridStyle}">
+      ${tree.nodes.map((node) => {
+        const x = xs.indexOf(Number(node.position?.x ?? 0)) + 1;
+        const y = ys.indexOf(Number(node.position?.y ?? 0)) + 1;
+        const info = skillInfo(draft.replacements[node.key] || node.skillKey);
+        const element = info.element || 'none';
+        return `
+          <button
+            type="button"
+            class="skill-node element-${element} ${node.key === activeNodeKey ? 'active' : ''} ${draft.replacements[node.key] ? 'changed' : ''}"
+            data-skill-node="${escapeHtml(node.key)}"
+            data-skill-prefix="${prefix}"
+            style="grid-column:${x};grid-row:${y}"
+            title="${escapeHtml(`${info.name}\n${info.description || info.effectSummary || '효과 정보 미확인'}`)}"
+          >
+            <b>${escapeHtml(skillNodeLabel(node, draft))}</b>
+            <small>${escapeHtml(info.effectSummary || info.description || '효과 정보 미확인')}</small>
+          </button>
+        `;
+      }).join('')}
+    </div>
+    <div class="skill-picker">
+      <div class="skill-picker-title">
+        <strong>${escapeHtml(activeInfo?.name || '노드 선택')}</strong>
+        <span>${escapeHtml(activeInfo?.description || activeInfo?.effectSummary || '교체할 노드를 클릭하세요.')}</span>
+      </div>
+      <input class="skill-search" data-skill-search="${prefix}" placeholder="스킬 이름/효과 검색">
+      <div class="skill-candidates" data-skill-candidates="${prefix}">
+        ${renderSkillCandidates(prefix, '')}
+      </div>
+    </div>
+  `;
+}
+
+function renderSkillCandidates(prefix, query) {
+  const setKey = selectedSkillSetKey(prefix);
+  const tree = skillTreeBySet(setKey);
+  const activeNodeKey = state.activeSkillNode?.prefix === prefix ? state.activeSkillNode.nodeKey : tree?.nodes?.[0]?.key;
+  const q = String(query || '').trim().toLowerCase();
+  const candidates = skillIndexList()
+    .filter((item) => {
+      const haystack = `${item.name} ${item.description} ${item.effectSummary} ${item.key}`.toLowerCase();
+      return !q || haystack.includes(q);
+    })
+    .slice(0, 80);
+  if (!activeNodeKey) return '<p class="skill-tree-empty">교체할 노드를 먼저 선택하세요.</p>';
+  return candidates.map((item) => `
+    <button
+      type="button"
+      class="skill-candidate element-${item.element || 'none'}"
+      data-skill-candidate="${escapeHtml(item.key)}"
+      data-skill-prefix="${prefix}"
+      data-skill-target="${escapeHtml(activeNodeKey)}"
+      title="${escapeHtml(item.description || item.effectSummary || item.key)}"
+    >
+      <b>${escapeHtml(item.name)}</b>
+      <span>${escapeHtml(item.description || item.effectSummary || '효과 정보 미확인')}</span>
+    </button>
+  `).join('') || '<p class="skill-tree-empty">검색 결과가 없습니다.</p>';
+}
+
 function detailOverrideFromSources(attribute, skill, unit, retinueOverride = null) {
   const overrides = {};
   const attributeDetails = detailsByMode(attribute);
@@ -1484,10 +1651,23 @@ function detailOverrideFromSources(attribute, skill, unit, retinueOverride = nul
     overrides[mode] = compactObject({
       retinue: retinueOverride || unitDetails[mode]?.retinue || unit?.unitProfile,
       attribute_set: attributeDetails[mode]?.attributeSet || attribute?.attributeSet,
-      skill_set_override: skillDetails[mode]?.skillSet || (mode === 'romance' ? skill?.romanceSkill : skill?.historicalSkill),
+      skill_set_override: mode === 'romance' ? (skillDetails[mode]?.skillSet || skill?.romanceSkill) : undefined,
     });
   }
   return overrides;
+}
+
+function skillSetCloneFromPayload(recipe, snapshot, ownerKey, index) {
+  const replacements = Object.entries(snapshot?.replacements || {})
+    .filter(([, skillKey]) => skillKey);
+  if (!snapshot?.sourceSetKey || !replacements.length) return '';
+  const newSetKey = `hby_skillset_romance_${slugify(ownerKey)}_${index}`;
+  recipe.skillSetClones.push({
+    sourceSetKey: snapshot.sourceSetKey,
+    newSetKey,
+    replacements: replacements.map(([nodeKey, skillKey]) => ({ nodeKey, skillKey })),
+  });
+  return newSetKey;
 }
 
 function recipeFromQueue() {
@@ -1497,6 +1677,7 @@ function recipeFromQueue() {
     characterCloneRecipes: [],
     equipmentStatPatches: [],
     landUnitClones: [],
+    skillSetClones: [],
   };
 
   state.queue.forEach((item, index) => {
@@ -1515,6 +1696,7 @@ function recipeFromQueue() {
           overrides: payload.landUnitClone.overrides,
         });
       }
+      const customRomanceSkillSet = skillSetCloneFromPayload(recipe, payload.skillTree, payload.targetKey, index + 1);
       recipe.characterPatches.push({
         templateKey: payload.targetKey,
         templateOverrides: compactObject({
@@ -1528,12 +1710,11 @@ function recipeFromQueue() {
           historical: compactObject({
             retinue: retinueOverride || detailsByMode(unit).historical?.retinue || unit?.unitProfile,
             attribute_set: detailsByMode(attribute).historical?.attributeSet || attribute?.attributeSet,
-            skill_set_override: detailsByMode(hist).historical?.skillSet || hist?.historicalSkill,
           }),
           romance: compactObject({
             retinue: retinueOverride || detailsByMode(unit).romance?.retinue || unit?.unitProfile,
             attribute_set: detailsByMode(attribute).romance?.attributeSet || attribute?.attributeSet,
-            skill_set_override: detailsByMode(romance).romance?.skillSet || romance?.romanceSkill,
+            skill_set_override: customRomanceSkillSet || detailsByMode(romance).romance?.skillSet || romance?.romanceSkill,
           }),
         },
       });
@@ -1575,6 +1756,13 @@ function recipeFromQueue() {
       const titleInitialCeo = titleSource?.titleInitialCeoKey || titleSource?.details?.find((detail) => detail.initialCeos)?.initialCeos;
       const newInitialCeoKey = titleInitialCeo ? `hby_initial_ceo_${slug}_${index + 1}` : null;
       const detailOverrides = detailOverrideFromSources(attribute, skill, unit, retinueOverride);
+      const customRomanceSkillSet = skillSetCloneFromPayload(recipe, payload.skillTree, payload.newName || slug, index + 1);
+      if (customRomanceSkillSet) {
+        detailOverrides.romance = compactObject({
+          ...detailOverrides.romance,
+          skill_set_override: customRomanceSkillSet,
+        });
+      }
       for (const mode of ['historical', 'romance']) {
         detailOverrides[mode] = compactObject({
           ...detailOverrides[mode],
@@ -1865,6 +2053,16 @@ $('sourceCombatProfile').addEventListener('change', () => syncEquipmentSummary('
 $('editUnitProfile').addEventListener('change', () => syncUnitSummary('edit', 'editUnitProfile'));
 $('sourceUnitProfile').addEventListener('change', () => syncUnitSummary('source', 'sourceUnitProfile'));
 $('sourceBase').addEventListener('change', renderValidation);
+$('editRomanceSkill').addEventListener('change', () => {
+  state.activeSkillNode = null;
+  renderSkillTreeEditors();
+  renderValidation();
+});
+$('sourceSkill').addEventListener('change', () => {
+  state.activeSkillNode = null;
+  renderSkillTreeEditors();
+  renderValidation();
+});
 $('sourceTitle').addEventListener('change', () => {
   renderTitleSummary('source', resolveTitleChoice($('sourceTitle').value));
   renderValidation();
@@ -1896,6 +2094,43 @@ $('workQueue').addEventListener('keydown', (event) => {
   if (!item) return;
   event.preventDefault();
   loadQueueItem(Number(item.dataset.loadQueue));
+});
+document.addEventListener('click', (event) => {
+  const reset = event.target.closest('[data-skill-reset]');
+  if (reset) {
+    const prefix = reset.dataset.skillReset;
+    const draft = skillTreeDraft(prefix);
+    draft.replacements = {};
+    state.activeSkillNode = null;
+    renderSkillTreeEditor(prefix);
+    renderValidation();
+    return;
+  }
+  const node = event.target.closest('[data-skill-node]');
+  if (node) {
+    state.activeSkillNode = {
+      prefix: node.dataset.skillPrefix,
+      nodeKey: node.dataset.skillNode,
+    };
+    renderSkillTreeEditor(node.dataset.skillPrefix);
+    return;
+  }
+  const candidate = event.target.closest('[data-skill-candidate]');
+  if (candidate) {
+    const prefix = candidate.dataset.skillPrefix;
+    const target = candidate.dataset.skillTarget;
+    const draft = skillTreeDraft(prefix);
+    draft.replacements[target] = candidate.dataset.skillCandidate;
+    renderSkillTreeEditor(prefix);
+    renderValidation();
+  }
+});
+document.addEventListener('input', (event) => {
+  const search = event.target.closest('[data-skill-search]');
+  if (!search) return;
+  const prefix = search.dataset.skillSearch;
+  const target = document.querySelector(`[data-skill-candidates="${prefix}"]`);
+  if (target) target.innerHTML = renderSkillCandidates(prefix, search.value);
 });
 $('loadPackButton').addEventListener('click', loadPack);
 $('validateButton').addEventListener('click', validateServerRecipe);

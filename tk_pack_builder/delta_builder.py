@@ -8,7 +8,7 @@ import zlib
 from .adapters import RpfmPackSession, _decode_rpfm_cell, _encode_rpfm_cell
 from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_name
 from .land_units import validate_land_unit_clone
-from .recipe import CharacterClone, CharacterPatch, Recipe
+from .recipe import CharacterClone, CharacterPatch, Recipe, SkillSetClone
 from .stat_tables import resolve_stat_target, resolve_table_name
 from .validation import allow_reference_backed_clone_sources, has_errors, validate
 
@@ -40,6 +40,14 @@ def build_delta_pack(
 
     changed_stats = _collect_stat_patch_rows(session, recipe, source_dbs, rows_by_table)
     cloned_land_units = _collect_land_unit_clone_rows(session, recipe, source_dbs, rows_by_table)
+    skill_sets = _collect_skill_set_clone_rows(
+        session,
+        recipe.skill_set_clones,
+        source_dbs,
+        rows_by_table,
+        reference_paths or [],
+        opened_pack_keys,
+    )
     changed_character_fields = _collect_character_patch_rows(session, recipe.character_patches, source_dbs, rows_by_table)
     cloned_characters = _collect_character_clone_rows(
         session,
@@ -102,6 +110,7 @@ def build_delta_pack(
                 f"Wrote delta patch pack {output_path} ({output_path.stat().st_size} bytes) "
                 f"with {len(rows_by_table)} DB table(s), {changed_stats} edited equipment stat value(s), "
                 f"{cloned_land_units} cloned land unit row(s), "
+                f"{skill_sets} cloned romance skill set(s), "
                 f"{changed_character_fields} edited character field(s), {cloned_characters} cloned character(s), "
                 f"{copied_dependency_rows} referenced DB row(s), "
                 f"{len(loc_rows)} name loc row(s), {incident_tables} spawn incident table(s), "
@@ -153,6 +162,83 @@ def _collect_land_unit_clone_rows(
         cloned = {**source, "key": clone.new_key, **clone.overrides}
         _upsert_delta_row(rows_by_table, table_name, "key", cloned)
         rows.append(cloned)
+        created += 1
+    return created
+
+
+def _collect_skill_set_clone_rows(
+    session: RpfmPackSession,
+    clones: list[SkillSetClone],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    reference_paths: list[Path] | None = None,
+    opened_pack_keys: dict[str, str] | None = None,
+) -> int:
+    if not clones:
+        return 0
+    aliases = _character_dependency_aliases()
+    table_names = _optional_table_names(session, aliases)
+    tables = {
+        alias: _read_rows(session, table_name, source_dbs)
+        for alias, table_name in table_names.items()
+    }
+    opened_pack_keys = opened_pack_keys or {str(session.pack_path.resolve()): session.pack_key}
+    _merge_vanilla_dependency_tables(session, aliases, table_names, tables, source_dbs)
+    _merge_reference_dependency_tables(
+        session,
+        aliases,
+        reference_paths or [],
+        table_names,
+        tables,
+        source_dbs,
+        opened_pack_keys,
+    )
+
+    created = 0
+    for clone in clones:
+        source_set = dict(_find_required(tables.get("character_skill_node_sets", []), "key", clone.source_set_key))
+        new_set = {**source_set, "key": clone.new_set_key}
+        _upsert_delta_row(rows_by_table, table_names["character_skill_node_sets"], "key", new_set)
+
+        source_nodes = [
+            row for row in tables.get("character_skill_nodes", [])
+            if row.get("character_skill_node_set_key") == clone.source_set_key
+        ]
+        if not source_nodes:
+            raise ValueError(f"Source skill node set has no nodes: {clone.source_set_key}")
+        node_key_map = {
+            str(row.get("key")): _skill_node_clone_key(clone.source_set_key, clone.new_set_key, str(row.get("key")))
+            for row in source_nodes
+            if row.get("key")
+        }
+        used_skill_keys: set[str] = set()
+        for source_node in source_nodes:
+            old_key = str(source_node.get("key") or "")
+            new_skill_key = clone.replacements.get(old_key, source_node.get("character_skill_key"))
+            if new_skill_key:
+                used_skill_keys.add(str(new_skill_key))
+            new_node = {
+                **source_node,
+                "key": node_key_map[old_key],
+                "character_skill_node_set_key": clone.new_set_key,
+                "character_skill_key": new_skill_key,
+            }
+            _upsert_delta_row(rows_by_table, table_names["character_skill_nodes"], "key", new_node)
+
+        source_node_keys = set(node_key_map)
+        for source_link in tables.get("character_skill_node_links", []):
+            parent = str(source_link.get("parent_key") or "")
+            child = str(source_link.get("child_key") or "")
+            if parent not in source_node_keys and child not in source_node_keys:
+                continue
+            new_link = {
+                **source_link,
+                "parent_key": node_key_map.get(parent, parent),
+                "child_key": node_key_map.get(child, child),
+            }
+            _upsert_delta_row(rows_by_table, table_names["character_skill_node_links"], _skill_link_key, new_link)
+
+        _copy_skill_effect_dependencies(tables, table_names, rows_by_table, used_skill_keys)
         created += 1
     return created
 
@@ -514,9 +600,29 @@ def _character_dependency_aliases() -> dict[str, list[str]]:
         "cai_retinues_to_aspects": ["cai_retinues_to_aspects"],
         "character_attribute_sets": ["character_attribute_sets"],
         "character_attributes": ["character_attributes"],
-        "character_skill_node_sets": ["character_skill_node_sets"],
-        "character_skill_nodes": ["character_skill_nodes"],
-        "character_skill_node_links": ["character_skill_node_links"],
+        "character_skill_node_sets": [
+            "character_skill_node_sets",
+            "db/character_skill_node_sets_tables/_mtu_characters_skills",
+            "db/character_skill_node_sets_tables/_mtu_characters",
+        ],
+        "character_skill_nodes": [
+            "character_skill_nodes",
+            "db/character_skill_nodes_tables/_mtu_characters_skills_nodes_01_earth_commander",
+            "db/character_skill_nodes_tables/_mtu_characters",
+        ],
+        "character_skill_node_links": [
+            "character_skill_node_links",
+            "db/character_skill_node_links_tables/_mtu_characters_skills",
+            "db/character_skill_node_links_tables/_mtu_characters",
+        ],
+        "character_skill_level_to_effects_junctions": [
+            "character_skill_level_to_effects_junctions",
+            "db/character_skill_level_to_effects_junctions_tables/_mtu_characters_skills",
+        ],
+        "effects": [
+            "effects",
+            "db/effects_tables/_mtu_characters_skills_effects",
+        ],
         "land_units": [
             "land_units",
             "db/land_units_tables/_mtu_characters_custom_battles_land_units",
@@ -579,6 +685,44 @@ def _copy_skill_dependency(
             lambda row, keys=node_keys: str(row.get("parent_key")) in keys or str(row.get("child_key")) in keys,
             _skill_link_key,
         )
+
+
+def _copy_skill_effect_dependencies(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    skill_keys: set[str],
+) -> None:
+    if not skill_keys:
+        return
+    effect_keys: set[str] = set()
+    for row in tables.get("character_skill_level_to_effects_junctions", []):
+        if str(row.get("character_skill_key") or "") not in skill_keys:
+            continue
+        effect_key = str(row.get("effect_key") or "")
+        if effect_key:
+            effect_keys.add(effect_key)
+        table_path = row.get("_sourceTablePath") or table_names.get("character_skill_level_to_effects_junctions")
+        if table_path:
+            clean_row = {key: value for key, value in row.items() if not key.startswith("_source")}
+            _upsert_delta_row(rows_by_table, table_path, _skill_effect_key, clean_row)
+    if effect_keys:
+        _copy_matching_rows(
+            tables,
+            table_names,
+            rows_by_table,
+            "effects",
+            lambda row, keys=effect_keys: str(row.get("key") or "") in keys,
+            "key",
+        )
+
+
+def _skill_node_clone_key(source_set_key: str, new_set_key: str, source_node_key: str) -> str:
+    suffix = source_node_key
+    prefix = f"{source_set_key}_"
+    if source_node_key.startswith(prefix):
+        suffix = source_node_key[len(prefix):]
+    return f"{new_set_key}_{suffix}"
 
 
 def _copy_retinue_dependency(
@@ -848,6 +992,8 @@ def _dependency_key_for_alias(alias: str) -> str | Any:
         return "set_name"
     if alias == "character_skill_node_links":
         return _skill_link_key
+    if alias == "character_skill_level_to_effects_junctions":
+        return _skill_effect_key
     if alias == "retinue_slot_initial_units":
         return _retinue_slot_key
     if alias == "cai_retinues_to_aspects":
@@ -1309,6 +1455,15 @@ def _attribute_key(row: dict[str, Any]) -> tuple[Any, Any]:
 
 def _skill_link_key(row: dict[str, Any]) -> tuple[Any, Any, Any]:
     return row.get("parent_key"), row.get("child_key"), row.get("link_type")
+
+
+def _skill_effect_key(row: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
+    return (
+        row.get("character_skill_key"),
+        row.get("effect_key"),
+        row.get("effect_scope"),
+        row.get("level"),
+    )
 
 
 def _retinue_aspect_key(row: dict[str, Any]) -> tuple[Any, Any]:

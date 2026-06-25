@@ -576,15 +576,23 @@ def _summarize_skill_trees(
                 "name": str(character.get("label") or character.get("displayName") or character.get("key") or ""),
             })
 
+    skill_index: dict[str, dict[str, Any]] = {}
     trees = []
     for set_key, rows in sorted(nodes_by_set.items()):
         owners = owners_by_skill.get(set_key, [])
         if not owners:
             continue
-        nodes = [
-            _skill_node_summary(row, loc_text, effects_by_skill.get(str(row.get("character_skill_key") or ""), []))
-            for row in rows
-        ]
+        nodes = []
+        for row in rows:
+            skill_key = str(row.get("character_skill_key") or "")
+            effects_for_skill = effects_by_skill.get(skill_key, [])
+            skill_info = skill_index.setdefault(skill_key, _skill_index_entry(skill_key, loc_text, effects_for_skill))
+            skill_info["sources"].append({
+                "setKey": set_key,
+                "nodeKey": str(row.get("key") or ""),
+                "owners": owners,
+            })
+            nodes.append(_skill_node_summary(row, loc_text, effects_for_skill, skill_info))
         trees.append({
             "key": set_key,
             "name": _skill_set_label(set_key, node_sets.get(set_key), loc_text),
@@ -602,6 +610,7 @@ def _summarize_skill_trees(
     return {
         "romance": trees,
         "nodeCount": sum(len(tree["nodes"]) for tree in trees),
+        "skillIndex": dict(sorted(skill_index.items(), key=lambda item: (item[1]["name"], item[0]))),
     }
 
 
@@ -609,13 +618,16 @@ def _skill_node_summary(
     row: dict[str, Any],
     loc_text: dict[str, str],
     effects: list[dict[str, Any]],
+    skill_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     key = str(row.get("key") or "")
+    skill_info = skill_info or {}
     return {
         "key": key,
         "skillKey": row.get("character_skill_key"),
         "setKey": row.get("character_skill_node_set_key"),
-        "name": _skill_node_label(key, row, loc_text),
+        "name": skill_info.get("name") or _skill_node_label(key, row, loc_text),
+        "description": skill_info.get("description") or "",
         "icon": row.get("icon") or row.get("icon_path") or row.get("onscreen_name"),
         "position": _skill_node_position(row),
         "tier": _first_present(row, ("tier", "required_level", "level", "min_level")),
@@ -623,6 +635,74 @@ def _skill_node_summary(
         "effects": effects,
         "effectSummary": _effect_summary(effects),
     }
+
+
+def _skill_index_entry(skill_key: str, loc_text: dict[str, str], effects: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "key": skill_key,
+        "name": _skill_name_for_key(skill_key, loc_text),
+        "description": _skill_description_for_key(skill_key, loc_text),
+        "effects": effects,
+        "effectSummary": _effect_summary(effects),
+        "element": _skill_element(skill_key),
+        "sources": [],
+    }
+
+
+def _skill_name_for_key(skill_key: str, loc_text: dict[str, str]) -> str:
+    for loc_key in (
+        f"character_skills_localised_name_{skill_key}",
+        f"character_skills_name_{skill_key}",
+        f"character_skill_names_{skill_key}",
+    ):
+        if loc_text.get(loc_key):
+            return loc_text[loc_key]
+    return _friendly_skill_key(skill_key)
+
+
+def _skill_description_for_key(skill_key: str, loc_text: dict[str, str]) -> str:
+    for loc_key in (
+        f"character_skills_localised_description_{skill_key}",
+        f"character_skills_description_{skill_key}",
+    ):
+        if loc_text.get(loc_key):
+            return loc_text[loc_key]
+    return ""
+
+
+def _skill_element(skill_key: str) -> str:
+    value = skill_key.lower()
+    for element in ("earth", "fire", "wood", "water", "metal"):
+        if f"_{element}_" in value or value.endswith(f"_{element}"):
+            return element
+    return ""
+
+
+def _friendly_skill_key(skill_key: str) -> str:
+    value = str(skill_key or "")
+    replacements = {
+        "expertise": "전문성",
+        "resolve": "결의",
+        "cunning": "책략",
+        "instinct": "본능",
+        "authority": "권위",
+        "mobility": "기동",
+        "clarity": "명료",
+        "intensity": "열의",
+        "flexibility": "유연",
+        "dignity": "위엄",
+        "meditation": "명상",
+        "nobility": "고귀",
+        "zeal": "열정",
+        "composure": "침착",
+        "understanding": "이해",
+        "perception": "통찰",
+        "stability": "안정",
+    }
+    for english, korean in replacements.items():
+        if english in value.lower():
+            return korean
+    return _friendly_key(value)
 
 
 def _skill_node_position(row: dict[str, Any]) -> dict[str, int | float]:
@@ -693,7 +773,35 @@ def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> st
             return loc_text[str(value)]
         if value and field != "icon":
             return _friendly_key(str(value))
-    return _friendly_key(key)
+    return _friendly_effect_key(key)
+
+
+def _friendly_effect_key(key: str) -> str:
+    value = str(key or "")
+    lower = value.lower()
+    attributes = {
+        "expertise": "전문성",
+        "resolve": "결의",
+        "cunning": "책략",
+        "instinct": "본능",
+        "authority": "권위",
+    }
+    for english, korean in attributes.items():
+        if f"attribute_{english}" in lower:
+            return korean
+    if "satisfaction" in lower:
+        return "만족도"
+    if "morale" in lower:
+        return "사기"
+    if "movement" in lower:
+        return "이동거리"
+    if "replenishment" in lower:
+        return "충원률"
+    if "ability" in lower:
+        return "능력"
+    if "gdp" in lower or "income" in lower:
+        return "수입"
+    return _friendly_key(value)
 
 
 def _effect_summary(effects: list[dict[str, Any]]) -> str:
