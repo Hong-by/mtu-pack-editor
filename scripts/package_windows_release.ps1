@@ -1,11 +1,11 @@
-$ErrorActionPreference = "Stop"
-
 param(
     [string]$PackageName = "MTU-Pack-Editor-windows-portable",
     [string]$OutDir = "dist",
     [string]$PythonRoot = "",
     [string]$RpfmServer = ""
 )
+
+$ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $OutPath = Join-Path $Root $OutDir
