@@ -1,0 +1,1 @@
+release-assets/*.pack filter=lfs diff=lfs merge=lfs -text
