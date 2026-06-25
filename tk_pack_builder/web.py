@@ -64,6 +64,41 @@ SKILL_TABLE_ALIASES = {
         "effects",
         "db/effects_tables/_mtu_characters_skills_effects",
     ],
+    "unit_abilities": [
+        "unit_abilities",
+        "db/unit_abilities_tables/data__",
+        "db/unit_abilities_tables/_mtu_characters_skills_abilities",
+    ],
+    "unit_special_abilities": [
+        "unit_special_abilities",
+        "db/unit_special_abilities_tables/data__",
+        "db/unit_special_abilities_tables/_mtu_characters_skills_abilities",
+    ],
+    "special_ability_phases": [
+        "special_ability_phases",
+        "db/special_ability_phases_tables/data__",
+        "db/special_ability_phases_tables/_mtu_characters_skills_abilities",
+    ],
+    "special_ability_to_special_ability_phase_junctions": [
+        "special_ability_to_special_ability_phase_junctions",
+        "db/special_ability_to_special_ability_phase_junctions_tables/data__",
+        "db/special_ability_to_special_ability_phase_junctions_tables/_mtu_characters_skills_abilities",
+    ],
+    "special_ability_phase_stat_effects": [
+        "special_ability_phase_stat_effects",
+        "db/special_ability_phase_stat_effects_tables/data__",
+        "db/special_ability_phase_stat_effects_tables/_mtu_characters_skills_abilities",
+    ],
+    "special_ability_phase_attribute_effects": [
+        "special_ability_phase_attribute_effects",
+        "db/special_ability_phase_attribute_effects_tables/data__",
+        "db/special_ability_phase_attribute_effects_tables/_mtu_characters_skills_abilities",
+    ],
+    "special_ability_to_invalid_usage_flags": [
+        "special_ability_to_invalid_usage_flags",
+        "db/special_ability_to_invalid_usage_flags_tables/data__",
+        "db/special_ability_to_invalid_usage_flags_tables/_mtu_characters_skills_abilities",
+    ],
 }
 
 
@@ -912,6 +947,7 @@ def _summarize_skill_trees(
     loc_text: dict[str, str],
     characters: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    battle_ability_summaries = _battle_ability_summaries(tables)
     node_sets = {str(row.get("key")): row for row in tables.get("character_skill_node_sets", []) if row.get("key")}
     nodes_by_set: dict[str, list[dict[str, Any]]] = {}
     node_by_key: dict[str, dict[str, Any]] = {}
@@ -940,13 +976,18 @@ def _summarize_skill_trees(
             continue
         effect_key = str(row.get("effect_key") or "")
         effect_row = effects.get(effect_key, {})
-        effects_by_skill.setdefault(skill_key, []).append({
+        effect_summary = {
             "effectKey": effect_key,
             "name": _effect_label(effect_key, effect_row, loc_text),
             "scope": row.get("effect_scope"),
             "level": row.get("level"),
             "value": row.get("value"),
-        })
+        }
+        ability_key = _battle_ability_key_from_effect(effect_key)
+        if ability_key and battle_ability_summaries.get(ability_key):
+            effect_summary["battleAbilityKey"] = ability_key
+            effect_summary["battleAbilitySummary"] = battle_ability_summaries[ability_key]
+        effects_by_skill.setdefault(skill_key, []).append(effect_summary)
 
     owners_by_skill: dict[str, list[dict[str, str]]] = {}
     for character in characters:
@@ -1019,19 +1060,216 @@ def _skill_node_summary(
         "row": row,
         "effects": effects,
         "effectSummary": _effect_summary(effects),
+        "battleAbilitySummary": skill_info.get("battleAbilitySummary") or "",
     }
 
 
 def _skill_index_entry(skill_key: str, loc_text: dict[str, str], effects: list[dict[str, Any]]) -> dict[str, Any]:
+    battle_summaries = [
+        str(effect.get("battleAbilitySummary") or "")
+        for effect in effects
+        if effect.get("battleAbilitySummary")
+    ]
     return {
         "key": skill_key,
         "name": _skill_name_for_key(skill_key, loc_text),
         "description": _skill_description_for_key(skill_key, loc_text),
         "effects": effects,
         "effectSummary": _effect_summary(effects),
+        "battleAbilitySummary": " / ".join(dict.fromkeys(battle_summaries)),
         "element": _skill_element(skill_key),
         "sources": [],
     }
+
+
+def _battle_ability_key_from_effect(effect_key: str) -> str:
+    key = str(effect_key or "")
+    if "_skill_ability_" in key:
+        return key.replace("_skill_ability_", "_ability_")
+    if "_ability_" in key:
+        return key
+    return ""
+
+
+def _battle_ability_summaries(tables: dict[str, list[dict[str, Any]]]) -> dict[str, str]:
+    special_by_key = {
+        str(row.get("key") or ""): row
+        for row in tables.get("unit_special_abilities", [])
+        if row.get("key")
+    }
+    ability_keys = {
+        str(row.get("key") or "")
+        for row in tables.get("unit_abilities", [])
+        if row.get("key")
+    } | set(special_by_key)
+    phases_by_ability: dict[str, list[str]] = {}
+    for row in tables.get("special_ability_to_special_ability_phase_junctions", []):
+        ability = str(row.get("special_ability") or "")
+        phase = str(row.get("phase") or "")
+        if ability and phase:
+            phases_by_ability.setdefault(ability, []).append(phase)
+    phase_by_id = {
+        str(row.get("id") or ""): row
+        for row in tables.get("special_ability_phases", [])
+        if row.get("id")
+    }
+    stat_by_phase: dict[str, list[dict[str, Any]]] = {}
+    for row in tables.get("special_ability_phase_stat_effects", []):
+        phase = str(row.get("phase") or "")
+        if phase:
+            stat_by_phase.setdefault(phase, []).append(row)
+    attr_by_phase: dict[str, list[dict[str, Any]]] = {}
+    for row in tables.get("special_ability_phase_attribute_effects", []):
+        phase = str(row.get("phase") or "")
+        if phase:
+            attr_by_phase.setdefault(phase, []).append(row)
+    invalid_usage: dict[str, list[str]] = {}
+    for row in tables.get("special_ability_to_invalid_usage_flags", []):
+        ability = str(row.get("special_ability") or "")
+        flag = str(row.get("invalid_usage_flag") or "")
+        if ability and flag:
+            invalid_usage.setdefault(ability, []).append(flag)
+
+    summaries = {}
+    for ability in sorted(ability_keys):
+        summary = _battle_ability_summary(
+            ability,
+            special_by_key.get(ability, {}),
+            [phase_by_id.get(phase, {"id": phase}) for phase in phases_by_ability.get(ability, [ability])],
+            stat_by_phase,
+            attr_by_phase,
+            invalid_usage.get(ability, []),
+        )
+        if summary:
+            summaries[ability] = summary
+    return summaries
+
+
+def _battle_ability_summary(
+    ability: str,
+    special: dict[str, Any],
+    phases: list[dict[str, Any]],
+    stat_by_phase: dict[str, list[dict[str, Any]]],
+    attr_by_phase: dict[str, list[dict[str, Any]]],
+    invalid_flags: list[str],
+) -> str:
+    pieces = []
+    if special:
+        if special.get("passive"):
+            pieces.append("패시브")
+        else:
+            pieces.append("발동형")
+        if special.get("affect_self"):
+            pieces.append("자기 자신")
+        elif special.get("target_friends") or special.get("num_effected_friendly_units"):
+            pieces.append("아군 대상")
+        elif special.get("target_enemies") or special.get("num_effected_enemy_units"):
+            pieces.append("적 대상")
+        duration = _number_or_none(special.get("active_time"))
+        recharge = _number_or_none(special.get("recharge_time"))
+        if duration and duration > 0:
+            pieces.append(f"{duration:g}초")
+        if recharge and recharge > 0:
+            pieces.append(f"재사용 {recharge:g}초")
+        uses = _number_or_none(special.get("num_uses"))
+        if uses and uses > 0:
+            pieces.append(f"{uses:g}회")
+        effect_range = _number_or_none(special.get("effect_range"))
+        if effect_range and effect_range > 0:
+            pieces.append(f"범위 {effect_range:g}")
+    phase_ids = [str(phase.get("id") or "") for phase in phases if phase]
+    effect_pieces = []
+    for phase in phases:
+        phase_id = str(phase.get("id") or "")
+        if not special:
+            duration = _number_or_none(phase.get("duration"))
+            recharge = _number_or_none(phase.get("recharge_time"))
+            if duration and duration > 0:
+                pieces.append(f"{duration:g}초")
+            if recharge and recharge > 0:
+                pieces.append(f"재사용 {recharge:g}초")
+        if phase.get("unbreakable"):
+            effect_pieces.append("불굴")
+        if phase.get("cant_move"):
+            effect_pieces.append("이동 불가")
+        heal = _number_or_none(phase.get("heal_amount"))
+        hp_frequency = _number_or_none(phase.get("hp_change_frequency"))
+        if heal and heal > 0:
+            suffix = f"/{hp_frequency:g}초" if hp_frequency and hp_frequency > 0 else ""
+            effect_pieces.append(f"치유 {heal:g}{suffix}")
+        damage = _number_or_none(phase.get("damage_amount"))
+        if damage and damage > 0:
+            effect_pieces.append(f"피해 {damage:g}")
+        for row in stat_by_phase.get(phase_id, []):
+            label = _battle_stat_label(str(row.get("stat") or ""))
+            value = _number_or_none(row.get("value"))
+            how = str(row.get("how") or "")
+            if label and value is not None:
+                effect_pieces.append(f"{label} {_format_battle_value(value, how)}")
+        for row in attr_by_phase.get(phase_id, []):
+            label = _battle_attribute_label(str(row.get("attribute") or ""))
+            if label:
+                effect_pieces.append(label)
+    if invalid_flags:
+        invalid = ", ".join(_battle_invalid_usage_label(flag) for flag in invalid_flags)
+        effect_pieces.append(f"{invalid} 사용 불가")
+    effect_pieces = [piece for piece in dict.fromkeys(effect_pieces) if piece]
+    if not pieces and not effect_pieces and phase_ids:
+        return ", ".join(phase_ids)
+    if effect_pieces:
+        pieces.append("효과: " + ", ".join(effect_pieces[:8]))
+    return " · ".join(pieces)
+
+
+def _format_battle_value(value: int | float, how: str) -> str:
+    if how == "mult":
+        return f"x{value:g}"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:g}"
+
+
+def _battle_stat_label(stat: str) -> str:
+    labels = {
+        "stat_charge_bonus": "돌격 보너스",
+        "stat_mass_modifier": "질량",
+        "stat_melee_damage_ap": "장갑 관통 근접 피해",
+        "stat_melee_damage_base": "기본 근접 피해",
+        "stat_melee_attack": "근접 공격",
+        "stat_melee_defence": "근접 회피",
+        "stat_armour": "갑옷",
+        "stat_morale": "사기",
+        "stat_speed": "속도",
+        "stat_missile_damage_ap": "장갑 관통 원거리 피해",
+        "stat_missile_damage_base": "기본 원거리 피해",
+        "stat_reload": "재장전",
+        "stat_ammunition": "탄약",
+        "stat_fatigue": "피로",
+    }
+    return labels.get(stat, _friendly_key(stat))
+
+
+def _battle_attribute_label(attribute: str) -> str:
+    labels = {
+        "causes_terror": "공포 유발",
+        "causes_fear": "섬뜩함 유발",
+        "unbreakable": "불굴",
+        "encourage": "격려",
+        "stalk": "은밀한 이동",
+        "snipe": "은신 사격",
+        "immune_to_psychology": "심리 면역",
+        "fire_while_moving": "이동 중 사격",
+    }
+    return labels.get(attribute, _friendly_key(attribute))
+
+
+def _battle_invalid_usage_label(flag: str) -> str:
+    labels = {
+        "unit_is_elephant": "코끼리 탑승 유닛",
+        "unit_is_flying": "비행 유닛",
+        "unit_is_routing": "패주 중",
+        "unit_in_melee": "근접전 중",
+    }
+    return labels.get(flag, _friendly_key(flag))
 
 
 def _skill_name_for_key(skill_key: str, loc_text: dict[str, str]) -> str:
@@ -1333,6 +1571,11 @@ _SKILL_PHRASE_LABELS = {
     "modesty": "황제의 겸양",
     "sight_of_the_dragon": "용의 통찰",
     "skill_special_ability_water": "수계 특수 능력",
+    "dlc04_skill_healer_tranquillity": "평온",
+    "ytr_skill_healer_charisma": "카리스마",
+    "ytr_skill_healer_defiance": "저항",
+    "ytr_skill_healer_expedience": "신속",
+    "ytr_skill_healer_tranquillity": "평온",
     "stifling_deluge": "숨막히는 폭우",
     "the_dragons_gaze": "용의 응시",
     "two_zhangs": "두 장씨",
@@ -2029,6 +2272,34 @@ def _merge_reference_packs(
                         tables.setdefault(alias, []),
                         rows,
                         ("character_skill_key", "effect_key", "effect_scope", "level"),
+                        str(resolved),
+                    )
+                elif alias == "special_ability_to_special_ability_phase_junctions":
+                    _append_missing_rows_by_fields(
+                        tables.setdefault(alias, []),
+                        rows,
+                        ("special_ability", "phase", "order"),
+                        str(resolved),
+                    )
+                elif alias == "special_ability_phase_stat_effects":
+                    _append_missing_rows_by_fields(
+                        tables.setdefault(alias, []),
+                        rows,
+                        ("phase", "stat", "how", "value"),
+                        str(resolved),
+                    )
+                elif alias == "special_ability_phase_attribute_effects":
+                    _append_missing_rows_by_fields(
+                        tables.setdefault(alias, []),
+                        rows,
+                        ("phase", "attribute", "attribute_type"),
+                        str(resolved),
+                    )
+                elif alias == "special_ability_to_invalid_usage_flags":
+                    _append_missing_rows_by_fields(
+                        tables.setdefault(alias, []),
+                        rows,
+                        ("special_ability", "invalid_usage_flag"),
                         str(resolved),
                     )
                 elif alias == "character_attribute_sets":

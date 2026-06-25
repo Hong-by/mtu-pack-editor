@@ -314,9 +314,41 @@ textarea:focus {
 .skill-node b,
 .skill-candidate b {
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
   overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.25;
+}
+
+.skill-node.recommended,
+.skill-candidate.recommended {
+  border-color: #c69a31;
+}
+
+.skill-star {
+  display: inline-grid;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+  color: #9a6a00;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: 1px;
+}
+
+.skill-star.grade-a {
+  color: #b45309;
+}
+
+.skill-star.grade-b {
+  color: #8a6d00;
+}
+
+.skill-star.grade-c {
+  color: #63742b;
 }
 
 .skill-node small,
@@ -328,6 +360,10 @@ textarea:focus {
   line-height: 1.35;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
+}
+
+.skill-candidate span {
+  -webkit-line-clamp: 4;
 }
 
 .skill-node.active {
@@ -432,7 +468,7 @@ textarea:focus {
 .skill-candidate {
   display: grid;
   gap: 5px;
-  min-height: 62px;
+  min-height: 82px;
   padding: 9px 10px;
 }
 

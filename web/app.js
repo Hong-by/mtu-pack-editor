@@ -2055,6 +2055,88 @@ function skillInfo(skillKey) {
   return enrichedSkillInfo(skillKey);
 }
 
+const RECOMMENDED_SKILL_GROUPS = [
+  {
+    grade: 'A',
+    terms: [
+      '불사조의 불꽃',
+      '화살비',
+      '맹독 사격',
+      '맹독사격',
+      '경고 사격',
+      '경고사격',
+      '기만',
+      '평안',
+      '평온',
+      '신체의 이해',
+      '치유',
+      'flames of the phoenix',
+      'hail of arrows',
+      'venomous shot',
+      'warning shot',
+      'obfuscation',
+      'tranquillity',
+      'tranquility',
+      'knowledge of the body',
+    ],
+  },
+  {
+    grade: 'B',
+    terms: [
+      '학식',
+      '직감',
+      '도달',
+      '정신의 이해',
+      '사기',
+      'scholarship',
+      'intuition',
+      'knowledge of the mind',
+    ],
+  },
+  {
+    grade: 'C',
+    terms: [
+      '효렴',
+      '유연',
+      '자연의 벗',
+      '땅의 성체',
+      '석벽',
+      '땅의 부동심',
+      '불굴의 대지',
+      '휘감는 분노',
+      'filial',
+      'incorrupt',
+      'flexibility',
+      "nature's ally",
+      'natures ally',
+      'stone bulwark',
+      'unyielding earth',
+      'binding fury',
+      'wrapping fury',
+    ],
+  },
+];
+
+function recommendedSkillGrade(info) {
+  const haystack = [
+    info?.key,
+    info?.name,
+    info?.description,
+    info?.effectSummary,
+    info?.battleAbilitySummary,
+    ...(info?.effects || []).map((effect) => `${effect.effectKey || ''} ${effect.name || ''} ${effect.battleAbilitySummary || ''}`),
+  ].join(' ').toLowerCase();
+  for (const group of RECOMMENDED_SKILL_GROUPS) {
+    if (group.terms.some((term) => haystack.includes(term.toLowerCase()))) return group.grade;
+  }
+  return '';
+}
+
+function recommendedSkillStar(info) {
+  const grade = recommendedSkillGrade(info);
+  return grade ? `<span class="skill-star grade-${grade.toLowerCase()}" title="추천 기술 ${grade}급">★</span>` : '';
+}
+
 function skillNodeLabel(node, draft) {
   const replacement = draft?.replacements?.[node.key];
   const info = skillInfo(replacement || node.skillKey);
@@ -2154,7 +2236,9 @@ function renderSkillCandidates(prefix, query) {
 }
 
 function skillEffectText(info) {
-  return translateSkillEffectText(info?.effectSummary || info?.description || '효과 정보 없음');
+  const base = translateSkillEffectText(info?.effectSummary || info?.description || '효과 정보 없음');
+  const battle = translateSkillEffectText(info?.battleAbilitySummary || '');
+  return battle ? `${base} · 전투능력: ${battle}` : base;
 }
 
 const SKILL_ELEMENT_TABS = [
@@ -2226,16 +2310,17 @@ function renderSkillTreeEditor(prefix) {
         const replaced = draft.replacements[node.key];
         const info = skillInfo(replaced || node.skillKey);
         const element = info.element || 'none';
+        const grade = recommendedSkillGrade(info);
         return `
           <button
             type="button"
-            class="skill-node element-${element} ${node.key === activeNode?.key ? 'active' : ''} ${replaced ? 'changed' : ''}"
+            class="skill-node element-${element} ${node.key === activeNode?.key ? 'active' : ''} ${replaced ? 'changed' : ''} ${grade ? 'recommended' : ''}"
             data-skill-node="${escapeHtml(node.key)}"
             data-skill-prefix="${prefix}"
             style="grid-column:${x};grid-row:${y}"
-            title="${escapeHtml(`${info.name}\n${skillEffectText(info)}`)}"
+            title="${escapeHtml(`${grade ? `추천 기술 ${grade}급\n` : ''}${info.name}\n${skillEffectText(info)}`)}"
           >
-            <b>${escapeHtml(info.name)}${replaced ? ' *' : ''}</b>
+            <b>${recommendedSkillStar(info)}${escapeHtml(info.name)}${replaced ? ' *' : ''}</b>
             <small>${escapeHtml(skillEffectText(info))}</small>
           </button>
         `;
@@ -2266,7 +2351,7 @@ function renderSkillCandidates(prefix, query) {
   const q = String(query || '').trim().toLowerCase();
   const candidates = skillIndexList()
     .filter((item) => {
-      const haystack = `${item.name} ${item.description} ${item.effectSummary} ${item.key}`.toLowerCase();
+      const haystack = `${item.name} ${item.description} ${item.effectSummary} ${item.battleAbilitySummary || ''} ${item.key}`.toLowerCase();
       const matchesTab = activeTab === 'all' || item.element === activeTab;
       return matchesTab && (!q || haystack.includes(q));
     })
@@ -2280,13 +2365,13 @@ function renderSkillCandidates(prefix, query) {
   return candidates.map((item) => `
     <button
       type="button"
-      class="skill-candidate element-${item.element || 'none'}"
+      class="skill-candidate element-${item.element || 'none'} ${recommendedSkillGrade(item) ? 'recommended' : ''}"
       data-skill-candidate="${escapeHtml(item.key)}"
       data-skill-prefix="${prefix}"
       data-skill-target="${escapeHtml(activeNodeKey)}"
-      title="${escapeHtml(`${item.name}\n${skillEffectText(item)}`)}"
+      title="${escapeHtml(`${recommendedSkillGrade(item) ? `추천 기술 ${recommendedSkillGrade(item)}급\n` : ''}${item.name}\n${skillEffectText(item)}`)}"
     >
-      <b>${escapeHtml(item.name)}</b>
+      <b>${recommendedSkillStar(item)}${escapeHtml(item.name)}</b>
       <span>${escapeHtml(skillEffectText(item))}</span>
     </button>
   `).join('') || '<p class="skill-tree-empty">검색 결과가 없습니다.</p>';
