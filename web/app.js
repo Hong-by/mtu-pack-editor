@@ -2023,6 +2023,74 @@ function referencePackPaths() {
     .filter(Boolean);
 }
 
+const OFFICIAL_GAME_PACK_NAMES = new Set([
+  'database.pack',
+  'data_mh.pack',
+  'data_ep.pack',
+  'data_dlc07.pack',
+  'data_dlc06.pack',
+  'data_bl.pack',
+  'data_yt_bl.pack',
+  'data.pack',
+]);
+
+function basenameFromPath(path) {
+  return String(path || '').replaceAll('\\', '/').split('/').pop().toLowerCase();
+}
+
+function mergeReferencePackPaths(existingPaths, officialPaths) {
+  const customPaths = existingPaths.filter((path) => !OFFICIAL_GAME_PACK_NAMES.has(basenameFromPath(path)));
+  const seen = new Set();
+  return [...customPaths, ...officialPaths].filter((path) => {
+    const key = String(path || '').toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function applyGamePath() {
+  const input = $('gameDataPath');
+  const gamePath = input.value.trim();
+  if (!gamePath) {
+    state.serverMessages = [validationItem('warning', '게임 경로 필요', '삼탈워 설치 폴더 또는 data 폴더 경로를 입력하세요.')];
+    renderValidation();
+    return;
+  }
+  state.serverMessages = [validationItem('info', '게임 경로 확인 중', gamePath)];
+  renderValidation();
+  try {
+    const data = await postJson('/api/game-path/resolve', { gamePath });
+    const merged = mergeReferencePackPaths(referencePackPaths(), data.referencePackPaths || []);
+    $('referencePackPaths').value = merged.join('\n');
+    localStorage.setItem('mtuEditor.gameDataPath', data.dataDir || gamePath);
+    input.value = data.dataDir || gamePath;
+    const missingText = data.missing?.length ? ` · 누락: ${data.missing.join(', ')}` : '';
+    state.serverMessages = [validationItem('ok', '게임 경로 적용 완료', `${data.message}${missingText}`)];
+  } catch (error) {
+    state.serverMessages = [validationItem('error', '게임 경로 적용 실패', error.message)];
+  }
+  renderValidation();
+}
+
+async function suggestGamePath() {
+  const input = $('gameDataPath');
+  const saved = localStorage.getItem('mtuEditor.gameDataPath');
+  if (saved) {
+    input.value = saved;
+    return;
+  }
+  try {
+    const response = await fetch('/api/game-path/suggest');
+    const data = await response.json();
+    if (data.bestPath && !input.value.trim()) {
+      input.value = data.bestPath;
+    }
+  } catch {
+    // Best-effort convenience only. Manual entry still works.
+  }
+}
+
 function serverPayload() {
   const saveMode = $('saveModeSelect').value;
   const inPlace = saveMode === 'in_place';
@@ -2236,6 +2304,13 @@ document.addEventListener('input', (event) => {
   if (target) target.innerHTML = renderSkillCandidates(prefix, search.value);
 });
 $('loadPackButton').addEventListener('click', loadPack);
+$('applyGamePathButton').addEventListener('click', applyGamePath);
+$('gameDataPath').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    applyGamePath();
+  }
+});
 $('validateButton').addEventListener('click', validateServerRecipe);
 $('buildButton').addEventListener('click', buildServerPack);
 $('previewRecipeButton').addEventListener('click', previewRecipe);
@@ -2266,6 +2341,7 @@ for (const control of document.querySelectorAll('input, select')) {
 $('referencePackPaths').addEventListener('input', renderValidation);
 $('referencePackPaths').addEventListener('change', renderValidation);
 
+suggestGamePath();
 renderAll();
 if (location.protocol !== 'file:' && $('inputPackPath').value.trim()) {
   queueMicrotask(loadPack);

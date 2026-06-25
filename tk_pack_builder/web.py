@@ -33,6 +33,21 @@ DEFAULT_RPFM_SERVER = (
 )
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
 RPFM_PROCESS: subprocess.Popen[bytes] | None = None
+OFFICIAL_GAME_PACKS = [
+    "database.pack",
+    "data_mh.pack",
+    "data_ep.pack",
+    "data_dlc07.pack",
+    "data_dlc06.pack",
+    "data_bl.pack",
+    "data_yt_bl.pack",
+    "data.pack",
+]
+DEFAULT_GAME_DATA_PATHS = [
+    Path("E:/SteamLibrary/steamapps/common/Total War THREE KINGDOMS/data"),
+    Path("C:/Program Files (x86)/Steam/steamapps/common/Total War THREE KINGDOMS/data"),
+    Path("C:/Program Files/Steam/steamapps/common/Total War THREE KINGDOMS/data"),
+]
 REQUIRED_PACK_LAYOUT = """필수 pack 파일을 찾을 수 없습니다.
 
 공개 배포본에는 Total War: THREE KINGDOMS 원본/모드 pack 파일이 포함되지 않습니다.
@@ -106,6 +121,9 @@ class WebHandler(BaseHTTPRequestHandler):
         if path == "/api/health":
             self._send_json({"ok": True})
             return
+        if path == "/api/game-path/suggest":
+            self._send_json(suggest_game_paths())
+            return
         if path == "/api/asset":
             self._serve_pack_asset(parse_qs(parsed.query))
             return
@@ -122,6 +140,9 @@ class WebHandler(BaseHTTPRequestHandler):
                 return
             if self.path == "/api/build":
                 self._send_json(build_payload(payload))
+                return
+            if self.path == "/api/game-path/resolve":
+                self._send_json(resolve_game_path_payload(payload))
                 return
             self.send_error(HTTPStatus.NOT_FOUND)
         except ValueError as error:
@@ -285,6 +306,67 @@ def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
         }
     finally:
         _close_session(session)
+
+
+def suggest_game_paths() -> dict[str, Any]:
+    candidates = []
+    seen: set[str] = set()
+    for path in DEFAULT_GAME_DATA_PATHS:
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        data_dir = _normalize_game_data_dir(path)
+        packs = _game_pack_status(data_dir)
+        candidates.append({
+            "path": str(data_dir),
+            "exists": data_dir.is_dir(),
+            "found": sum(1 for item in packs if item["exists"]),
+            "total": len(packs),
+        })
+    best = next((item for item in candidates if item["exists"] and item["found"]), None)
+    return {"ok": True, "candidates": candidates, "bestPath": best["path"] if best else ""}
+
+
+def resolve_game_path_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_path = payload.get("gamePath") or payload.get("gameDataPath")
+    if not raw_path:
+        raise ValueError("게임 설치 폴더 또는 data 폴더 경로를 입력하세요.")
+    data_dir = _normalize_game_data_dir(_resolve_user_path(raw_path))
+    packs = _game_pack_status(data_dir)
+    existing_paths = [item["path"] for item in packs if item["exists"]]
+    missing = [item["name"] for item in packs if not item["exists"]]
+    if not data_dir.is_dir():
+        raise ValueError(f"게임 data 폴더를 찾을 수 없습니다: {data_dir}")
+    if not existing_paths:
+        raise ValueError(f"공식 pack 파일을 찾을 수 없습니다: {data_dir}")
+    return {
+        "ok": True,
+        "dataDir": str(data_dir),
+        "referencePackPaths": existing_paths,
+        "packs": packs,
+        "missing": missing,
+        "message": f"공식 pack {len(existing_paths)}/{len(OFFICIAL_GAME_PACKS)}개를 참조 목록에 반영했습니다.",
+    }
+
+
+def _normalize_game_data_dir(path: Path) -> Path:
+    if path.name.lower() == "data":
+        return path
+    if path.suffix.lower() == ".pack":
+        return path.parent
+    return path / "data"
+
+
+def _game_pack_status(data_dir: Path) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": name,
+            "path": str(data_dir / name),
+            "exists": (data_dir / name).is_file(),
+        }
+        for name in OFFICIAL_GAME_PACKS
+    ]
 
 
 def read_character_data(

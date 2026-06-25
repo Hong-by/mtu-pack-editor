@@ -110,6 +110,14 @@ p {
   color: #edf4ed;
 }
 
+.game-path-input {
+  width: 250px;
+  min-height: 34px;
+  border-color: #58635a;
+  background: #1f2822;
+  color: #edf4ed;
+}
+
 .path-input:disabled {
   opacity: 0.55;
 }
