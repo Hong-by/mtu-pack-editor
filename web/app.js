@@ -217,7 +217,54 @@ const MANUAL_TITLE_EFFECTS = [
   ['하의', '백성의 군주', '결의 +20, 본능 +20, 권위 +20, 회복력 +1, 원거리 부대 유지비 -15%, 사기 +6(세력 전체 / 세력 지도자이거나 인공장군일 때)'],
   ['유장', '평화 지지자', '책략 +10, 본능 +5, 권위 +15, 식량생산 +50%(세력 승상, 지도자, 후계자일 때)'],
   ['장로', '칭호명 미확인', '전문성 +10, 결의 +15, 권위 +5, 식량생산 +100%(세력전체)(상국, 세력지도자, 후계자일 때)'],
+  ['약탈자', '약탈자', '전문성 +10, 본능 +5, 전투 후 전리품 수입 +25%(통솔할 때), 1레벨 기술: 격렬, 약점 공격'],
+  ['복수자', '복수자', '결의 +10, 본능 +5, 사기 -3(현지 현의 적군), 1레벨 기술: 최후의 돌격, 쟁취자'],
+  ['살인자', '살인자', '본능 +15, 부여 효과: 공포 유발, 1레벨 기술: 최후의 돌격, 격노'],
+  ['탈출한 죄수', '탈출한 죄수', '전문성 +10, 본능 +5, 전투 후 생포 회피 확률 +25%, 1레벨 기술: 약점 공격, 파렴치'],
+  ['주정뱅이', '주정뱅이', '결의 +10, 책략 -10, 본능 +10, 권위 -10, 부여 효과: 공포 유발 면역, 1레벨 기술: 불사조의 불꽃, 도달'],
 ].map(([owner, title, effects]) => ({ owner, title, effects }));
+
+const MANUAL_SKILL_EFFECTS = [
+  ['석벽', '원거리 방어 확률 +100%, 불굴 부여(범위 75, 30초, 재사용 120초)', ['stone bulwark', 'stone wall']],
+  ['땅의 부동심', '근접 회피 +100%, 돌격 저항 +1900%, 불굴 부여(범위 75, 30초, 재사용 120초)', ['earth steadfastness', 'heart of the earth']],
+  ['자연의 벗', '속도 +25%, 사기 +10, 숲 제약 무시(범위 75, 상시)', ['nature friend', 'friend of nature']],
+  ['평정', '불화살 사용, 야간 전투 가능', ['composure']],
+  ['격렬', '공격할 때 사기 +2, 돌격 속도 +25', ['intensity']],
+  ['기동', '전투 시 달리기 속도 +25%(아군 수행원)', ['mobility']],
+  ['명상', '방어할 때 사기 +2(지휘를 할 때)', ['meditation']],
+  ['열의', '근접 갑옷 관통 피해 +10%(아군), 근접 공격 속도 +40%', ['zeal']],
+  ['지각', '숲 제약 무시, 매복 회피 확률 +25%', ['perception']],
+  ['유연', '충원 +5%(지휘를 할 때), 재배치 비용 -25%(세력 전체 조건부)', ['flexibility']],
+  ['명료', '시야 +50%, 건물 유지비 -25%(태수가 있는 군)', ['clarity']],
+  ['품위', '규율 부여, 세력 지지 +5(세력 전체 조건부)', ['dignity']],
+  ['고귀', '고무 부여, 가능한 파견 임무 +1(세력 전체 조건부)', ['nobility']],
+  ['이해심', '근접 기병 원거리 방어 확률 +20%(아군 수행원), 공업 현황 조사 파견 해제', ['understanding']],
+  ['안정', '새로 모집한 모든 부대 등급 +1(세력 전체 조건부), 부패 근절 파견 해제, 공공질서 +5(태수가 있는 군)', ['stability']],
+  ['침착', '책략 +8, 화염 화살 사용, 야간 전투 가능', ['composure']],
+  ['학식', '책략 +8, 인물 경험치 +10, 상업/산업 수입 보조', ['scholarship']],
+  ['정밀', '전문성 +8, 관통 원거리 피해 +10, 재장전 속도 +10', ['precision']],
+  ['통찰', '권위 +8, 매복 회피 확률 +25%, 숲 제약 무시', ['perception']],
+  ['직감', '전문성 +8, 포로 탈출 확률 +25, 산업 수입 보조', ['intuition']],
+  ['수완', '책략 +8, 화염 포병 사용, 적 영토 이동 보조', ['resourcefulness']],
+  ['판단', '책략 +8, 교역 협정 +1, 원거리 피해 +25', ['judgement', 'judgment']],
+  ['인내', '결의 +8, 포로 생포 확률 +25, 공성 우위 보조', ['patience', 'endurance']],
+  ['도달', '원거리 사거리 +25%, 원거리 피해 보조', ['reach']],
+  ['복수', '본능 +8, 사기 +2, 공포 유발', ['vengeance']],
+  ['호위', '능력치 보강 및 부대/인물 보호형 보너스', ['bodyguard']],
+  ['봉황의 불꽃', '전문성 +4, 본능 +4, 불사조의 불꽃 계열 능력', ['flames of the phoenix']],
+  ['불사조의 불꽃', '전문성 +4, 본능 +4, 범위 피해형 화 속성 능력', ['phoenix']],
+  ['기만', '책략 +8, 매복 확률 +25, 유격 배치', ['guile']],
+  ['유격 배치', '전투 배치 선택 폭을 넓히는 유격 배치 효과', ['guerrilla deployment']],
+  ['격노', '본능 +8, 돌격 보너스 보조', ['fury']],
+  ['용맹', '본능 +8, 근접 전투 보조', ['bravery']],
+  ['위엄', '권위 +8, 세력/사기 보조', ['majesty']],
+  ['유연 Lv3', '결의 +8, 재배치 비용 -25, 충원률 +5', ['flexibility mlvl 3']],
+  ['인내 Lv3', '결의 +8, 피로 저항 +25, 소모 피해 감소', ['endurance mlvl 3', 'patience mlvl 3']],
+  ['기만 Lv3', '책략 +8, 매복 확률 +25, 유격 배치', ['guile mlvl 3']],
+  ['통찰 Lv3', '권위 +8, 매복 회피 확률 +25, 숲 제약 무시', ['perception mlvl 3']],
+  ['직감 Lv3', '전문성 +8, 포로 탈출 확률 +25, 산업 수입 보조', ['intuition mlvl 3']],
+  ['판단 Lv3', '책략 +8, 교역/외교 보조, 원거리 피해 +25', ['judgement mlvl 3', 'judgment mlvl 3']],
+].map(([name, effects, aliases = []]) => ({ name, effects, aliases }));
 
 const $ = (id) => document.getElementById(id);
 
@@ -575,6 +622,10 @@ function normalizeKoreanText(value) {
   return String(value || '').replace(/\s+/g, '').replace(/[·:;.,]/g, '').toLowerCase();
 }
 
+function normalizeLookupText(value) {
+  return String(value || '').replace(/[^0-9a-zA-Z가-힣]+/g, '').toLowerCase();
+}
+
 function manualTitleEffectFor(ownerName = '', titleName = '') {
   const owner = normalizeKoreanText(ownerName);
   const title = normalizeKoreanText(titleName);
@@ -592,6 +643,45 @@ function manualTitleEffectFor(ownerName = '', titleName = '') {
 function titleEffectFor(character) {
   if (character?.manualTitleEffect) return character.manualTitleEffect;
   return manualTitleEffectFor(character?.titleOwnerName || character?.name, character?.titleName);
+}
+
+function manualSkillEffectFor(infoOrKey = '') {
+  const key = typeof infoOrKey === 'string' ? infoOrKey : infoOrKey?.key;
+  const name = typeof infoOrKey === 'string' ? '' : infoOrKey?.name;
+  const haystack = normalizeLookupText(`${name || ''} ${friendlyKey(key || '')} ${key || ''}`);
+  if (!haystack) return null;
+  return MANUAL_SKILL_EFFECTS.find((item) => {
+    const needles = [item.name, ...(item.aliases || [])].map((value) => normalizeLookupText(value)).filter(Boolean);
+    return needles.some((needle) => haystack.includes(needle) || needle.includes(haystack));
+  }) || null;
+}
+
+function needsManualSkillEffect(info) {
+  const text = `${info?.description || ''} ${info?.effectSummary || ''}`;
+  if (!text.trim()) return true;
+  if (text.includes('효과 정보')) return true;
+  if (/[a-z]{3,}[_ ][a-z]{3,}/i.test(text)) return true;
+  return false;
+}
+
+function enrichedSkillInfo(infoOrKey) {
+  const base = typeof infoOrKey === 'string'
+    ? (skillTreesData().skillIndex?.[infoOrKey] || {
+        key: infoOrKey,
+        name: friendlyKey(infoOrKey),
+        description: '',
+        effectSummary: '',
+        element: '',
+      })
+    : (infoOrKey || {});
+  const manual = manualSkillEffectFor(base);
+  if (!manual) return base;
+  return {
+    ...base,
+    name: base.name && !String(base.name).includes('_') ? base.name : manual.name,
+    effectSummary: needsManualSkillEffect(base) ? manual.effects : (base.effectSummary || manual.effects),
+    manualEffect: manual.effects,
+  };
 }
 
 function titleOptionLabel(character) {
@@ -1735,7 +1825,7 @@ function skillTreesData() {
 }
 
 function skillIndexList() {
-  return Object.values(skillTreesData().skillIndex || {});
+  return Object.values(skillTreesData().skillIndex || {}).map((item) => enrichedSkillInfo(item));
 }
 
 function skillTreeBySet(setKey) {
@@ -1809,13 +1899,7 @@ function skillTreeSnapshot(prefix) {
 }
 
 function skillInfo(skillKey) {
-  return skillTreesData().skillIndex?.[skillKey] || {
-    key: skillKey,
-    name: friendlyKey(skillKey),
-    description: '',
-    effectSummary: '',
-    element: '',
-  };
+  return enrichedSkillInfo(skillKey);
 }
 
 function skillNodeLabel(node, draft) {
