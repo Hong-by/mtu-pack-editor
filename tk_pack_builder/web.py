@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import socket
 import subprocess
 import time
@@ -815,6 +816,246 @@ def _effect_summary(effects: list[dict[str, Any]]) -> str:
         pieces.append(f"{effect.get('name')}{suffix}{scope}")
     if len(effects) > 4:
         pieces.append(f"외 {len(effects) - 4}개")
+    return " · ".join(pieces)
+
+
+_SKILL_PHRASE_LABELS = {
+    "ability_fire_heart_seeker": "화염 추적자",
+    "flames_of_the_phoenix": "봉황의 불꽃",
+    "unpredictability": "예측불가",
+    "resourcefulness": "수완",
+    "humanity": "인애",
+    "rapacity": "탐욕",
+    "shamelessness": "파렴치",
+    "bodyguard": "호위",
+    "fire_heart_seeker": "화염 추적자",
+    "bravery": "용기",
+    "vengeance": "복수",
+    "endurance": "인내",
+    "fury": "격노",
+    "guile": "기만",
+    "reach": "사거리",
+    "passion": "열정",
+    "humility": "겸손",
+    "precision": "정밀",
+    "abundance": "풍요",
+    "gluttony": "탐욕",
+    "intuition": "직감",
+    "judgement": "판단",
+    "judgment": "판단",
+    "mobility": "기동",
+    "clarity": "명료",
+    "intensity": "집중",
+    "flexibility": "유연",
+    "dignity": "위엄",
+    "meditation": "명상",
+    "nobility": "고귀",
+    "zeal": "열의",
+    "composure": "침착",
+    "understanding": "이해",
+    "perception": "통찰",
+    "stability": "안정",
+}
+
+_SKILL_TERM_LABELS = {
+    **_SKILL_PHRASE_LABELS,
+    "expertise": "전문성",
+    "resolve": "결의",
+    "cunning": "책략",
+    "instinct": "본능",
+    "authority": "권위",
+    "ranged": "원거리",
+    "damage": "피해",
+    "armour": "갑옷",
+    "armor": "갑옷",
+}
+
+
+def _contains_hangul(text: str) -> bool:
+    return any("\uac00" <= ch <= "\ud7a3" for ch in text)
+
+
+def _translate_skill_name_text(text: str) -> str:
+    if not text or _contains_hangul(text):
+        return text
+    normalized = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+    return (
+        _SKILL_PHRASE_LABELS.get(normalized)
+        or _SKILL_TERM_LABELS.get(normalized)
+        or _friendly_skill_key(normalized)
+    )
+
+
+def _skill_name_for_key(skill_key: str, loc_text: dict[str, str]) -> str:
+    for loc_key in (
+        f"character_skills_localised_name_{skill_key}",
+        f"character_skills_name_{skill_key}",
+        f"character_skill_names_{skill_key}",
+    ):
+        if loc_text.get(loc_key):
+            return _translate_skill_name_text(loc_text[loc_key])
+    return _friendly_skill_key(skill_key)
+
+
+def _friendly_skill_key(skill_key: str) -> str:
+    value = str(skill_key or "")
+    lower = value.lower()
+    level_match = re.search(r"(?:^|_)mlvl_?(\d+)|(?:^|_)level_?(\d+)", lower)
+    level = f" Lv{level_match.group(1) or level_match.group(2)}" if level_match else ""
+    cleaned = lower
+    cleaned = re.sub(r"^3k_(?:main|dlc\d+|mtu)_", "", cleaned)
+    cleaned = re.sub(r"^skill_", "", cleaned)
+    cleaned = re.sub(r"^(?:special|mastery|ability)_", "", cleaned)
+    cleaned = re.sub(r"_mlvl_?\d+|_level_?\d+", "", cleaned)
+    if cleaned in _SKILL_PHRASE_LABELS:
+        return f"{_SKILL_PHRASE_LABELS[cleaned]}{level}"
+    for phrase_key, label in _SKILL_PHRASE_LABELS.items():
+        if phrase_key in cleaned:
+            return f"{label}{level}"
+    cleaned = re.sub(r"_(?:earth|fire|wood|water|metal)(?:_|$)", "_", cleaned)
+    cleaned = re.sub(r"(^|_)\d+($|_)", "_", cleaned)
+    cleaned = cleaned.strip("_")
+    if cleaned in _SKILL_PHRASE_LABELS:
+        return f"{_SKILL_PHRASE_LABELS[cleaned]}{level}"
+    for phrase_key, label in _SKILL_PHRASE_LABELS.items():
+        if phrase_key in cleaned:
+            return f"{label}{level}"
+    for part in re.split(r"_+", cleaned):
+        if part in _SKILL_TERM_LABELS:
+            return f"{_SKILL_TERM_LABELS[part]}{level}"
+    return _friendly_key(value)
+
+
+def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> str:
+    for loc_key in (
+        f"effects_description_{key}",
+        f"effects_localised_description_{key}",
+        f"effects_localised_title_{key}",
+        f"effects_name_{key}",
+    ):
+        if loc_text.get(loc_key):
+            return loc_text[loc_key]
+    for field in ("description", "onscreen_name", "name", "icon"):
+        value = row.get(field)
+        if value and loc_text.get(str(value)):
+            return loc_text[str(value)]
+        if value and field != "icon":
+            label = _friendly_key(str(value))
+            if not label.lower().startswith("effect "):
+                return label
+    return _friendly_effect_key(key)
+
+
+def _friendly_effect_key(key: str) -> str:
+    lower = str(key or "").lower()
+    attributes = {
+        "expertise": "전문성",
+        "resolve": "결의",
+        "cunning": "책략",
+        "instinct": "본능",
+        "authority": "권위",
+    }
+    for english, korean in attributes.items():
+        if english in lower:
+            return korean
+    for phrase_key, label in _SKILL_PHRASE_LABELS.items():
+        if phrase_key in lower:
+            return label
+    if "ai_hint" in lower or "ai hint" in lower:
+        return ""
+    if "satisfaction" in lower:
+        return "만족도"
+    if "morale" in lower:
+        return "사기"
+    if "movement" in lower:
+        return "이동거리"
+    if "replenishment" in lower:
+        return "충원률"
+    if "charge" in lower:
+        return "돌격 보너스"
+    if "ranged_damage" in lower or "ranged damage" in lower:
+        return "원거리 피해"
+    if "progression_limit_army" in lower:
+        return "군단 한도"
+    if "fatigue" in lower:
+        return "피로 저항"
+    if "attrition" in lower:
+        return "소모 피해"
+    if "ambush" in lower:
+        return "매복 확률"
+    if "guerrilla" in lower:
+        return "유격 배치"
+    if "redeployment" in lower:
+        return "재배치 비용"
+    if "faction_support" in lower or "faction support" in lower:
+        return "세력 지지도"
+    if "mighty_knockback" in lower or "knockback" in lower:
+        return "강한 밀쳐내기"
+    if "charge_speed" in lower:
+        return "돌격 속도"
+    if "fire_charge_bonus" in lower:
+        return "화염 돌격 보너스"
+    if "fire_units" in lower:
+        return "화염 부대 피해"
+    if "siege_escalation" in lower:
+        return "공성 우위"
+    if "enemy_territory" in lower:
+        return "적 영토 이동"
+    if "unlock_fire_conscription" in lower or "fire conscription" in lower:
+        return "화염 부대 모집 해금"
+    if "disciplined" in lower:
+        return "규율"
+    if "melee_damage" in lower or "melee damage" in lower:
+        return "근접 피해"
+    if "melee_evasion" in lower:
+        return "근접 회피"
+    if "armour" in lower or "armor" in lower:
+        return "갑옷"
+    if "ammo" in lower or "ammunition" in lower:
+        return "탄약"
+    if "income" in lower or "gdp" in lower:
+        return "수입"
+    if "food" in lower:
+        return "식량"
+    if "diplomacy" in lower:
+        return "외교"
+    if "resilience" in lower:
+        return "회복력"
+    if "fear" in lower:
+        return "공포 유발"
+    if "stalk" in lower:
+        return "은밀한 이동"
+    if "vanguard" in lower:
+        return "유격 배치"
+    if "ability" in lower:
+        return "능력"
+    return _friendly_key(str(key or ""))
+
+
+def _visible_effect_label(effect: dict[str, Any]) -> str:
+    key = str(effect.get("effectKey") or "")
+    name = str(effect.get("name") or "")
+    label = name if name and not name.lower().startswith("effect ") else _friendly_effect_key(key)
+    if label and not _contains_hangul(label):
+        label = _friendly_effect_key(key)
+    lower = f"{key} {label}".lower()
+    if "ai_hint" in lower or "ai hint" in lower:
+        return ""
+    return label.strip()
+
+
+def _effect_summary(effects: list[dict[str, Any]]) -> str:
+    useful_effects = [effect for effect in effects if _visible_effect_label(effect)]
+    if not useful_effects:
+        return "효과 정보 없음"
+    pieces = []
+    for effect in useful_effects[:4]:
+        label = _visible_effect_label(effect)
+        value = effect.get("value")
+        suffix = f" {value:+g}" if isinstance(value, (int, float)) else f" {value}" if value not in {None, ""} else ""
+        pieces.append(f"{label}{suffix}")
+    if len(useful_effects) > 4:
+        pieces.append(f"외 {len(useful_effects) - 4}개")
     return " · ".join(pieces)
 
 

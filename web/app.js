@@ -1642,6 +1642,109 @@ function renderSkillCandidates(prefix, query) {
   `).join('') || '<p class="skill-tree-empty">검색 결과가 없습니다.</p>';
 }
 
+function skillEffectText(info) {
+  return info?.effectSummary || info?.description || '효과 정보 없음';
+}
+
+function skillTreeOwnerName(prefix) {
+  const character = selectedCharacter();
+  return character?.name || '선택 장수';
+}
+
+function renderSkillTreeEditor(prefix) {
+  const container = $(`${prefix}SkillTreeEditor`);
+  if (!container) return;
+  const setKey = selectedSkillSetKey(prefix);
+  const tree = skillTreeBySet(setKey);
+  if (!tree) {
+    container.innerHTML = '<p class="skill-tree-empty">낭만 스킬트리 데이터를 찾지 못했습니다. 참조 pack을 다시 읽어주세요.</p>';
+    return;
+  }
+  const draft = skillTreeDraft(prefix, setKey);
+  const activeNodeKey = state.activeSkillNode?.prefix === prefix ? state.activeSkillNode.nodeKey : '';
+  const xs = [...new Set(tree.nodes.map((node) => Number(node.position?.x ?? 0)))].sort((a, b) => a - b);
+  const ys = [...new Set(tree.nodes.map((node) => Number(node.position?.y ?? 0)))].sort((a, b) => a - b);
+  const gridStyle = `--skill-cols:${Math.max(xs.length, 1)};--skill-rows:${Math.max(ys.length, 1)}`;
+  const activeNode = tree.nodes.find((node) => node.key === activeNodeKey) || tree.nodes[0];
+  const activeInfo = activeNode ? skillInfo(draft.replacements[activeNode.key] || activeNode.skillKey) : null;
+  container.innerHTML = `
+    <div class="skill-tree-head">
+      <div>
+        <strong>${escapeHtml(skillTreeOwnerName(prefix))} 낭만 스킬트리</strong>
+        <span>${tree.nodes.length}개 노드 · 바꿀 노드를 클릭한 뒤 아래 후보를 선택하세요.</span>
+      </div>
+      <button type="button" class="ghost-btn mini" data-skill-reset="${prefix}">초기화</button>
+    </div>
+    <div class="skill-tree-board" style="${gridStyle}">
+      ${tree.nodes.map((node) => {
+        const x = xs.indexOf(Number(node.position?.x ?? 0)) + 1;
+        const y = ys.indexOf(Number(node.position?.y ?? 0)) + 1;
+        const replaced = draft.replacements[node.key];
+        const info = skillInfo(replaced || node.skillKey);
+        const element = info.element || 'none';
+        return `
+          <button
+            type="button"
+            class="skill-node element-${element} ${node.key === activeNode?.key ? 'active' : ''} ${replaced ? 'changed' : ''}"
+            data-skill-node="${escapeHtml(node.key)}"
+            data-skill-prefix="${prefix}"
+            style="grid-column:${x};grid-row:${y}"
+            title="${escapeHtml(`${info.name}\n${skillEffectText(info)}`)}"
+          >
+            <b>${escapeHtml(info.name)}${replaced ? ' *' : ''}</b>
+            <small>${escapeHtml(skillEffectText(info))}</small>
+          </button>
+        `;
+      }).join('')}
+    </div>
+    <div class="skill-picker">
+      <div class="skill-picker-title">
+        <strong>교체할 노드: ${escapeHtml(activeInfo?.name || '노드 선택')}</strong>
+        <span>${escapeHtml(skillEffectText(activeInfo))}</span>
+      </div>
+      <input class="skill-search" data-skill-search="${prefix}" placeholder="스킬 이름이나 효과 검색">
+      <div class="skill-candidates" data-skill-candidates="${prefix}">
+        ${renderSkillCandidates(prefix, '')}
+      </div>
+    </div>
+  `;
+}
+
+function renderSkillCandidates(prefix, query) {
+  const setKey = selectedSkillSetKey(prefix);
+  const tree = skillTreeBySet(setKey);
+  const activeNodeKey = state.activeSkillNode?.prefix === prefix ? state.activeSkillNode.nodeKey : tree?.nodes?.[0]?.key;
+  if (!activeNodeKey) return '<p class="skill-tree-empty">교체할 노드를 먼저 선택하세요.</p>';
+  const activeNode = tree?.nodes?.find((node) => node.key === activeNodeKey);
+  const activeInfo = activeNode ? skillInfo(activeNode.skillKey) : null;
+  const q = String(query || '').trim().toLowerCase();
+  const candidates = skillIndexList()
+    .filter((item) => {
+      const haystack = `${item.name} ${item.description} ${item.effectSummary} ${item.key}`.toLowerCase();
+      return !q || haystack.includes(q);
+    })
+    .sort((a, b) => {
+      const aSame = a.element && a.element === activeInfo?.element ? 1 : 0;
+      const bSame = b.element && b.element === activeInfo?.element ? 1 : 0;
+      if (aSame !== bSame) return bSame - aSame;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+    })
+    .slice(0, 80);
+  return candidates.map((item) => `
+    <button
+      type="button"
+      class="skill-candidate element-${item.element || 'none'}"
+      data-skill-candidate="${escapeHtml(item.key)}"
+      data-skill-prefix="${prefix}"
+      data-skill-target="${escapeHtml(activeNodeKey)}"
+      title="${escapeHtml(`${item.name}\n${skillEffectText(item)}`)}"
+    >
+      <b>${escapeHtml(item.name)}</b>
+      <span>${escapeHtml(skillEffectText(item))}</span>
+    </button>
+  `).join('') || '<p class="skill-tree-empty">검색 결과가 없습니다.</p>';
+}
+
 function detailOverrideFromSources(attribute, skill, unit, retinueOverride = null) {
   const overrides = {};
   const attributeDetails = detailsByMode(attribute);
