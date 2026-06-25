@@ -157,13 +157,13 @@ class WebHandler(BaseHTTPRequestHandler):
     def _serve_pack_asset(self, query: dict[str, list[str]]) -> None:
         input_path = query.get("inputPath", [""])[0]
         requested_packed_path = query.get("path", [""])[0]
-        if not input_path or not requested_packed_path:
-            self.send_error(HTTPStatus.BAD_REQUEST, "inputPath and path are required")
+        if not requested_packed_path:
+            self.send_error(HTTPStatus.BAD_REQUEST, "path is required")
             return
         packed_path = _real_packed_asset_path(requested_packed_path)
-        pack_path = _resolve_user_path(input_path)
-        extracted = _extracted_asset_path(pack_path, requested_packed_path)
-        if extracted.is_file():
+        pack_path = _resolve_user_path(input_path) if input_path else None
+        extracted = _extracted_asset_path(pack_path, requested_packed_path) if pack_path is not None else None
+        if extracted is not None and extracted.is_file():
             content_type = mimetypes.guess_type(extracted.name)[0] or "application/octet-stream"
             self._send_bytes(extracted.read_bytes(), content_type, cache_hit=True)
             return
@@ -171,6 +171,9 @@ class WebHandler(BaseHTTPRequestHandler):
         if extracted_any is not None:
             content_type = mimetypes.guess_type(extracted_any.name)[0] or "application/octet-stream"
             self._send_bytes(extracted_any.read_bytes(), content_type, cache_hit=True)
+            return
+        if pack_path is None:
+            self.send_error(HTTPStatus.NOT_FOUND, "Extracted asset not found and no source pack path was provided.")
             return
         cached = PACK_CACHE.get_asset(pack_path, packed_path)
         if cached is not None:
@@ -201,7 +204,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 _close_session(session)
         content_type = mimetypes.guess_type(packed_path)[0] or "application/octet-stream"
         PACK_CACHE.put_asset(pack_path, packed_path, content_type, data)
-        _write_extracted_asset(extracted, data)
+        if extracted is not None:
+            _write_extracted_asset(extracted, data)
         self._send_bytes(data, content_type, cache_hit=False)
 
     def _send_bytes(self, data: bytes, content_type: str, cache_hit: bool = False) -> None:
@@ -265,7 +269,6 @@ def _fallback_pack_path(pack_path: Path) -> Path | None:
     candidates = [
         ROOT / "work" / "packs" / pack_path.name,
         ROOT / "work" / "packs" / "refs" / pack_path.name,
-        ROOT / "work" / "packs" / "my_hero.pack",
     ]
     return next((path for path in candidates if path.is_file()), None)
 
@@ -276,20 +279,24 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
     input_path = payload.get("inputPath")
     include_vanilla = bool(payload.get("includeVanilla"))
     reference_paths = _reference_pack_paths(payload)
-    if not input_path:
-        raise ValueError("inputPath is required.")
-    pack_path = _resolve_user_path(input_path)
+    pack_path = _resolve_user_path(input_path) if input_path else None
     if not payload.get("forceRefresh"):
         cache_started = time.perf_counter()
-        cached = PACK_CACHE.get_open_payload(pack_path, include_vanilla, reference_paths) if pack_path.exists() else None
+        cached = (
+            PACK_CACHE.get_open_payload(pack_path, include_vanilla, reference_paths)
+            if pack_path is not None and pack_path.exists()
+            else None
+        )
         timings["cacheLookup"] = _elapsed(cache_started)
         if cached is not None:
+            _refresh_skill_tree_labels(cached.get("characters", {}))
             cached["timings"] = {**timings, "total": _elapsed(started_at)}
             return cached
         snapshot_started = time.perf_counter()
         snapshot = _load_reference_snapshot()
         timings["snapshotLookup"] = _elapsed(snapshot_started)
         if snapshot is not None:
+            _refresh_skill_tree_labels(snapshot.get("characters", {}))
             snapshot["timings"] = {**timings, "total": _elapsed(started_at)}
             return snapshot
         raise ValueError("DB 스냅샷이 없습니다. pack 원본 조회가 필요하면 상단의 DB 갱신을 눌러주세요.")
@@ -355,6 +362,40 @@ def _write_reference_snapshot(analysis: dict[str, Any], characters: dict[str, An
     }
     with REFERENCE_SNAPSHOT.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False)
+
+
+def _refresh_skill_tree_labels(characters: dict[str, Any]) -> None:
+    skill_trees = characters.get("skillTrees") if isinstance(characters, dict) else None
+    if not isinstance(skill_trees, dict):
+        return
+    skill_index = skill_trees.get("skillIndex")
+    if isinstance(skill_index, dict):
+        for key, entry in skill_index.items():
+            _refresh_skill_entry(str(key), entry)
+    for value in skill_trees.values():
+        if not isinstance(value, list):
+            continue
+        for tree in value:
+            if not isinstance(tree, dict):
+                continue
+            for node in tree.get("nodes", []):
+                _refresh_skill_entry(str(node.get("skillKey") or node.get("key") or ""), node)
+
+
+def _refresh_skill_entry(fallback_key: str, entry: Any) -> None:
+    if not isinstance(entry, dict):
+        return
+    name = str(entry.get("name") or "")
+    if not name or not _contains_hangul(name):
+        translated_name = _translate_skill_name_text(name)
+        entry["name"] = (
+            translated_name
+            if translated_name and _contains_hangul(translated_name)
+            else _friendly_skill_key(str(entry.get("key") or fallback_key or name))
+        )
+    effects = entry.get("effects")
+    if isinstance(effects, list):
+        entry["effectSummary"] = _effect_summary(effects)
 
 
 def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1181,6 +1222,29 @@ _SKILL_PHRASE_LABELS = {
     "ability_fire_targeted_strike": "정밀 타격",
     "ability_fire_undying_vow": "불굴의 맹세",
     "ability_fire_wildfire_raider": "들불 약탈자",
+    "ability_earth_stone_bulwark": "석벽",
+    "ability_earth_distant_courage": "원대한 용기",
+    "ability_earth_familial_conflict": "가족 갈등",
+    "ability_earth_heavenly_presence": "천상의 존재감",
+    "ability_earth_imperious_presence": "위압적 존재감",
+    "ability_earth_inspiring_words": "격려의 말",
+    "ability_earth_qiao_sisters": "교 자매",
+    "ability_earth_unyielding_earth": "불굴의 대지",
+    "ability_metal_alt_1": "금속성 보조 1",
+    "ability_metal_alt_2": "금속성 보조 2",
+    "ability_metal_elemental_vigour": "원소의 활력",
+    "ability_metal_fleet_footed": "날랜 발",
+    "ability_metal_geographic_mastery": "지형 숙달",
+    "ability_metal_impenetrable_redoubt": "난공불락 보루",
+    "ability_metal_impetuous_charge": "성급한 돌격",
+    "ability_metal_inward_focus": "내면 집중",
+    "ability_metal_poison_volley": "독화살 일제사격",
+    "ability_metal_swift_fingers": "재빠른 손놀림",
+    "ability_metal_tactical_withdrawal": "전술적 후퇴",
+    "ability_metal_tempered_deflection": "단련된 받아넘기기",
+    "ability_metal_venomous_shot": "맹독 사격",
+    "ability_metal_warning_shot": "경고 사격",
+    "ability_wood_why_the_cold_feet": "망설이는 발걸음",
     "ability_water_inspiring_surge": "고무적인 격류",
     "ability_water_stifling_deluge": "숨막히는 폭우",
     "ability_water_two_zhangs": "두 장씨",
@@ -1188,7 +1252,24 @@ _SKILL_PHRASE_LABELS = {
     "blazing_roar": "불타는 포효",
     "blazing_saddles": "불타는 안장",
     "blossoming_beauty": "꽃피는 미인",
+    "cold_feet": "망설이는 발걸음",
     "devastating_roar": "파괴적인 포효",
+    "distant_courage": "원대한 용기",
+    "earth_distant_courage": "원대한 용기",
+    "earth_familial_conflict": "가족 갈등",
+    "earth_heavenly_presence": "천상의 존재감",
+    "earth_imperious_presence": "위압적 존재감",
+    "earth_inspiring_words": "격려의 말",
+    "earth_opportunism": "기회주의",
+    "earth_qiao_sisters": "교 자매",
+    "earth_ceasefire": "휴전",
+    "earth_shattering_strike": "대지분쇄 일격",
+    "emperor_earth_imposing": "황제의 위압",
+    "emperor_earth_modesty": "황제의 겸양",
+    "earth_stone_bulwark": "석벽",
+    "earth_unyielding_earth": "불굴의 대지",
+    "elemental_vigour": "원소의 활력",
+    "familial_conflict": "가족 갈등",
     "final_rush": "최후의 돌격",
     "fire_bomb": "화염탄",
     "internal_blaze": "내면의 불꽃",
@@ -1210,12 +1291,43 @@ _SKILL_PHRASE_LABELS = {
     "camp_crushing": "진영 파괴",
     "fervent_cheer": "열렬한 함성",
     "hail_of_arrows": "화살 세례",
+    "heavenly_presence": "천상의 존재감",
+    "imperious_presence": "위압적 존재감",
+    "imposing": "황제의 위압",
+    "impenetrable_redoubt": "난공불락 보루",
+    "impetuous_charge": "성급한 돌격",
+    "inspiring_words": "격려의 말",
     "inspiring_surge": "고무적인 격류",
+    "inward_focus": "내면 집중",
+    "fleet_footed": "날랜 발",
+    "geographic_mastery": "지형 숙달",
+    "metal_alt_1": "금속성 보조 1",
+    "metal_alt_2": "금속성 보조 2",
+    "metal_elemental_vigour": "원소의 활력",
+    "metal_fleet_footed": "날랜 발",
+    "metal_geographic_mastery": "지형 숙달",
+    "metal_impenetrable_redoubt": "난공불락 보루",
+    "metal_impetuous_charge": "성급한 돌격",
+    "metal_inward_focus": "내면 집중",
+    "metal_insight": "금속 통찰",
+    "metal_poison_volley": "독화살 일제사격",
+    "metal_swift_fingers": "재빠른 손놀림",
+    "metal_tactical_withdrawal": "전술적 후퇴",
+    "metal_tempered_deflection": "단련된 받아넘기기",
+    "metal_tenacity_of_steel": "강철의 끈기",
+    "metal_venomous_shot": "맹독 사격",
+    "metal_warning_shot": "경고 사격",
+    "mastery_metal_insight": "금속 통찰 숙련",
+    "mastery_earth_opportunism": "기회주의 숙련",
+    "skill_mastery_earth_opportunism": "기회주의 숙련",
+    "modesty": "황제의 겸양",
     "sight_of_the_dragon": "용의 통찰",
     "skill_special_ability_water": "수계 특수 능력",
     "stifling_deluge": "숨막히는 폭우",
     "the_dragons_gaze": "용의 응시",
     "two_zhangs": "두 장씨",
+    "unyielding_earth": "불굴의 대지",
+    "why_the_cold_feet": "망설이는 발걸음",
     "xianchenying": "선진영",
     "unbreakable": "불굴",
     "obfuscation": "기만",
@@ -1252,6 +1364,19 @@ _SKILL_PHRASE_LABELS = {
     "humility": "겸손",
     "precision": "정밀",
     "projectile_fire_arrows": "화염 화살",
+    "poison_volley": "독화살 일제사격",
+    "opportunism": "기회주의",
+    "qiao_sisters": "교 자매",
+    "quickfire": "속사",
+    "roar_of_the_beast": "야수의 포효",
+    "ceasefire": "휴전",
+    "shattering_strike": "대지분쇄 일격",
+    "swift_fingers": "재빠른 손놀림",
+    "tactical_withdrawal": "전술적 후퇴",
+    "tempered_deflection": "단련된 받아넘기기",
+    "tenacity_of_steel": "강철의 끈기",
+    "venomous_shot": "맹독 사격",
+    "warning_shot": "경고 사격",
     "fire_arrows": "화염 화살",
     "abundance": "풍요",
     "gluttony": "탐욕",
@@ -1357,11 +1482,15 @@ def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> st
         f"effects_name_{key}",
     ):
         if loc_text.get(loc_key):
-            return loc_text[loc_key]
+            label = loc_text[loc_key]
+            translated = _friendly_effect_key(label)
+            return translated if translated and _contains_hangul(translated) else _translate_skill_name_text(label)
     for field in ("description", "onscreen_name", "name", "icon"):
         value = row.get(field)
         if value and loc_text.get(str(value)):
-            return loc_text[str(value)]
+            label = loc_text[str(value)]
+            translated = _friendly_effect_key(label)
+            return translated if translated and _contains_hangul(translated) else _translate_skill_name_text(label)
         if value and field != "icon":
             label = _friendly_effect_key(str(value))
             if label and _contains_hangul(label):
@@ -1395,6 +1524,32 @@ def _friendly_effect_key(key: str) -> str:
         return "화염 화살"
     if "ai_hint" in lower or "ai hint" in lower:
         return ""
+    if "campaign_progression_yellow_turbans" in lower or "campaign progression yellow turbans" in lower:
+        return "황건 세력 캠페인 진행"
+    if "stat_mod_missile_defence" in lower or "stat mod missile defence" in lower:
+        return "원거리 방어"
+    if "technology_research_points" in lower or "technology research points" in lower:
+        return "기술 연구 점수"
+    if "province_corruption" in lower or "province corruption" in lower:
+        return "부패"
+    if "action_cover_cost_bonus" in lower or "action cover cost bonus" in lower:
+        return "은폐 행동 비용"
+    if "action_network_cost_bonus" in lower or "action network cost bonus" in lower:
+        return "첩보망 행동 비용"
+    if "effect_salary" in lower or "effect salary" in lower:
+        return "봉록"
+    if "ignore_forest_penalties" in lower or "ignore forest penalties" in lower:
+        return "숲 제약 무시"
+    if "ignore_forest" in lower or "ignore forest" in lower:
+        return "숲 제약 무시"
+    if "ancillary" in lower:
+        return "장비"
+    if "stone_bulwark" in normalized or "stone bulwark" in lower:
+        return "석벽"
+    if "unyielding_earth" in normalized or "unyielding earth" in lower:
+        return "불굴의 대지"
+    if "why_the_cold_feet" in normalized or "why the cold feet" in lower:
+        return "망설이는 발걸음"
     if "run_speed" in lower or "campaign_run_speed" in lower:
         return "속도"
     if "line_of_sight" in lower:

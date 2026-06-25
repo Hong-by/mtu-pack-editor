@@ -40,22 +40,6 @@ $rpfmSource = Join-Path $root "work\rpfm-dist"
 $rpfmTarget = Join-Path $workDir "rpfm-dist"
 $snapshotSource = Join-Path $root "work\reference_snapshot.json"
 $snapshotTarget = Join-Path $workDir "reference_snapshot.json"
-$packSource = Join-Path $root "work\packs\my_hero.pack"
-$packTarget = Join-Path $workDir "packs\my_hero.pack"
-$referencePackNames = @(
-    "database.pack",
-    "data_mh.pack",
-    "data_ep.pack",
-    "data_dlc07.pack",
-    "data_dlc06.pack",
-    "data_bl.pack",
-    "data_yt_bl.pack",
-    "BFG_Originals.pack",
-    "BFG_for_MTU.pack",
-    "BFG_Nanman2.pack",
-    "BFG_Yellow_Turban.pack",
-    "LSHZ_lbdc_lh.pack"
-)
 $assetSource = Join-Path $root "work\assets"
 $assetTarget = Join-Path $workDir "assets"
 robocopy (Join-Path $root "web") $webTarget /E | Out-Null
@@ -64,19 +48,8 @@ if ($LASTEXITCODE -gt 7) {
 }
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $workDir "packs") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $workDir "packs\refs") | Out-Null
 if (Test-Path $snapshotSource) {
     Copy-Item -LiteralPath $snapshotSource -Destination $snapshotTarget -Force
-}
-if (Test-Path $packSource) {
-    Copy-Item -LiteralPath $packSource -Destination $packTarget -Force
-}
-foreach ($name in $referencePackNames) {
-    $source = Join-Path $root "work\packs\refs\$name"
-    $target = Join-Path $workDir "packs\refs\$name"
-    if (Test-Path $source) {
-        Copy-Item -LiteralPath $source -Destination $target -Force
-    }
 }
 if (Test-Path $assetSource) {
     robocopy $assetSource $assetTarget /E | Out-Null

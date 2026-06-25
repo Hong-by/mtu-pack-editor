@@ -225,8 +225,20 @@ const MANUAL_TITLE_EFFECTS = [
 ].map(([owner, title, effects]) => ({ owner, title, effects }));
 
 const MANUAL_SKILL_EFFECTS = [
-  ['석벽', '원거리 방어 확률 +100%, 불굴 부여(범위 75, 30초, 재사용 120초)', ['stone bulwark', 'stone wall']],
-  ['땅의 부동심', '근접 회피 +100%, 돌격 저항 +1900%, 불굴 부여(범위 75, 30초, 재사용 120초)', ['earth steadfastness', 'heart of the earth']],
+  ['석벽', '원거리 방어 확률 +100%, 불굴 부여(범위 75, 30초, 재사용 120초)', ['stone bulwark', 'stone wall', 'ability earth stone bulwark', 'ability_earth_stone_bulwark']],
+  ['원대한 용기', '권위 +4, 결의 +4', ['distant courage', 'skill distant courage', 'ability earth distant courage', 'ability_earth_distant_courage']],
+  ['가족 갈등', '능력 +1, 권위 +4, 책략 +4', ['familial conflict', 'ability earth familial conflict', 'ability_earth_familial_conflict']],
+  ['천상의 존재감', '능력 +1, 권위 +4, 결의 +4', ['heavenly presence', 'ability earth heavenly presence', 'ability_earth_heavenly_presence']],
+  ['위압적 존재감', '권위 +4, 책략 +4', ['imperious presence', 'skill imperious presence', 'ability earth imperious presence', 'ability_earth_imperious_presence']],
+  ['격려의 말', '권위 +4, 본능 +4', ['inspiring words', 'skill inspiring words', 'ability earth inspiring words', 'ability_earth_inspiring_words']],
+  ['교 자매', '권위 +4, 결의 +4', ['qiao sisters', 'ability earth qiao sisters', 'ability_earth_qiao_sisters']],
+  ['금속성 보조 1', '권위 +3, 전문성 +5, 능력 +1, 황건 세력 캠페인 진행 +2', ['metal alt 1', 'ability metal alt 1', 'ability_metal_alt_1']],
+  ['금속성 보조 2', '권위 +3, 전문성 +5, 사거리 +1, 황건 세력 캠페인 진행 +2', ['metal alt 2', 'ability metal alt 2', 'ability_metal_alt_2']],
+  ['원소의 활력', '권위 +4, 전문성 +4', ['elemental vigour', 'elemental vigor', 'ability metal elemental vigour', 'ability_metal_elemental_vigour']],
+  ['날랜 발', '전문성 +4, 본능 +4', ['fleet footed', 'ability metal fleet footed', 'ability_metal_fleet_footed']],
+  ['지형 숙달', '능력 +1, 권위 +4, 전문성 +4', ['geographic mastery', 'ability metal geographic mastery', 'ability_metal_geographic_mastery']],
+  ['불굴의 대지', '근접 회피 +100%, 돌격 저항 +1900%, 불굴 부여(범위 75, 30초, 재사용 120초)', ['earth steadfastness', 'heart of the earth', 'unyielding earth', 'ability earth unyielding earth', 'ability_earth_unyielding_earth']],
+  ['망설이는 발걸음', '능력 +0, 책략 +4, 본능 +4', ['why the cold feet', 'why_the_cold_feet', 'ability wood why the cold feet', 'ability_wood_why_the_cold_feet']],
   ['자연의 벗', '속도 +25%, 사기 +10, 숲 제약 무시(범위 75, 상시)', ['nature friend', 'friend of nature']],
   ['평정', '불화살 사용, 야간 전투 가능', ['composure']],
   ['격렬', '공격할 때 사기 +2, 돌격 속도 +25', ['intensity']],
@@ -668,18 +680,27 @@ function enrichedSkillInfo(infoOrKey) {
   const base = typeof infoOrKey === 'string'
     ? (skillTreesData().skillIndex?.[infoOrKey] || {
         key: infoOrKey,
-        name: friendlyKey(infoOrKey),
+        name: friendlySkillName(infoOrKey),
         description: '',
         effectSummary: '',
         element: '',
       })
     : (infoOrKey || {});
+  const baseName = String(base.name || '');
+  const translatedName = friendlySkillName(baseName || base.key || '');
   const manual = manualSkillEffectFor(base);
-  if (!manual) return base;
+  if (!manual) {
+    return {
+      ...base,
+      name: translatedName || base.name,
+      effectSummary: translateSkillEffectText(base.effectSummary || ''),
+      description: translateSkillEffectText(base.description || ''),
+    };
+  }
   return {
     ...base,
-    name: base.name && !String(base.name).includes('_') ? base.name : manual.name,
-    effectSummary: needsManualSkillEffect(base) ? manual.effects : (base.effectSummary || manual.effects),
+    name: baseName && !baseName.includes('_') && /[가-힣]/.test(baseName) ? base.name : manual.name,
+    effectSummary: needsManualSkillEffect(base) ? manual.effects : translateSkillEffectText(base.effectSummary || manual.effects),
     manualEffect: manual.effects,
   };
 }
@@ -857,6 +878,136 @@ function friendlyKey(value) {
     .filter((word) => word && !['3k', 'main', 'mtu', 'template', 'historical', 'hero', 'general'].includes(word))
     .slice(-4)
     .join(' ') || String(value || '-');
+}
+
+const SKILL_NAME_TRANSLATIONS = {
+  'stone bulwark': '석벽',
+  'distant courage': '원대한 용기',
+  'familial conflict': '가족 갈등',
+  'heavenly presence': '천상의 존재감',
+  'imperious presence': '위압적 존재감',
+  'inspiring words': '격려의 말',
+  'qiao sisters': '교 자매',
+  'emperor earth imposing': '황제의 위압',
+  'emperor earth modesty': '황제의 겸양',
+  'imposing': '황제의 위압',
+  'modesty': '황제의 겸양',
+  'opportunism': '기회주의',
+  'earth opportunism': '기회주의',
+  'mastery earth opportunism': '기회주의 숙련',
+  'skill mastery earth opportunism': '기회주의 숙련',
+  'ceasefire': '휴전',
+  'earth ceasefire': '휴전',
+  'shattering strike': '대지분쇄 일격',
+  'earth shattering strike': '대지분쇄 일격',
+  'unyielding earth': '불굴의 대지',
+  'why the cold feet': '망설이는 발걸음',
+  'blade breaker': '검 파괴자',
+  'blazing roar': '불타는 포효',
+  'blazing saddles': '불타는 안장',
+  'devastating roar': '파괴적인 포효',
+  'final rush': '최후의 돌격',
+  'fire bomb': '화염탄',
+  'internal blaze': '내면의 불꽃',
+  'mighty thrust': '강력한 찌르기',
+  'natures ally': '자연의 벗',
+  "nature's ally": '자연의 벗',
+  'scattering blows': '흩뿌리는 일격',
+  'sundering strike': '분쇄의 일격',
+  'targeted strike': '정밀 타격',
+  'undying vow': '불굴의 맹세',
+  'wildfire raider': '들불 약탈자',
+  'inspiring surge': '고무적인 격류',
+  'stifling deluge': '숨막히는 폭우',
+  'two zhangs': '두 장씨',
+  'sight of the dragon': '용의 통찰',
+  'the dragons gaze': '용의 응시',
+  "the dragon's gaze": '용의 응시',
+  'hail of arrows': '화살 세례',
+  'blood soaked wrath': '피로 물든 분노',
+  'breakthrough in concentration': '집중 돌파',
+  'camp crushing': '진영 파괴',
+  'fervent cheer': '열렬한 함성',
+  'flames of the phoenix': '봉황의 불꽃',
+  'fire arrows': '화염 화살',
+  'metal alt 1': '금속성 보조 1',
+  'metal alt 2': '금속성 보조 2',
+  'elemental vigour': '원소의 활력',
+  'elemental vigor': '원소의 활력',
+  'fleet footed': '날랜 발',
+  'geographic mastery': '지형 숙달',
+  'impenetrable redoubt': '난공불락 보루',
+  'impetuous charge': '성급한 돌격',
+  'inward focus': '내면 집중',
+  'poison volley': '독화살 일제사격',
+  'swift fingers': '재빠른 손놀림',
+  'tactical withdrawal': '전술적 후퇴',
+  'tempered deflection': '단련된 받아넘기기',
+  'venomous shot': '맹독 사격',
+  'warning shot': '경고 사격',
+  'tenacity of steel': '강철의 끈기',
+  'roar of the beast': '야수의 포효',
+  'mastery metal insight': '금속 통찰 숙련',
+  'metal insight': '금속 통찰',
+  'special ability metal': '금속 특수 능력',
+  'metal exemplar': '금속의 모범',
+  'metal quickfire': '금속 속사',
+  'quickfire': '속사',
+  'emphatic volley': '강렬한 일제사격',
+};
+
+const SKILL_EFFECT_TRANSLATIONS = {
+  'campaign progression yellow turbans': '황건 세력 캠페인 진행',
+  'stat mod missile defence': '원거리 방어',
+  'effect technology research points': '기술 연구 점수',
+  'effect province corruption': '부패',
+  'action cover cost bonus': '은폐 행동 비용',
+  'action network cost bonus': '첩보망 행동 비용',
+  'effect salary': '봉록',
+};
+
+function skillLookupKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/^3k[_ -](?:main|dlc\d+|mtu)[_ -]/, '')
+    .replace(/^(?:effect|effects|enable|unlock|skill|ability|special ability|projectile)[_ -]+/, '')
+    .replace(/^(?:dlc\d+)[_ -]+(?:skill)[_ -]+/, '')
+    .replace(/^(?:emperor|mastery)[_ -]+/, '')
+    .replace(/^(?:earth|fire|wood|water|metal)[_ -]+/, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/[^0-9a-z가-힣' ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function friendlySkillName(value) {
+  const raw = String(value || '');
+  if (!raw) return '-';
+  if (/[가-힣]/.test(raw)) return raw;
+  const rawLookup = raw.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (SKILL_NAME_TRANSLATIONS[rawLookup]) return SKILL_NAME_TRANSLATIONS[rawLookup];
+  const direct = skillLookupKey(raw);
+  if (SKILL_NAME_TRANSLATIONS[direct]) return SKILL_NAME_TRANSLATIONS[direct];
+  const fallback = skillLookupKey(friendlyKey(raw));
+  if (SKILL_NAME_TRANSLATIONS[fallback]) return SKILL_NAME_TRANSLATIONS[fallback];
+  for (const [english, korean] of Object.entries(SKILL_NAME_TRANSLATIONS)) {
+    if (direct.includes(english) || english.includes(direct)) return korean;
+  }
+  return friendlyKey(raw);
+}
+
+function translateSkillEffectText(value) {
+  let text = String(value || '');
+  if (!text || !/[a-z]{3,}/i.test(text)) return text;
+  for (const [english, korean] of Object.entries(SKILL_EFFECT_TRANSLATIONS)) {
+    const pattern = new RegExp(english.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[ _-]+'), 'gi');
+    text = text.replace(pattern, korean);
+  }
+  for (const [english, korean] of Object.entries(SKILL_NAME_TRANSLATIONS)) {
+    const pattern = new RegExp(`(?:skill|ability)?[ _-]*(?:earth|fire|wood|water|metal)?[ _-]*${english.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[ _-]+')}`, 'gi');
+    text = text.replace(pattern, korean);
+  }
+  return text.replace(/\bdlc\d+\s+/gi, '').replace(/·(?=\S)/g, '· ');
 }
 
 function nullableNumber(value) {
@@ -1284,8 +1435,10 @@ function portraitMarkup(character, className) {
 
 function assetUrl(path, sourcePath = '') {
   if (!path || location.protocol === 'file:') return '';
+  const bundledSourcePattern = /^work[\\/]+packs[\\/]+(my_hero\.pack|refs[\\/])/i;
+  const inputPath = bundledSourcePattern.test(sourcePath) ? '' : (sourcePath || $('inputPackPath').value);
   const params = new URLSearchParams({
-    inputPath: sourcePath || $('inputPackPath').value,
+    inputPath,
     path,
   });
   return `/api/asset?${params.toString()}`;
@@ -2001,7 +2154,7 @@ function renderSkillCandidates(prefix, query) {
 }
 
 function skillEffectText(info) {
-  return info?.effectSummary || info?.description || '효과 정보 없음';
+  return translateSkillEffectText(info?.effectSummary || info?.description || '효과 정보 없음');
 }
 
 const SKILL_ELEMENT_TABS = [
