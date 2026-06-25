@@ -497,10 +497,8 @@ function titleOptionLabel(character) {
   const translatedTitle = character.titleName && character.titleName !== '칭호 미확인'
     ? character.titleName
     : friendlyKey(character.titleKey || character.titleInitialCeoKey);
-  const marker = effect ? '★ 효과 정리' : translatedTitle && translatedTitle !== '칭호 미확인' ? '한글' : 'key';
   const effectText = effect ? ` · ${effect.effects}` : '';
-  const sourceText = character.manualTitleOnly ? '효과 정리 전용' : '현재 pack 칭호';
-  return `${marker} ${character.name} · ${translatedTitle} · ${sourceText}${effectText}`;
+  return `${character.name} · ${translatedTitle}${effectText}`;
 }
 
 function sortTitleCandidates(items) {
@@ -995,7 +993,7 @@ function infoCard(title, value, note) {
 function titleBrief(character) {
   if (!character?.titleKey) return '칭호 미확인';
   const effect = titleEffectFor(character);
-  return `${effect ? '★ ' : ''}${character.titleName || friendlyKey(character.titleKey)}`;
+  return character.titleName || friendlyKey(character.titleKey);
 }
 
 function titleSummaryMarkup(character) {
@@ -1004,10 +1002,8 @@ function titleSummaryMarkup(character) {
   const rows = [
     ['칭호 주인', character.titleOwnerName || character.name || '미확인'],
     ['현재 칭호', character.titleName || '미확인'],
-    ['데이터 출처', character.manualTitleOnly ? '효과 정리 전용' : '현재 pack 칭호'],
   ];
   return `
-    <div class="equipment-note">한글 칭호명과 효과 설명은 시트/수동 정리 데이터를 우선 표시합니다.</div>
     ${effect ? `
       <div class="title-effect">
         <strong>${escapeHtml(effect.owner)} - ${escapeHtml(effect.title)}</strong>
