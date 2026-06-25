@@ -367,6 +367,14 @@ def _write_reference_snapshot(analysis: dict[str, Any], characters: dict[str, An
 def _refresh_skill_tree_labels(characters: dict[str, Any]) -> None:
     skill_trees = characters.get("skillTrees") if isinstance(characters, dict) else None
     if not isinstance(skill_trees, dict):
+        if isinstance(characters, dict):
+            for value in characters.values():
+                if isinstance(value, dict):
+                    _refresh_skill_tree_labels(value)
+                elif isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict):
+                            _refresh_skill_tree_labels(item)
         return
     skill_index = skill_trees.get("skillIndex")
     if isinstance(skill_index, dict):
@@ -1140,6 +1148,8 @@ def _skill_node_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -
 
 
 def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> str:
+    if "find_filial_and_incorrupt" in str(key).lower():
+        return "효렴 인재 탐색"
     for loc_key in (
         f"effects_description_{key}",
         f"effects_localised_description_{key}",
@@ -1692,6 +1702,9 @@ def _friendly_effect_key(key: str) -> str:
 def _visible_effect_label(effect: dict[str, Any]) -> str:
     key = str(effect.get("effectKey") or "")
     name = str(effect.get("name") or "")
+    lower_source = f"{key} {name}".lower()
+    if "find_filial_and_incorrupt" in lower_source or ("효성" in name and "청렴" in name):
+        return "효렴 인재 탐색"
     label = name if name and not name.lower().startswith("effect ") else _friendly_effect_key(key)
     if label and not _contains_hangul(label):
         label = _friendly_effect_key(key)
