@@ -29,7 +29,7 @@
 
 body {
   margin: 0;
-  min-width: 1180px;
+  min-width: 1320px;
   height: 100vh;
   overflow: hidden;
   background: var(--bg);
@@ -37,6 +37,12 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   line-height: 1.45;
+}
+
+#referencePackPaths,
+#loadPackButton,
+#refreshPackButton {
+  display: none;
 }
 
 button,
@@ -160,7 +166,7 @@ p {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 360px minmax(420px, 1fr) 390px;
+  grid-template-columns: 340px minmax(360px, 1fr) minmax(500px, 560px);
   gap: 14px;
   height: calc(100vh - 72px);
   padding: 14px;
@@ -213,6 +219,7 @@ p {
 input,
 select,
 textarea {
+  min-width: 0;
   width: 100%;
   min-height: 36px;
   border: 1px solid var(--line);
@@ -241,6 +248,7 @@ textarea:focus {
 }
 
 .skill-tree-editor {
+  min-width: 0;
   display: grid;
   gap: 10px;
 }
@@ -273,8 +281,9 @@ textarea:focus {
 }
 
 .skill-tree-board {
+  min-width: 0;
   display: grid;
-  grid-template-columns: repeat(var(--skill-cols), minmax(110px, 1fr));
+  grid-template-columns: repeat(var(--skill-cols), minmax(0, 1fr));
   grid-auto-rows: 96px;
   gap: 8px;
   padding: 10px;
@@ -285,6 +294,7 @@ textarea:focus {
 
 .skill-node,
 .skill-candidate {
+  min-width: 0;
   min-height: 0;
   border: 1px solid #576158;
   border-radius: 6px;
@@ -303,6 +313,8 @@ textarea:focus {
 
 .skill-node b,
 .skill-candidate b {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.25;
 }
@@ -353,6 +365,7 @@ textarea:focus {
 }
 
 .skill-picker {
+  min-width: 0;
   display: grid;
   gap: 8px;
   padding: 10px;
@@ -365,9 +378,53 @@ textarea:focus {
   min-height: 32px;
 }
 
+.skill-element-tabs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.skill-element-tab {
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.skill-element-tab.active {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px rgba(47, 123, 97, 0.2);
+}
+
+.skill-element-tab.element-earth {
+  background: var(--earth-bg);
+}
+
+.skill-element-tab.element-fire {
+  background: var(--fire-bg);
+}
+
+.skill-element-tab.element-wood {
+  background: var(--wood-bg);
+}
+
+.skill-element-tab.element-water {
+  background: var(--water-bg);
+}
+
+.skill-element-tab.element-metal {
+  background: var(--metal-bg);
+}
+
 .skill-candidates {
+  min-width: 0;
   max-height: 360px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
   gap: 6px;
 }
@@ -434,6 +491,7 @@ textarea:focus {
 .mini-portrait,
 .portrait-frame,
 .portrait-image {
+  position: relative;
   display: grid;
   place-items: center;
   border-radius: 8px;
@@ -454,6 +512,13 @@ textarea:focus {
   display: block;
   object-fit: cover;
   object-position: top center;
+}
+
+.portrait-fallback {
+  color: currentColor;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
 }
 
 .portrait-image {
@@ -670,15 +735,51 @@ dd {
   line-height: 1.25;
 }
 
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 18px;
+  margin-right: 5px;
+  border-radius: 4px;
+  padding: 0 5px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  vertical-align: 1px;
+}
+
+.source-my {
+  background: #2f7b63;
+}
+
+.source-bfg {
+  background: #7b5b2f;
+}
+
+.source-data {
+  background: #355f8c;
+}
+
+.source-aw {
+  background: #8a3f5f;
+}
+
+.source-lshz {
+  background: #5d6f2e;
+}
+
 .image-set-preview {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(132px, 148px) minmax(0, 1fr);
+  gap: 14px;
   align-items: stretch;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-soft);
-  padding: 10px;
+  padding: 12px;
 }
 
 .preview-art {
@@ -695,7 +796,7 @@ dd {
 }
 
 .preview-art span {
-  font-size: 32px;
+  font-size: 42px;
   font-weight: 900;
 }
 
@@ -712,13 +813,13 @@ dd {
 
 .preview-art b {
   position: absolute;
-  left: 6px;
-  bottom: 6px;
+  left: 8px;
+  bottom: 8px;
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.82);
-  padding: 3px 5px;
+  padding: 4px 6px;
   color: rgba(30, 36, 31, 0.76);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .preview-copy {
@@ -743,7 +844,9 @@ dd {
 }
 
 .work-panel {
-  overflow: auto;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .mode-switch {
@@ -771,6 +874,7 @@ dd {
 }
 
 .work-mode {
+  min-width: 0;
   display: none;
   padding: 14px;
   gap: 12px;
@@ -815,6 +919,7 @@ dd {
 }
 
 .tab-section {
+  min-width: 0;
   display: none;
   gap: 12px;
 }
@@ -824,6 +929,7 @@ dd {
 }
 
 label {
+  min-width: 0;
   display: grid;
   gap: 5px;
   color: var(--muted);
@@ -832,6 +938,7 @@ label {
 }
 
 .form-group {
+  min-width: 0;
   display: grid;
   gap: 10px;
   border: 1px solid var(--line);
@@ -859,6 +966,22 @@ label {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+.three-col {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.inline-stat {
+  display: grid;
+  gap: 4px;
+}
+
+.inline-stat span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .spawn-help {
@@ -890,6 +1013,7 @@ label {
 }
 
 .equipment-summary {
+  min-width: 0;
   display: grid;
   gap: 7px;
   border: 1px solid var(--line);
@@ -1081,20 +1205,40 @@ label {
   font-size: 12px;
 }
 
+.queue-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
 .queue-item span {
   color: var(--muted);
   font-size: 12px;
 }
 
+.queue-edit-btn,
 .queue-delete-btn {
   min-height: 26px;
   padding: 0 9px;
-  border: 1px solid #e2a29a;
   border-radius: 6px;
-  background: #fff0ee;
-  color: var(--danger);
   font-size: 12px;
   font-weight: 700;
+}
+
+.queue-edit-btn {
+  border: 1px solid #9dc7b8;
+  background: #f4fbf7;
+  color: var(--accent-strong);
+}
+
+.queue-edit-btn:hover {
+  background: #e7f4ee;
+}
+
+.queue-delete-btn {
+  border: 1px solid #e2a29a;
+  background: #fff0ee;
+  color: var(--danger);
 }
 
 .queue-delete-btn:hover {
@@ -1169,7 +1313,7 @@ textarea {
   color: var(--metal);
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1320px) {
   body {
     min-width: 0;
     overflow: auto;

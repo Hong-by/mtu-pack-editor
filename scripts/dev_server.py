@@ -79,7 +79,7 @@ def start_rpfm(binary: Path, host: str, port: int) -> subprocess.Popen[bytes]:
         )
     print(f"Starting RPFM server: {binary}")
     env = None
-    return subprocess.Popen([str(binary)], cwd=binary.parent.parent.parent, env=env)
+    return subprocess.Popen([str(binary)], cwd=binary.parent, env=env)
 
 
 def start_web(host: str, port: int) -> subprocess.Popen[bytes]:

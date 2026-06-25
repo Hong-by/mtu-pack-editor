@@ -30,6 +30,20 @@ class SkillSetClone:
 
 
 @dataclass(frozen=True)
+class AttributeSetClone:
+    source_set_key: str
+    new_set_key: str
+    overrides: dict[str, int | float]
+
+
+@dataclass(frozen=True)
+class AgeRangeClone:
+    source_key: str
+    new_key: str
+    overrides: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class CharacterClone:
     new_template_key: str
     source_template_key: str
@@ -63,6 +77,8 @@ class Recipe:
     equipment_stat_patches: list[StatPatch]
     land_unit_clones: list[LandUnitClone]
     skill_set_clones: list[SkillSetClone]
+    attribute_set_clones: list[AttributeSetClone]
+    age_range_clones: list[AgeRangeClone]
     character_clones: list[CharacterClone]
     character_patches: list[CharacterPatch]
     raw: dict[str, Any]
@@ -104,6 +120,26 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
         )
         for item in data.get("skillSetClones", [])
     ]
+    attribute_set_clones = [
+        AttributeSetClone(
+            source_set_key=item["sourceSetKey"],
+            new_set_key=item["newSetKey"],
+            overrides={
+                str(key): value
+                for key, value in item.get("overrides", {}).items()
+                if isinstance(value, (int, float))
+            },
+        )
+        for item in data.get("attributeSetClones", [])
+    ]
+    age_range_clones = [
+        AgeRangeClone(
+            source_key=item["sourceKey"],
+            new_key=item["newKey"],
+            overrides=item.get("overrides", {}),
+        )
+        for item in data.get("ageRangeClones", [])
+    ]
     character_clones = [
         CharacterClone(
             new_template_key=item["newTemplateKey"],
@@ -139,6 +175,8 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
         equipment_stat_patches=patches,
         land_unit_clones=land_unit_clones,
         skill_set_clones=skill_set_clones,
+        attribute_set_clones=attribute_set_clones,
+        age_range_clones=age_range_clones,
         character_clones=character_clones,
         character_patches=character_patches,
         raw=data,

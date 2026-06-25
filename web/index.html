@@ -17,22 +17,30 @@
       </div>
       <div class="header-actions">
         <input id="inputPackPath" class="path-input" value="work\packs\my_hero.pack" aria-label="입력 pack 경로">
-        <input id="outputPackPath" class="path-input" value="work\packs\my_hero_patch.pack" aria-label="출력 pack 경로">
-        <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">work\packs\refs\BFG_Originals.pack
-work\packs\refs\database.pack
+        <input id="outputPackPath" class="path-input" value="output\my_hero_patch.pack" aria-label="출력 pack 경로">
+        <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">work\packs\refs\database.pack
 work\packs\refs\data_mh.pack
 work\packs\refs\data_ep.pack
 work\packs\refs\data_dlc07.pack
 work\packs\refs\data_dlc06.pack
 work\packs\refs\data_bl.pack
-work\packs\refs\data_yt_bl.pack
-work\packs\refs\data.pack</textarea>
+work\packs\refs\data.pack
+work\packs\refs\BFG_Originals.pack
+work\packs\refs\BFG_for_MTU.pack
+work\packs\refs\BFG_Nanman2.pack
+work\packs\refs\BFG_Yellow_Turban.pack
+work\packs\refs\LSHZ_lbdc_lh.pack
+work\packs\refs\AW-Design All in One Historical Figures.pack
+work\packs\refs\AW Addon-MinWUJang72.pack
+work\packs\refs\AW-Design All in One 2 Historical Figures.pack
+work\packs\refs\AW-Design All in One 3 Historical Figures.pack</textarea>
         <select id="saveModeSelect" class="save-mode" aria-label="저장 방식">
           <option value="patch_pack" selected>패치 pack</option>
           <option value="save_as">Save As 원본 복사</option>
           <option value="in_place">원본 수정</option>
         </select>
         <button id="loadPackButton" class="ghost-btn" type="button">팩 읽기</button>
+        <button id="refreshPackButton" class="ghost-btn" type="button">DB 갱신</button>
         <button id="validateButton" class="ghost-btn" type="button">검증</button>
         <button id="buildButton" class="primary-btn" type="button">저장</button>
         <button id="previewRecipeButton" class="ghost-btn" type="button">레시피 미리보기</button>
@@ -90,14 +98,6 @@ work\packs\refs\data.pack</textarea>
 
         <div class="section-block">
           <div class="section-head">
-            <h3>현재 장수 설정</h3>
-            <span>읽기 쉬운 이름으로 보여주고, 원본 key는 보조로만 표시합니다.</span>
-          </div>
-          <div id="currentCards" class="info-card-grid"></div>
-        </div>
-
-        <div class="section-block">
-          <div class="section-head">
             <h3>이미지/모델 후보</h3>
             <span>이미지 세트는 초상화/카드, 모델 세트는 전장/캠페인/전체 외형을 묶습니다.</span>
           </div>
@@ -135,6 +135,7 @@ work\packs\refs\data.pack</textarea>
               <span>능력치 세트</span>
               <select id="editAttributeSet"></select>
             </label>
+            <div id="editAttributeSummary" class="equipment-summary"></div>
             <label>
               <span>오행/타입</span>
               <select id="editSubtype"></select>
@@ -184,6 +185,10 @@ work\packs\refs\data.pack</textarea>
                 <select id="editSpawnEvent"></select>
               </label>
             </div>
+            <label>
+              <span>출생년도</span>
+              <input id="editAgeRange" type="number" min="0" max="999" step="1" placeholder="출생년도">
+            </label>
             <div class="two-col">
               <label>
                 <span id="editMinRoundLabel">최소 라운드</span>
@@ -237,6 +242,7 @@ work\packs\refs\data.pack</textarea>
               <span>능력치 세트</span>
               <select id="sourceAttributeSet"></select>
             </label>
+            <div id="sourceAttributeSummary" class="equipment-summary"></div>
             <label>
               <span>칭호</span>
               <select id="sourceTitle"></select>
@@ -283,6 +289,10 @@ work\packs\refs\data.pack</textarea>
             <label>
               <span>등장 조건</span>
               <select id="sourceSpawn"></select>
+            </label>
+            <label>
+              <span>출생년도</span>
+              <input id="createAgeRange" type="number" min="0" max="999" step="1" placeholder="출생년도">
             </label>
             <label>
               <span>등장 이벤트</span>

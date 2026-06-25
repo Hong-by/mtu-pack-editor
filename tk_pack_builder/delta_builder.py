@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 from pathlib import Path
 from typing import Any
 import zlib
@@ -8,12 +9,14 @@ import zlib
 from .adapters import RpfmPackSession, _decode_rpfm_cell, _encode_rpfm_cell
 from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_name
 from .land_units import validate_land_unit_clone
-from .recipe import CharacterClone, CharacterPatch, Recipe, SkillSetClone
+from .recipe import AgeRangeClone, AttributeSetClone, CharacterClone, CharacterPatch, Recipe, SkillSetClone
 from .stat_tables import resolve_stat_target, resolve_table_name
 from .validation import allow_reference_backed_clone_sources, has_errors, validate
 
 
 LEGACY_TEMPLATE_PACK = Path("work/legacy_template/8King_4P_1.7_up.pack")
+ROOT = Path(os.environ.get("TK_PACK_EDITOR_ROOT", Path(__file__).resolve().parents[1])).resolve()
+EXTRACTED_ASSET_ROOT = ROOT / "work" / "assets"
 
 
 def build_delta_pack(
@@ -40,9 +43,25 @@ def build_delta_pack(
 
     changed_stats = _collect_stat_patch_rows(session, recipe, source_dbs, rows_by_table)
     cloned_land_units = _collect_land_unit_clone_rows(session, recipe, source_dbs, rows_by_table)
+    attribute_sets = _collect_attribute_set_clone_rows(
+        session,
+        recipe.attribute_set_clones,
+        source_dbs,
+        rows_by_table,
+        reference_paths or [],
+        opened_pack_keys,
+    )
     skill_sets = _collect_skill_set_clone_rows(
         session,
         recipe.skill_set_clones,
+        source_dbs,
+        rows_by_table,
+        reference_paths or [],
+        opened_pack_keys,
+    )
+    age_ranges = _collect_age_range_clone_rows(
+        session,
+        recipe.age_range_clones,
         source_dbs,
         rows_by_table,
         reference_paths or [],
@@ -110,7 +129,9 @@ def build_delta_pack(
                 f"Wrote delta patch pack {output_path} ({output_path.stat().st_size} bytes) "
                 f"with {len(rows_by_table)} DB table(s), {changed_stats} edited equipment stat value(s), "
                 f"{cloned_land_units} cloned land unit row(s), "
+                f"{attribute_sets} cloned attribute set(s), "
                 f"{skill_sets} cloned romance skill set(s), "
+                f"{age_ranges} cloned age range row(s), "
                 f"{changed_character_fields} edited character field(s), {cloned_characters} cloned character(s), "
                 f"{copied_dependency_rows} referenced DB row(s), "
                 f"{len(loc_rows)} name loc row(s), {incident_tables} spawn incident table(s), "
@@ -162,6 +183,68 @@ def _collect_land_unit_clone_rows(
         cloned = {**source, "key": clone.new_key, **clone.overrides}
         _upsert_delta_row(rows_by_table, table_name, "key", cloned)
         rows.append(cloned)
+        created += 1
+    return created
+
+
+def _collect_attribute_set_clone_rows(
+    session: RpfmPackSession,
+    clones: list[AttributeSetClone],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    reference_paths: list[Path] | None = None,
+    opened_pack_keys: dict[str, str] | None = None,
+) -> int:
+    if not clones:
+        return 0
+    aliases = _character_dependency_aliases()
+    table_names = _optional_table_names(session, aliases)
+    tables = {
+        alias: _read_rows(session, table_name, source_dbs)
+        for alias, table_name in table_names.items()
+        if alias in {"character_attribute_sets", "character_attributes"}
+    }
+    opened_pack_keys = opened_pack_keys or {str(session.pack_path.resolve()): session.pack_key}
+    _merge_vanilla_dependency_tables(session, aliases, table_names, tables, source_dbs)
+    _merge_reference_dependency_tables(
+        session,
+        aliases,
+        reference_paths or [],
+        table_names,
+        tables,
+        source_dbs,
+        opened_pack_keys,
+    )
+
+    created = 0
+    for clone in clones:
+        source_set = dict(_find_required_by(tables.get("character_attribute_sets", []), _attribute_set_key, clone.source_set_key))
+        set_table = source_set.get("_sourceTablePath") or table_names.get("character_attribute_sets")
+        if not set_table:
+            raise ValueError("Source attribute set table not found.")
+        new_set = _with_attribute_set_key(source_set, clone.new_set_key)
+        _upsert_delta_row(rows_by_table, set_table, _attribute_set_key, new_set)
+
+        source_attrs = [
+            row for row in tables.get("character_attributes", [])
+            if _attribute_set_key(row) == clone.source_set_key
+        ]
+        if not source_attrs:
+            raise ValueError(f"Source attribute set has no attributes: {clone.source_set_key}")
+        for source_attr in source_attrs:
+            attr_key = _attribute_override_key(source_attr)
+            value_column = _attribute_value_column(source_attr)
+            new_attr = _with_attribute_set_key(source_attr, clone.new_set_key)
+            if attr_key in clone.overrides and value_column:
+                new_attr[value_column] = clone.overrides[attr_key]
+            attr_table = source_attr.get("_sourceTablePath") or table_names.get("character_attributes")
+            if attr_table:
+                _upsert_delta_row(rows_by_table, attr_table, _attribute_key, _clean_source_row(new_attr))
+        tables.setdefault("character_attribute_sets", []).append({**new_set, "_sourceTablePath": set_table})
+        tables.setdefault("character_attributes", []).extend(
+            _with_attribute_set_key(row, clone.new_set_key)
+            for row in source_attrs
+        )
         created += 1
     return created
 
@@ -289,6 +372,49 @@ def _collect_character_patch_rows(
                 patched,
             )
     return changed
+
+
+def _collect_age_range_clone_rows(
+    session: RpfmPackSession,
+    clones: list[AgeRangeClone],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    reference_paths: list[Path] | None = None,
+    opened_pack_keys: dict[str, str] | None = None,
+) -> int:
+    if not clones:
+        return 0
+    table_name = resolve_character_table_name(session, "character_generation_spawn_age_ranges")
+    rows = _read_rows(session, table_name, source_dbs)
+    aliases = {
+        "character_generation_spawn_age_ranges": CHARACTER_TABLE_ALIASES["character_generation_spawn_age_ranges"],
+    }
+    tables = {"character_generation_spawn_age_ranges": rows}
+    opened_pack_keys = opened_pack_keys or {str(session.pack_path.resolve()): session.pack_key}
+    _merge_dependency_tables_from_pack(session, session.pack_key, session.list_tables(), aliases, tables, source_dbs)
+    _merge_vanilla_dependency_tables(session, aliases, {"character_generation_spawn_age_ranges": table_name}, tables, source_dbs)
+    _merge_reference_dependency_tables(
+        session,
+        aliases,
+        reference_paths or [],
+        {"character_generation_spawn_age_ranges": table_name},
+        tables,
+        source_dbs,
+        opened_pack_keys,
+    )
+    rows = tables["character_generation_spawn_age_ranges"]
+    created = 0
+    for clone in clones:
+        source = _find_required(rows, "key", clone.source_key)
+        new_row = {
+            **source,
+            "key": clone.new_key,
+            **clone.overrides,
+        }
+        _upsert_delta_row(rows_by_table, table_name, "key", new_row)
+        rows.append(new_row)
+        created += 1
+    return created
 
 
 def _collect_character_clone_rows(
@@ -652,8 +778,8 @@ def _copy_attribute_dependency(
     key = str(attribute_set or "")
     if not key:
         return
-    _copy_matching_rows(tables, table_names, rows_by_table, "character_attribute_sets", lambda row: row.get("set_name") == key, "set_name")
-    _copy_matching_rows(tables, table_names, rows_by_table, "character_attributes", lambda row: row.get("set_name") == key, _attribute_key)
+    _copy_matching_rows(tables, table_names, rows_by_table, "character_attribute_sets", lambda row: _attribute_set_key(row) == key, _attribute_set_key)
+    _copy_matching_rows(tables, table_names, rows_by_table, "character_attributes", lambda row: _attribute_set_key(row) == key, _attribute_key)
 
 
 def _copy_skill_dependency(
@@ -773,7 +899,7 @@ def _copy_matching_rows(
             table_path = row.get("_sourceTablePath") or table_names.get(alias)
             if not table_path:
                 continue
-            clean_row = {key: value for key, value in row.items() if not key.startswith("_source")}
+            clean_row = _clean_source_row(row)
             _upsert_delta_row(rows_by_table, table_path, key_field, clean_row)
 
 
@@ -989,7 +1115,7 @@ def _dependency_key_for_alias(alias: str) -> str | Any:
     if alias == "character_attributes":
         return _attribute_key
     if alias == "character_attribute_sets":
-        return "set_name"
+        return _attribute_set_key
     if alias == "character_skill_node_links":
         return _skill_link_key
     if alias == "character_skill_level_to_effects_junctions":
@@ -1279,9 +1405,13 @@ def _copy_image_assets(
             source_key = opened_sources.get(resolved)
         if source_key is None:
             resolved_path = Path(source_path).resolve()
-            source_key = _open_pack_reusing_existing(session, resolved_path, opened_sources)
-            opened_sources[source_path] = source_key
-            opened_sources[str(resolved_path)] = source_key
+            if resolved_path.is_file():
+                source_key = _open_pack_reusing_existing(session, resolved_path, opened_sources)
+                opened_sources[source_path] = source_key
+                opened_sources[str(resolved_path)] = source_key
+            else:
+                copied += _copy_extracted_image_assets(session, target_key, sorted(packed_paths))
+                continue
 
         paths = [{"File": path} for path in sorted(packed_paths)]
         if not paths:
@@ -1289,9 +1419,56 @@ def _copy_image_assets(
         response = session.client.send({
             "AddPackedFilesFromPackFile": [target_key, source_key, paths]
         })
-        _raise_rpfm_error(response)
+        try:
+            _raise_rpfm_error(response)
+        except Exception:
+            copied += _copy_extracted_image_assets(session, target_key, sorted(packed_paths))
+            continue
         copied += len(paths)
     return copied
+
+
+def _copy_extracted_image_assets(
+    session: RpfmPackSession,
+    target_key: str,
+    packed_paths: list[str],
+) -> int:
+    source_paths: list[str] = []
+    dest_paths: list[dict[str, str]] = []
+    missing: list[str] = []
+    for packed_path in packed_paths:
+        extracted = _find_extracted_asset(packed_path)
+        if extracted is None:
+            missing.append(packed_path)
+            continue
+        source_paths.append(str(extracted))
+        dest_paths.append({"File": packed_path})
+    if missing:
+        raise ValueError(
+            "Extracted image asset(s) not found. Refresh/extract reference assets first: "
+            + ", ".join(missing[:5])
+        )
+    if not source_paths:
+        return 0
+    response = session.client.send({
+        "AddPackedFiles": [target_key, source_paths, dest_paths, None]
+    })
+    _raise_rpfm_error(response)
+    data = response.get("data", {})
+    added = data.get("VecContainerPathOptionString", [dest_paths, None])[0]
+    return len(added)
+
+
+def _find_extracted_asset(packed_path: str) -> Path | None:
+    normalized = _normalize_pack_path(packed_path)
+    parts = [part for part in normalized.split("/") if part]
+    if not parts or not EXTRACTED_ASSET_ROOT.is_dir():
+        return None
+    for pack_dir in EXTRACTED_ASSET_ROOT.iterdir():
+        candidate = pack_dir.joinpath(*parts)
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _normalize_pack_path(path: str) -> str:
@@ -1422,11 +1599,22 @@ def _upsert_delta_row(
     rows.append(row)
 
 
+def _clean_source_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in row.items() if not str(key).startswith("_source")}
+
+
 def _find_required(rows: list[dict[str, Any]], key_field: str, key: str) -> dict[str, Any]:
     for row in rows:
         if row.get(key_field) == key:
             return row
     raise ValueError(f"Row not found: {key_field}={key}")
+
+
+def _find_required_by(rows: list[dict[str, Any]], key_func: Any, key: str) -> dict[str, Any]:
+    for row in rows:
+        if str(key_func(row)) == str(key):
+            return row
+    raise ValueError(f"Row not found: {key}")
 
 
 def _find_row(rows: list[dict[str, Any]], key_field: str, key: str) -> dict[str, Any] | None:
@@ -1450,7 +1638,112 @@ def _art_key(row: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
 
 
 def _attribute_key(row: dict[str, Any]) -> tuple[Any, Any]:
-    return row.get("set_name"), row.get("attribute_type")
+    return _attribute_set_key(row), _attribute_override_key(row)
+
+
+def _attribute_set_key(row: dict[str, Any]) -> str:
+    for column in (
+        "set_name",
+        "attribute_set",
+        "character_attribute_set",
+        "character_attribute_set_key",
+        "attribute_set_key",
+        "set",
+        "key",
+    ):
+        value = row.get(column)
+        if value:
+            return str(value)
+    for value in row.values():
+        text = str(value or "")
+        if "_attribute_set_" in text or "attribute_set_" in text:
+            return text
+    return ""
+
+
+def _with_attribute_set_key(row: dict[str, Any], set_key: str) -> dict[str, Any]:
+    clean = _clean_source_row(dict(row))
+    for column in (
+        "set_name",
+        "attribute_set",
+        "character_attribute_set",
+        "character_attribute_set_key",
+        "attribute_set_key",
+        "set",
+        "key",
+    ):
+        value = clean.get(column)
+        if value and ("attribute_set" in str(value) or column != "key"):
+            clean[column] = set_key
+            return clean
+    clean["set_name"] = set_key
+    return clean
+
+
+def _attribute_override_key(row: dict[str, Any]) -> str:
+    value = str(
+        row.get("attribute_type")
+        or row.get("attribute")
+        or row.get("character_attribute")
+        or row.get("attribute_key")
+        or row.get("key")
+        or ""
+    ).lower()
+    stat_key = _attribute_override_key_from_text(value)
+    if stat_key:
+        return stat_key
+    for cell in row.values():
+        stat_key = _attribute_override_key_from_text(str(cell or "").lower())
+        if stat_key:
+            return stat_key
+    return value
+
+
+def _attribute_override_key_from_text(value: str) -> str | None:
+    if "attribute_set" in value:
+        return None
+    if "expertise" in value or "metal" in value:
+        return "expertise"
+    if "resolve" in value or "wood" in value:
+        return "resolve"
+    if "cunning" in value or "water" in value:
+        return "cunning"
+    if "instinct" in value or "fire" in value:
+        return "instinct"
+    if "authority" in value or "earth" in value:
+        return "authority"
+    return None
+
+
+def _attribute_value_column(row: dict[str, Any]) -> str | None:
+    for column in ("value", "attribute_value", "base_value", "initial_value", "starting_value", "amount"):
+        if isinstance(row.get(column), (int, float)):
+            return column
+    skip_columns = {
+        "set_name",
+        "attribute_set",
+        "character_attribute_set",
+        "character_attribute_set_key",
+        "attribute_set_key",
+        "set",
+        "key",
+        "attribute_type",
+        "attribute",
+        "character_attribute",
+        "attribute_key",
+        "minimum_value",
+        "maximum_value",
+        "min_value",
+        "max_value",
+        "min",
+        "max",
+    }
+    for column, value in row.items():
+        if str(column).startswith("_") or column in skip_columns:
+            continue
+        if isinstance(value, (int, float)):
+            return column
+    return None
 
 
 def _skill_link_key(row: dict[str, Any]) -> tuple[Any, Any, Any]:

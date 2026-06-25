@@ -4,9 +4,11 @@ import json
 import mimetypes
 import os
 import re
+import shutil
 import socket
 import subprocess
 import time
+import hashlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,19 +22,26 @@ from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_na
 from .korean_names import korean_character_name
 from .pack_cache import PackCache
 from .recipe import recipe_from_dict
+from .rpfm_runtime import resolve_rpfm_server
 from .stat_tables import TABLE_ALIASES
 from .validation import allow_reference_backed_clone_sources, has_errors, messages_to_dicts, validate
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get("TK_PACK_EDITOR_ROOT", Path(__file__).resolve().parents[1])).resolve()
 STATIC_ROOT = ROOT / "web"
-DEFAULT_RPFM_SERVER = (
-    ROOT / "work" / "rpfm-dist" / "rpfm_server.exe"
-    if os.name == "nt"
-    else ROOT / "work" / "rpfm-master" / "target" / "debug" / "rpfm_server"
-)
+RPFM_SERVER_CANDIDATES = [
+    ROOT / "work" / "rpfm-dist" / "rpfm_server.exe",
+    Path("E:/rpfm-v5.0.3-x86_64-pc-windows-msvc/rpfm_server.exe"),
+] if os.name == "nt" else [
+    ROOT / "work" / "rpfm-master" / "target" / "debug" / "rpfm_server",
+]
+DEFAULT_RPFM_SERVER = next((path for path in RPFM_SERVER_CANDIDATES if path.is_file()), RPFM_SERVER_CANDIDATES[0])
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
+REFERENCE_SNAPSHOT = ROOT / "work" / "reference_snapshot.json"
+EXTRACTED_ASSET_ROOT = ROOT / "work" / "assets"
+IMAGE_ONLY_ASSET_PREFIX = "__image_only_reference__"
 RPFM_PROCESS: subprocess.Popen[bytes] | None = None
+RPFM_LOG_HANDLE: Any | None = None
 
 SKILL_TABLE_ALIASES = {
     "character_skill_node_sets": [
@@ -147,20 +156,41 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def _serve_pack_asset(self, query: dict[str, list[str]]) -> None:
         input_path = query.get("inputPath", [""])[0]
-        packed_path = query.get("path", [""])[0]
-        if not input_path or not packed_path:
+        requested_packed_path = query.get("path", [""])[0]
+        if not input_path or not requested_packed_path:
             self.send_error(HTTPStatus.BAD_REQUEST, "inputPath and path are required")
             return
+        packed_path = _real_packed_asset_path(requested_packed_path)
         pack_path = _resolve_user_path(input_path)
+        extracted = _extracted_asset_path(pack_path, requested_packed_path)
+        if extracted.is_file():
+            content_type = mimetypes.guess_type(extracted.name)[0] or "application/octet-stream"
+            self._send_bytes(extracted.read_bytes(), content_type, cache_hit=True)
+            return
+        extracted_any = _find_extracted_asset(requested_packed_path) or _find_extracted_asset(packed_path)
+        if extracted_any is not None:
+            content_type = mimetypes.guess_type(extracted_any.name)[0] or "application/octet-stream"
+            self._send_bytes(extracted_any.read_bytes(), content_type, cache_hit=True)
+            return
         cached = PACK_CACHE.get_asset(pack_path, packed_path)
         if cached is not None:
             content_type, data = cached
+            _write_extracted_asset(extracted, data)
             self._send_bytes(data, content_type, cache_hit=True)
             return
 
         session = None
         try:
             _ensure_rpfm_server()
+            if not pack_path.is_file():
+                fallback_pack = _fallback_pack_path(pack_path)
+                if fallback_pack is not None:
+                    pack_path = fallback_pack
+                    extracted = _extracted_asset_path(pack_path, requested_packed_path)
+                    if extracted.is_file():
+                        content_type = mimetypes.guess_type(extracted.name)[0] or "application/octet-stream"
+                        self._send_bytes(extracted.read_bytes(), content_type, cache_hit=True)
+                        return
             session = adapter_for("rpfm").open_pack(pack_path)
             data = session.read_file_bytes(packed_path)
         except Exception as error:
@@ -171,6 +201,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 _close_session(session)
         content_type = mimetypes.guess_type(packed_path)[0] or "application/octet-stream"
         PACK_CACHE.put_asset(pack_path, packed_path, content_type, data)
+        _write_extracted_asset(extracted, data)
         self._send_bytes(data, content_type, cache_hit=False)
 
     def _send_bytes(self, data: bytes, content_type: str, cache_hit: bool = False) -> None:
@@ -181,6 +212,62 @@ class WebHandler(BaseHTTPRequestHandler):
         self.send_header("content-length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+
+def _extracted_asset_path(pack_path: Path, packed_path: str) -> Path:
+    pack_id = hashlib.sha1(str(pack_path.resolve()).encode("utf-8", errors="ignore")).hexdigest()[:12]
+    clean_parts = [
+        part
+        for part in packed_path.replace("\\", "/").split("/")
+        if part and part not in {".", ".."}
+    ]
+    return EXTRACTED_ASSET_ROOT / pack_id / Path(*clean_parts)
+
+
+def _source_scoped_asset_path(source_path: Path, packed_path: str) -> str:
+    source_id = hashlib.sha1(str(source_path.resolve()).encode("utf-8", errors="ignore")).hexdigest()[:12]
+    normalized = packed_path.replace("\\", "/")
+    return f"{IMAGE_ONLY_ASSET_PREFIX}/{source_id}/{normalized}"
+
+
+def _real_packed_asset_path(packed_path: str) -> str:
+    normalized = packed_path.replace("\\", "/")
+    prefix = f"{IMAGE_ONLY_ASSET_PREFIX}/"
+    if not normalized.startswith(prefix):
+        return normalized
+    parts = normalized.split("/", 2)
+    return parts[2] if len(parts) >= 3 else normalized
+
+
+def _write_extracted_asset(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_file() or path.stat().st_size != len(data):
+        path.write_bytes(data)
+
+
+def _find_extracted_asset(packed_path: str) -> Path | None:
+    clean_parts = [
+        part
+        for part in packed_path.replace("\\", "/").split("/")
+        if part and part not in {".", ".."}
+    ]
+    if not clean_parts or not EXTRACTED_ASSET_ROOT.is_dir():
+        return None
+    suffix = Path(*clean_parts)
+    for pack_dir in EXTRACTED_ASSET_ROOT.iterdir():
+        candidate = pack_dir / suffix
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _fallback_pack_path(pack_path: Path) -> Path | None:
+    candidates = [
+        ROOT / "work" / "packs" / pack_path.name,
+        ROOT / "work" / "packs" / "refs" / pack_path.name,
+        ROOT / "work" / "packs" / "my_hero.pack",
+    ]
+    return next((path for path in candidates if path.is_file()), None)
 
 
 def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -194,11 +281,18 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
     pack_path = _resolve_user_path(input_path)
     if not payload.get("forceRefresh"):
         cache_started = time.perf_counter()
-        cached = PACK_CACHE.get_open_payload(pack_path, include_vanilla, reference_paths)
+        cached = PACK_CACHE.get_open_payload(pack_path, include_vanilla, reference_paths) if pack_path.exists() else None
         timings["cacheLookup"] = _elapsed(cache_started)
         if cached is not None:
             cached["timings"] = {**timings, "total": _elapsed(started_at)}
             return cached
+        snapshot_started = time.perf_counter()
+        snapshot = _load_reference_snapshot()
+        timings["snapshotLookup"] = _elapsed(snapshot_started)
+        if snapshot is not None:
+            snapshot["timings"] = {**timings, "total": _elapsed(started_at)}
+            return snapshot
+        raise ValueError("DB 스냅샷이 없습니다. pack 원본 조회가 필요하면 상단의 DB 갱신을 눌러주세요.")
 
     open_started = time.perf_counter()
     session = _open_session(payload)
@@ -217,6 +311,7 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
         timings["readCharacterData"] = _elapsed(read_started)
         cache_write_started = time.perf_counter()
         PACK_CACHE.put_open_payload(pack_path, include_vanilla, analysis, character_data, reference_paths)
+        _write_reference_snapshot(analysis, character_data)
         timings["cacheWrite"] = _elapsed(cache_write_started)
         timings["total"] = _elapsed(started_at)
         return {
@@ -231,6 +326,35 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
         }
     finally:
         _close_session(session)
+
+
+def _load_reference_snapshot() -> dict[str, Any] | None:
+    if not REFERENCE_SNAPSHOT.is_file():
+        return None
+    with REFERENCE_SNAPSHOT.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return {
+        "ok": True,
+        "analysis": payload.get("analysis", {}),
+        "characters": payload.get("characters", {}),
+        "cache": {
+            "hit": True,
+            "type": "reference_snapshot",
+            "path": str(REFERENCE_SNAPSHOT),
+        },
+    }
+
+
+def _write_reference_snapshot(analysis: dict[str, Any], characters: dict[str, Any]) -> None:
+    REFERENCE_SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schemaVersion": 1,
+        "createdAt": time.time(),
+        "analysis": analysis,
+        "characters": characters,
+    }
+    with REFERENCE_SNAPSHOT.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False)
 
 
 def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -250,6 +374,8 @@ def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         recipe = recipe_from_dict(payload.get("recipe", {}))
         output_path = _resolve_user_path(payload["outputPath"]) if payload.get("outputPath") else None
+        if output_path is not None:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
         messages = build_pack(
             session,
             recipe,
@@ -365,7 +491,13 @@ def summarize_character_tables(
         card_path = str(primary_art.get("card") or "").strip("/")
         portrait_image_path = _find_character_image(asset_index, portrait_path, "halfbody_large")
         card_image_path = _find_character_image(asset_index, card_path, "unitcards")
-        image_assets = [] if external_image_set else _character_image_assets(asset_index, asset_sources, portrait_path, card_path)
+        if _is_image_only_reference(asset_sources.get(portrait_image_path or "", "")):
+            portrait_image_path = None
+        if _is_image_only_reference(asset_sources.get(card_image_path or "", "")):
+            card_image_path = None
+        image_assets = [] if external_image_set else _non_image_only_reference_assets(
+            _character_image_assets(asset_index, asset_sources, portrait_path, card_path)
+        )
         art_sets.append(
             {
                 "key": art_set_id,
@@ -398,7 +530,13 @@ def summarize_character_tables(
         card_path = str(primary_art.get("card") or "").strip("/")
         portrait_image_path = _find_character_image(asset_index, portrait_path, "halfbody_large")
         card_image_path = _find_character_image(asset_index, card_path, "unitcards")
-        image_assets = [] if external_image_set else _character_image_assets(asset_index, asset_sources, portrait_path, card_path)
+        if _is_image_only_reference(asset_sources.get(portrait_image_path or "", "")):
+            portrait_image_path = None
+        if _is_image_only_reference(asset_sources.get(card_image_path or "", "")):
+            card_image_path = None
+        image_assets = [] if external_image_set else _non_image_only_reference_assets(
+            _character_image_assets(asset_index, asset_sources, portrait_path, card_path)
+        )
         art_sets.append(
             {
                 "key": art_set_id,
@@ -443,6 +581,7 @@ def summarize_character_tables(
         if row.get("key")
     ]
     combat_stats_by_initial_ceo = _combat_stats_by_initial_ceo(tables)
+    attribute_stats_by_set = _attribute_stats_by_set(tables)
     land_units = {str(row.get("key")): row for row in tables.get("land_units", []) if row.get("key")}
 
     characters = []
@@ -495,6 +634,7 @@ def summarize_character_tables(
                 "cardImageSourcePath": art_set_summary.get("cardImageSourcePath"),
                 "imageAssets": art_set_summary.get("imageAssets", []),
                 "combatStats": combat_stats,
+                "attributeStats": _attribute_stats_for_details(details, attribute_stats_by_set),
                 "titleInfo": title_info,
                 "templateRow": template,
                 "details": details,
@@ -503,6 +643,7 @@ def summarize_character_tables(
             }
         )
 
+    _append_image_only_characters(characters, art_sets, asset_index, asset_sources)
     detail_rows = tables["character_generation_template_game_mode_details"]
     skill_trees = _summarize_skill_trees(tables, loc_text, characters)
     return {
@@ -516,11 +657,205 @@ def summarize_character_tables(
         "initialCeos": sorted(initial_ceos, key=lambda item: str(item["key"])),
         "retinues": _unique_options(row.get("retinue") for row in detail_rows),
         "attributeSets": _unique_options(row.get("attribute_set") for row in detail_rows),
+        "attributeStatsBySet": attribute_stats_by_set,
         "skillSets": _unique_options(row.get("skill_set_override") for row in detail_rows),
         "skillTrees": skill_trees,
         "subtypes": _unique_options(row.get("subtype") for row in tables["character_generation_templates"]),
         "locKeys": sorted(loc_text.keys()),
     }
+
+
+def _append_image_only_characters(
+    characters: list[dict[str, Any]],
+    art_sets: list[dict[str, Any]],
+    asset_index: dict[str, Any],
+    asset_sources: dict[str, str],
+) -> None:
+    existing_image_paths = {
+        str(character.get("portraitImagePath") or "").lower()
+        for character in characters
+        if character.get("portraitImagePath")
+    }
+    existing_character_keys = {str(character.get("key") or "") for character in characters}
+    existing_art_keys = {str(art_set.get("key") or "") for art_set in art_sets}
+    image_paths = sorted(
+        [
+            path for path in asset_index.get("files", [])
+            if "/stills/halfbody_large/" in path.lower()
+            and path.lower().endswith(".png")
+            and "/large/" not in path.lower()
+        ],
+        key=lambda path: (
+            0 if Path(path).stem.lower() == path.lower().split("/stills/halfbody_large/", 1)[0].rsplit("/", 1)[-1] else 1,
+            path.lower(),
+        ),
+    )
+    seen_image_folders: set[str] = set()
+    for path in image_paths:
+        real_path = _real_packed_asset_path(path)
+        lower = real_path.lower()
+        marker = "/stills/halfbody_large/"
+        if lower in existing_image_paths:
+            if not _is_image_only_reference(asset_sources.get(path, "")):
+                continue
+        if _is_non_character_image_path(real_path.lower()):
+            continue
+        folder = real_path[: lower.index(marker)]
+        folder_key = folder.lower()
+        source_path = asset_sources.get(path, "")
+        source_folder_key = f"{source_path}|{folder_key}"
+        if source_folder_key in seen_image_folders:
+            continue
+        seen_image_folders.add(source_folder_key)
+        image_key = folder.removeprefix("ui/characters/").strip("/")
+        if not image_key:
+            continue
+        card_path = _find_character_image(asset_index, image_key, "unitcards")
+        label = _friendly_image_character_label(_image_label_key(image_key, real_path))
+        art_key = f"image_only_{image_key}".replace("/", "_")
+        image_assets = _character_image_assets(asset_index, asset_sources, image_key, image_key)
+        if art_key not in existing_art_keys:
+            art_sets.append({
+                "key": art_key,
+                "label": label,
+                "rowCount": 0,
+                "portrait": image_key,
+                "card": image_key,
+                "uniform": "",
+                "uniformLabel": "모델 없음",
+                "referenceSourcePath": source_path,
+                "virtual": True,
+                "imageOnly": True,
+                "externalImageSet": False,
+                "portraitImagePath": path,
+                "portraitImageSourcePath": source_path,
+                "cardImagePath": card_path,
+                "cardImageSourcePath": asset_sources.get(card_path or ""),
+                "imageAssets": image_assets,
+                "rows": [],
+            })
+            existing_art_keys.add(art_key)
+        character_key = f"image_only_{image_key}".replace("/", "_")
+        if character_key in existing_character_keys:
+            character_key = f"{character_key}_{Path(path).stem}".replace("/", "_")
+        characters.append({
+            "key": character_key,
+            "displayName": label,
+            "label": label,
+            "forename": label,
+            "familyName": "",
+            "clanName": "",
+            "subtype": "",
+            "weight": 100,
+            "artSet": art_key,
+            "ageRange": "",
+            "minSpawnRound": 0,
+            "maxSpawnRound": 999,
+            "voiceoverActor": "",
+            "portrait": image_key,
+            "card": image_key,
+            "uniform": "",
+            "uniformLabel": "모델 없음",
+            "details": [],
+            "combatStats": {},
+            "attributeStats": {},
+            "titleInfo": {},
+            "templateRow": {},
+            "source": "reference",
+            "referenceSourcePath": source_path,
+            "virtualImageOnly": True,
+            "portraitImagePath": path,
+            "portraitImageSourcePath": source_path,
+            "cardImagePath": card_path,
+            "cardImageSourcePath": asset_sources.get(card_path or ""),
+            "imageAssets": image_assets,
+        })
+        existing_image_paths.add(lower)
+        existing_character_keys.add(character_key)
+
+
+def _non_image_only_reference_assets(assets: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [
+        asset for asset in assets
+        if not _is_image_only_reference(asset.get("sourcePath", ""))
+    ]
+
+
+def _is_non_character_image_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").lower()
+    parts = [part for part in normalized.split("/") if part]
+    if re.search(r"(^|[_\-/])(?:\d{1,2}yo|baby|child|children|kid|kids|infant|toddler)(?:[_\-/]|$)", normalized):
+        return True
+    child_tokens = {"baby", "child", "children", "kid", "kids", "infant", "toddler"}
+    non_character_tokens = {
+        "ancillary",
+        "ancillaries",
+        "armour",
+        "armor",
+        "weapon",
+        "weapons",
+        "mount",
+        "mounts",
+        "horse",
+        "horses",
+        "accessory",
+        "accessories",
+        "aura",
+        "banner",
+        "banners",
+        "common",
+        "face",
+        "faces",
+        "generic",
+        "prop",
+        "props",
+        "shared",
+        "ui_composite_scene",
+    }
+    return any(
+        part in child_tokens
+        or bool(child_tokens.intersection(part.replace("-", "_").split("_")))
+        or bool(non_character_tokens.intersection(part.replace("-", "_").split("_")))
+        or part.startswith(("baby_", "child_", "kid_", "infant_", "toddler_"))
+        or part.endswith(("_baby", "_child", "_kid", "_infant", "_toddler"))
+        for part in parts
+    )
+
+
+def _friendly_image_character_label(image_key: str) -> str:
+    lower = image_key.lower()
+    known = {
+        "diao_chan": "초선",
+        "lu_bu": "여포",
+    }
+    for token, label in known.items():
+        if token in lower:
+            return label
+    label = _friendly_character_label(image_key)
+    for prefix in ("lb special ", "special "):
+        if label.startswith(prefix):
+            label = label[len(prefix):]
+    return label
+
+
+def _image_label_key(image_key: str, image_path: str) -> str:
+    normalized = image_key.replace("\\", "/").strip("/")
+    lower = normalized.lower()
+    stem = Path(image_path).stem
+    folder_leaf = normalized.rsplit("/", 1)[-1] if normalized else ""
+    generic_folder_tokens = (
+        "add_unique",
+        "artsets",
+        "generic_arts",
+        "composites",
+        "faces",
+        "baby",
+    )
+    if "/" in normalized or any(token in lower for token in generic_folder_tokens):
+        return stem
+    if stem and stem.lower() != folder_leaf.lower() and stem.lower().startswith(("3k_", "sad_", "mod_")):
+        return stem
+    return image_key
 
 
 def _summarize_skill_trees(
@@ -657,7 +992,11 @@ def _skill_name_for_key(skill_key: str, loc_text: dict[str, str]) -> str:
         f"character_skill_names_{skill_key}",
     ):
         if loc_text.get(loc_key):
-            return loc_text[loc_key]
+            label = loc_text[loc_key]
+            if _contains_hangul(label):
+                return label
+            translated = _friendly_effect_key(label)
+            return translated if _contains_hangul(translated) else _translate_skill_name_text(label)
     return _friendly_skill_key(skill_key)
 
 
@@ -767,11 +1106,19 @@ def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> st
         f"effects_name_{key}",
     ):
         if loc_text.get(loc_key):
-            return loc_text[loc_key]
+            label = loc_text[loc_key]
+            if _contains_hangul(label):
+                return label
+            translated = _friendly_effect_key(label)
+            return translated if _contains_hangul(translated) else _translate_skill_name_text(label)
     for field in ("description", "onscreen_name", "name", "icon"):
         value = row.get(field)
         if value and loc_text.get(str(value)):
-            return loc_text[str(value)]
+            label = loc_text[str(value)]
+            if _contains_hangul(label):
+                return label
+            translated = _friendly_effect_key(label)
+            return translated if _contains_hangul(translated) else _translate_skill_name_text(label)
         if value and field != "icon":
             return _friendly_key(str(value))
     return _friendly_effect_key(key)
@@ -820,6 +1167,72 @@ def _effect_summary(effects: list[dict[str, Any]]) -> str:
 
 
 _SKILL_PHRASE_LABELS = {
+    "ability_fire_blade_breaker": "검 파괴자",
+    "ability_fire_blazing_roar": "불타는 포효",
+    "ability_fire_blazing_saddles": "불타는 안장",
+    "ability_fire_devastating_roar": "파괴적인 포효",
+    "ability_fire_final_rush": "최후의 돌격",
+    "ability_fire_fire_bomb": "화염탄",
+    "ability_fire_internal_blaze": "내면의 불꽃",
+    "ability_fire_mighty_thrust": "강력한 찌르기",
+    "ability_fire_natures_ally": "자연의 벗",
+    "ability_fire_scattering_blows": "흩뿌리는 일격",
+    "ability_fire_sundering_strike": "분쇄의 일격",
+    "ability_fire_targeted_strike": "정밀 타격",
+    "ability_fire_undying_vow": "불굴의 맹세",
+    "ability_fire_wildfire_raider": "들불 약탈자",
+    "ability_water_inspiring_surge": "고무적인 격류",
+    "ability_water_stifling_deluge": "숨막히는 폭우",
+    "ability_water_two_zhangs": "두 장씨",
+    "blade_breaker": "검 파괴자",
+    "blazing_roar": "불타는 포효",
+    "blazing_saddles": "불타는 안장",
+    "blossoming_beauty": "꽃피는 미인",
+    "devastating_roar": "파괴적인 포효",
+    "final_rush": "최후의 돌격",
+    "fire_bomb": "화염탄",
+    "internal_blaze": "내면의 불꽃",
+    "mighty_thrust": "강력한 찌르기",
+    "natures_ally": "자연의 벗",
+    "scattering_blows": "흩뿌리는 일격",
+    "sundering_strike": "분쇄의 일격",
+    "targeted_strike": "정밀 타격",
+    "undying_vow": "불굴의 맹세",
+    "wildfire_raider": "들불 약탈자",
+    "charge_forward": "전진 돌격",
+    "exemplary_strike": "모범적인 일격",
+    "fire_hail_of_arrows": "화살 세례",
+    "fire_reign_of_terror": "공포의 지배",
+    "fire_the_dragons_gaze": "용의 응시",
+    "spearhead": "선봉",
+    "blood_soaked_wrath": "피로 물든 분노",
+    "breakthrough_in_concentration": "집중 돌파",
+    "camp_crushing": "진영 파괴",
+    "fervent_cheer": "열렬한 함성",
+    "hail_of_arrows": "화살 세례",
+    "inspiring_surge": "고무적인 격류",
+    "sight_of_the_dragon": "용의 통찰",
+    "skill_special_ability_water": "수계 특수 능력",
+    "stifling_deluge": "숨막히는 폭우",
+    "the_dragons_gaze": "용의 응시",
+    "two_zhangs": "두 장씨",
+    "xianchenying": "선진영",
+    "unbreakable": "불굴",
+    "obfuscation": "기만",
+    "patience": "인내",
+    "ruthlessness": "무자비",
+    "evasiveness": "회피",
+    "mutability": "변화",
+    "trust": "신뢰",
+    "villainy": "간악",
+    "wisdom": "지혜",
+    "consideration": "배려",
+    "craft": "기교",
+    "dilligence": "근면",
+    "diligence": "근면",
+    "restlessness": "분주",
+    "scholarship": "학식",
+    "stealth": "은신",
     "ability_fire_heart_seeker": "화염 추적자",
     "flames_of_the_phoenix": "봉황의 불꽃",
     "unpredictability": "예측불가",
@@ -838,6 +1251,8 @@ _SKILL_PHRASE_LABELS = {
     "passion": "열정",
     "humility": "겸손",
     "precision": "정밀",
+    "projectile_fire_arrows": "화염 화살",
+    "fire_arrows": "화염 화살",
     "abundance": "풍요",
     "gluttony": "탐욕",
     "intuition": "직감",
@@ -902,10 +1317,18 @@ def _friendly_skill_key(skill_key: str) -> str:
     lower = value.lower()
     level_match = re.search(r"(?:^|_)mlvl_?(\d+)|(?:^|_)level_?(\d+)", lower)
     level = f" Lv{level_match.group(1) or level_match.group(2)}" if level_match else ""
+    normalized_full = re.sub(r"[^a-z0-9]+", "_", lower).strip("_")
+    if normalized_full in _SKILL_PHRASE_LABELS:
+        return f"{_SKILL_PHRASE_LABELS[normalized_full]}{level}"
+    for phrase_key, label in _SKILL_PHRASE_LABELS.items():
+        if phrase_key in normalized_full:
+            return f"{label}{level}"
     cleaned = lower
     cleaned = re.sub(r"^3k_(?:main|dlc\d+|mtu)_", "", cleaned)
-    cleaned = re.sub(r"^skill_", "", cleaned)
-    cleaned = re.sub(r"^(?:special|mastery|ability)_", "", cleaned)
+    previous = ""
+    while previous != cleaned:
+        previous = cleaned
+        cleaned = re.sub(r"^(?:skill|special|mastery|ability|enable|unlock)_", "", cleaned)
     cleaned = re.sub(r"_mlvl_?\d+|_level_?\d+", "", cleaned)
     if cleaned in _SKILL_PHRASE_LABELS:
         return f"{_SKILL_PHRASE_LABELS[cleaned]}{level}"
@@ -940,14 +1363,21 @@ def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> st
         if value and loc_text.get(str(value)):
             return loc_text[str(value)]
         if value and field != "icon":
-            label = _friendly_key(str(value))
-            if not label.lower().startswith("effect "):
+            label = _friendly_effect_key(str(value))
+            if label and _contains_hangul(label):
                 return label
     return _friendly_effect_key(key)
 
 
 def _friendly_effect_key(key: str) -> str:
     lower = str(key or "").lower()
+    normalized = re.sub(r"[^a-z0-9]+", "_", lower).strip("_")
+    normalized = re.sub(r"^(?:3k_(?:main|dlc\d+|mtu)_)?(?:effect|effects|enable|unlock|skill|ability)_", "", normalized)
+    if normalized in _SKILL_PHRASE_LABELS:
+        return _SKILL_PHRASE_LABELS[normalized]
+    for phrase_key, label in _SKILL_PHRASE_LABELS.items():
+        if phrase_key in normalized:
+            return label
     attributes = {
         "expertise": "전문성",
         "resolve": "결의",
@@ -961,8 +1391,80 @@ def _friendly_effect_key(key: str) -> str:
     for phrase_key, label in _SKILL_PHRASE_LABELS.items():
         if phrase_key in lower:
             return label
+    if "projectile_fire_arrows" in lower or "fire_arrows" in lower:
+        return "화염 화살"
     if "ai_hint" in lower or "ai hint" in lower:
         return ""
+    if "run_speed" in lower or "campaign_run_speed" in lower:
+        return "속도"
+    if "line_of_sight" in lower:
+        return "시야"
+    if "attack_rate" in lower:
+        return "공격 속도"
+    if "province_building_upkeep" in lower or "building_upkeep" in lower:
+        return "건물 유지비"
+    if "ap_damage_melee" in lower:
+        return "관통 근접 피해"
+    if "mod_melee_defence" in lower or "melee_defence" in lower:
+        return "근접 방어"
+    if "mod_missile_damage" in lower or "missile_damage" in lower:
+        return "원거리 피해"
+    if "projectile_poison_arrows" in lower:
+        return "독화살"
+    if "projectile_fire_artillery" in lower:
+        return "화염 포병"
+    if "unit_rank_new_recruits" in lower or "new_recruits" in lower:
+        return "신규 모집 등급"
+    if "industrial_exploitation" in lower:
+        return "산업 개발"
+    if "points_per_turn" in lower:
+        return "책략 점수"
+    if "attribute_encourages" in lower:
+        return "격려"
+    if "politics_assignment_limit" in lower:
+        return "파견 임무 한도"
+    if "block_mod_earth_units" in lower:
+        return "토 부대 방어"
+    if "defence_mod_metal_units" in lower:
+        return "금 부대 방어"
+    if "captives_capture_chance" in lower:
+        return "포로 생포 확률"
+    if "captives_escape_chance" in lower:
+        return "포로 탈출 확률"
+    if "unit_unlock_archer" in lower:
+        return "궁병 모집 해금"
+    if "characters_experience_bonus" in lower:
+        return "인물 경험치"
+    if "reinforcement_range" in lower:
+        return "지원군 범위"
+    if "deployables_caltrops" in lower:
+        return "마름쇠 배치"
+    if "deployables_wooden_stakes" in lower:
+        return "말뚝 배치"
+    if "find_villainous_and_corrupt" in lower:
+        return "간악/부패 인물 탐색"
+    if "find_filial_and_incorrupt" in lower:
+        return "효성/청렴 인물 탐색"
+    if "abs_increase_from_characters" in lower:
+        return "인물 만족도"
+    if "public_order_from_characters" in lower:
+        return "인물 공공질서"
+    if "province_public_order_base" in lower or "public_order" in lower:
+        return "공공질서"
+    if "root_out_corruption" in lower:
+        return "부패 척결"
+    if "night_battles" in lower:
+        return "야간 전투"
+    if "unit_experience" in lower:
+        return "부대 경험치"
+    if "ancillary_aura" in lower or "aura_mod" in lower:
+        return "오라 범위"
+    if "immune_to_psychology" in lower:
+        return "심리 면역"
+    if "ap_damage_missile" in lower:
+        return "관통 원거리 피해"
+    if "force_army_reload" in lower or "army_reload" in lower:
+        return "재장전 속도"
     if "satisfaction" in lower:
         return "만족도"
     if "morale" in lower:
@@ -1329,7 +1831,7 @@ def _merge_reference_packs(
             session = adapter_for(actual_adapter).open_pack(resolved)
             open_seconds = _elapsed(step)
             step = time.perf_counter()
-            reference_tables = {} if _is_data_pack(resolved) else _read_reference_tables(session)
+            reference_tables = {} if _is_image_only_reference(resolved) else _read_reference_tables(session)
             table_seconds = _elapsed(step)
             step = time.perf_counter()
             for alias, rows in reference_tables.items():
@@ -1361,6 +1863,20 @@ def _merge_reference_packs(
                         ("character_skill_key", "effect_key", "effect_scope", "level"),
                         str(resolved),
                     )
+                elif alias == "character_attribute_sets":
+                    _append_missing_rows_by_key(
+                        tables.setdefault(alias, []),
+                        rows,
+                        _attribute_set_key,
+                        str(resolved),
+                    )
+                elif alias == "character_attributes":
+                    _append_missing_rows_by_key(
+                        tables.setdefault(alias, []),
+                        rows,
+                        lambda row: (_attribute_set_key(row), _attribute_stat_key(row) or ""),
+                        str(resolved),
+                    )
                 else:
                     _append_missing_rows(
                         tables.setdefault(alias, []),
@@ -1373,22 +1889,28 @@ def _merge_reference_packs(
             loc_seconds = _elapsed(step)
             step = time.perf_counter()
             added_assets = 0
+            image_only_reference = _is_image_only_reference(resolved)
             for asset_path in session.list_files():
-                if asset_path in known_assets:
+                stored_asset_path = _source_scoped_asset_path(resolved, asset_path) if image_only_reference else asset_path
+                if stored_asset_path in known_assets:
                     continue
-                asset_files.append(asset_path)
-                known_assets.add(asset_path)
-                asset_sources[asset_path] = str(resolved)
+                if not image_only_reference and asset_path in known_assets:
+                    continue
+                asset_files.append(stored_asset_path)
+                known_assets.add(stored_asset_path)
+                asset_sources[stored_asset_path] = str(resolved)
                 added_assets += 1
             asset_seconds = _elapsed(step)
             added = {
                 alias: len(tables.get(alias, [])) - before_counts.get(alias, 0)
                 for alias in reference_tables
             }
+            row_counts = {alias: len(rows) for alias, rows in reference_tables.items()}
             report.append({
                 "path": str(resolved),
                 "ok": True,
                 "tables": sorted(reference_tables),
+                "rowCounts": row_counts,
                 "addedRows": {key: value for key, value in added.items() if value},
                 "addedAssets": added_assets,
                 "seconds": _elapsed(reference_started),
@@ -1412,12 +1934,28 @@ def _skip_reference_pack_for_fast_open(path: Path) -> bool:
 
 
 def _is_data_pack(path: Path) -> bool:
-    return path.name.lower() == "data.pack"
+    return path.name.lower().startswith("data") or path.name.lower() in {"database.pack"}
+
+
+def _is_aw_reference(path: Path | str) -> bool:
+    if not path:
+        return False
+    return Path(path).name.lower().startswith(("aw-", "aw "))
+
+
+def _is_lshz_reference(path: Path | str) -> bool:
+    if not path:
+        return False
+    return Path(path).name.lower().startswith("lshz_")
+
+
+def _is_image_only_reference(path: Path | str) -> bool:
+    return _is_aw_reference(path) or _is_lshz_reference(path)
 
 
 def _skip_bfg_resource_pack_for_fast_open(path: Path) -> bool:
     name = path.name.lower()
-    return name.startswith("bfg_") and name not in {"bfg_astral.pack", "bfg_originals.pack"}
+    return name == "bfg_astral.pack"
 
 
 def _is_bfg_pack(path: Path) -> bool:
@@ -1439,6 +1977,8 @@ def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
     for alias in (
         "campaign_character_art_sets",
         "campaign_character_arts",
+        "character_attribute_sets",
+        "character_attributes",
         "equipment_variants_weapons",
         "equipment_variants_armours",
         "melee_weapons",
@@ -1448,16 +1988,32 @@ def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
         "land_units",
     ):
         try:
-            if alias in {"campaign_character_art_sets", "campaign_character_arts"}:
+            if alias in {
+                "campaign_character_art_sets",
+                "campaign_character_arts",
+                "character_attribute_sets",
+                "character_attributes",
+            }:
                 table_name = _resolve_reference_character_table(session, alias)
             else:
                 table_name = _resolve_stat_table(session, alias, "pack")
             tables[alias] = session.read_table(table_name)
-        except ValueError:
+        except (KeyError, ValueError):
             continue
     for alias in SKILL_TABLE_ALIASES:
         try:
             table_name = _resolve_skill_table(session, alias, "pack")
+            tables[alias] = session.read_table(table_name)
+        except ValueError:
+            continue
+    return tables
+
+
+def _read_data_pack_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
+    tables: dict[str, list[dict[str, Any]]] = {}
+    for alias in ("character_attribute_sets", "character_attributes"):
+        try:
+            table_name = _resolve_reference_character_table(session, alias)
             tables[alias] = session.read_table(table_name)
         except ValueError:
             continue
@@ -1494,6 +2050,21 @@ def _append_missing_rows_by_fields(
         if key in existing:
             if _is_bfg_reference(reference_path):
                 existing[key].setdefault("_externalImageSetSourcePath", reference_path)
+            continue
+        target.append({**row, "_referenceSourcePath": reference_path})
+        existing[key] = target[-1]
+
+
+def _append_missing_rows_by_key(
+    target: list[dict[str, Any]],
+    source: list[dict[str, Any]],
+    key_func: Any,
+    reference_path: str,
+) -> None:
+    existing = {key_func(row): row for row in target if key_func(row)}
+    for row in source:
+        key = key_func(row)
+        if not key or key in existing:
             continue
         target.append({**row, "_referenceSourcePath": reference_path})
         existing[key] = target[-1]
@@ -1543,6 +2114,156 @@ def _unit_stats_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "unitFromReference": bool(row.get("_referenceSourcePath")),
         "unitReferenceSource": row.get("_referenceSourcePath"),
     }
+
+
+def _attribute_stats_by_set(tables: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in tables.get("character_attributes", []):
+        set_key = _attribute_set_key(row)
+        if not set_key:
+            continue
+        attr_key = _attribute_stat_key(row)
+        value = _attribute_stat_value(row)
+        if not attr_key or value is None:
+            continue
+        grouped.setdefault(set_key, {})[attr_key] = value
+    for set_key, stats in _DEFAULT_ATTRIBUTE_STATS_BY_SET.items():
+        grouped.setdefault(set_key, dict(stats))
+    return grouped
+
+
+_ATTRIBUTE_STAT_PRESETS = {
+    "balanced": {"expertise": 40, "resolve": 40, "cunning": 40, "instinct": 40, "authority": 40},
+    "earth": {"expertise": 45, "resolve": 30, "cunning": 40, "instinct": 35, "authority": 50},
+    "fire": {"expertise": 40, "resolve": 35, "cunning": 30, "instinct": 50, "authority": 45},
+    "metal": {"expertise": 50, "resolve": 40, "cunning": 45, "instinct": 30, "authority": 35},
+    "water": {"expertise": 35, "resolve": 45, "cunning": 50, "instinct": 40, "authority": 30},
+    "wood": {"expertise": 30, "resolve": 50, "cunning": 35, "instinct": 45, "authority": 40},
+    "healer": {"expertise": 30, "resolve": 45, "cunning": 35, "instinct": 50, "authority": 40},
+    "scholar": {"expertise": 50, "resolve": 40, "cunning": 30, "instinct": 35, "authority": 45},
+    "veteran": {"expertise": 35, "resolve": 50, "cunning": 45, "instinct": 40, "authority": 30},
+}
+
+
+def _build_default_attribute_stats_by_set() -> dict[str, dict[str, int]]:
+    result: dict[str, dict[str, int]] = {}
+    for element in ("earth", "fire", "metal", "water", "wood"):
+        for suffix in ("records", "romance"):
+            result[f"3k_main_attribute_set_general_{element}_{suffix}"] = dict(_ATTRIBUTE_STAT_PRESETS[element])
+            result[f"3k_dlc06_attribute_set_general_nanman_{element}_{suffix}"] = dict(_ATTRIBUTE_STAT_PRESETS[element])
+    for suffix in ("records", "romance"):
+        result[f"3k_dlc06_attribute_set_general_nanman_balanced_{suffix}"] = dict(_ATTRIBUTE_STAT_PRESETS["balanced"])
+        for role in ("healer", "scholar", "veteran"):
+            result[f"3k_ytr_attribute_set_general_{role}_{suffix}"] = dict(_ATTRIBUTE_STAT_PRESETS[role])
+    return result
+
+
+_DEFAULT_ATTRIBUTE_STATS_BY_SET = _build_default_attribute_stats_by_set()
+
+
+def _attribute_set_key(row: dict[str, Any]) -> str:
+    for column in (
+        "set_name",
+        "attribute_set",
+        "character_attribute_set",
+        "character_attribute_set_key",
+        "attribute_set_key",
+        "set",
+        "key",
+    ):
+        value = row.get(column)
+        if value:
+            return str(value)
+    for value in row.values():
+        text = str(value or "")
+        if "_attribute_set_" in text or "attribute_set_" in text:
+            return text
+    return ""
+
+
+def _attribute_stats_for_details(
+    details: list[dict[str, Any]],
+    stats_by_set: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    for game_mode in ("historical", "romance"):
+        for detail in details:
+            if detail.get("gameMode") != game_mode:
+                continue
+            stats = stats_by_set.get(str(detail.get("attributeSet") or ""))
+            if stats:
+                return stats
+    for detail in details:
+        stats = stats_by_set.get(str(detail.get("attributeSet") or ""))
+        if stats:
+            return stats
+    return {}
+
+
+def _attribute_stat_key(row: dict[str, Any]) -> str | None:
+    value = str(
+        row.get("attribute_type")
+        or row.get("attribute")
+        or row.get("character_attribute")
+        or row.get("attribute_key")
+        or row.get("key")
+        or ""
+    ).lower()
+    stat_key = _attribute_stat_key_from_text(value)
+    if stat_key:
+        return stat_key
+    for cell in row.values():
+        stat_key = _attribute_stat_key_from_text(str(cell or "").lower())
+        if stat_key:
+            return stat_key
+    return None
+
+
+def _attribute_stat_key_from_text(value: str) -> str | None:
+    if "attribute_set" in value:
+        return None
+    if "expertise" in value or "metal" in value:
+        return "expertise"
+    if "resolve" in value or "wood" in value:
+        return "resolve"
+    if "cunning" in value or "water" in value:
+        return "cunning"
+    if "instinct" in value or "fire" in value:
+        return "instinct"
+    if "authority" in value or "earth" in value:
+        return "authority"
+    return None
+
+
+def _attribute_stat_value(row: dict[str, Any]) -> int | float | None:
+    for column in ("value", "attribute_value", "base_value", "initial_value", "starting_value", "amount"):
+        value = row.get(column)
+        if isinstance(value, (int, float)):
+            return value
+    skip_columns = {
+        "set_name",
+        "attribute_set",
+        "character_attribute_set",
+        "character_attribute_set_key",
+        "attribute_set_key",
+        "set",
+        "key",
+        "attribute_type",
+        "attribute",
+        "character_attribute",
+        "attribute_key",
+        "minimum_value",
+        "maximum_value",
+        "min_value",
+        "max_value",
+        "min",
+        "max",
+    }
+    for column, value in row.items():
+        if str(column).startswith("_") or column in skip_columns:
+            continue
+        if isinstance(value, (int, float)):
+            return value
+    return None
 
 
 def _character_token_from_template(template_key: str) -> str:
@@ -1828,7 +2549,10 @@ def _find_character_image(asset_index: dict[str, Any], image_key: str, image_kin
         f"ui/characters/{normalized}/composites/large_panel/norm/norm.png",
         f"ui/characters/{normalized}/composites/large_panel/happy/noanim.png",
         f"ui/characters/{normalized}/composites/large_panel/happy/happy.png",
+        f"ui/eventpics/{image_name}.png",
     ]
+    if image_name.startswith("ep_"):
+        preferred.append(f"ui/eventpics/ep_event_{image_name.removeprefix('ep_')}.png")
     assets_by_lower = asset_index["lower_to_path"]
     for path in preferred:
         found = assets_by_lower.get(path.lower())
@@ -2021,7 +2745,7 @@ def _resolve_skill_table(session: Any, alias: str, source: str) -> str:
 
 def _resolve_reference_character_table(session: Any, alias: str) -> str:
     tables = set(session.list_tables("pack"))
-    for candidate in CHARACTER_TABLE_ALIASES[alias]:
+    for candidate in CHARACTER_TABLE_ALIASES.get(alias, [alias]):
         if candidate in tables:
             return candidate
     matches = sorted(table for table in tables if table.startswith(f"db/{alias}_tables/"))
@@ -2069,18 +2793,15 @@ def _reference_pack_paths(payload: dict[str, Any]) -> list[Path]:
 
 def _reference_pack_priority(path: Path) -> int:
     name = path.name.lower()
-    if name == "data.pack":
+    if name.startswith("bfg_"):
+        return 0
+    if name.startswith("data") or name == "database.pack":
+        return 1
+    if name.startswith("lshz_"):
         return 2
-    vanilla_names = {
-        "database.pack",
-        "data_mh.pack",
-        "data_ep.pack",
-        "data_dlc07.pack",
-        "data_dlc06.pack",
-        "data_bl.pack",
-        "data_yt_bl.pack",
-    }
-    return 1 if name in vanilla_names else 0
+    if name.startswith(("aw-", "aw ")):
+        return 3
+    return 4
 
 
 def _detect_adapter(pack_path: Path) -> str:
@@ -2111,21 +2832,74 @@ def _resolve_user_path(raw_path: Any) -> Path:
 
 
 def _ensure_rpfm_server() -> None:
-    global RPFM_PROCESS
+    global RPFM_PROCESS, RPFM_LOG_HANDLE
     if _port_open("127.0.0.1", 45127):
         return
     if RPFM_PROCESS is not None and RPFM_PROCESS.poll() is None:
         _wait_for_port("127.0.0.1", 45127)
         return
-    if not DEFAULT_RPFM_SERVER.is_file():
-        raise ValueError(f"RPFM server binary not found: {DEFAULT_RPFM_SERVER}")
+    rpfm_server = resolve_rpfm_server(ROOT, DEFAULT_RPFM_SERVER)
+    if not rpfm_server.is_file():
+        raise ValueError(f"RPFM server binary not found: {rpfm_server}")
+    log_path = ROOT / "work" / "rpfm-server.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if RPFM_LOG_HANDLE is not None and not RPFM_LOG_HANDLE.closed:
+        RPFM_LOG_HANDLE.close()
+    RPFM_LOG_HANDLE = log_path.open("ab")
+    creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     RPFM_PROCESS = subprocess.Popen(
-        [str(DEFAULT_RPFM_SERVER)],
-        cwd=DEFAULT_RPFM_SERVER.parent.parent.parent,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        [str(rpfm_server)],
+        cwd=rpfm_server.parent,
+        env=_rpfm_env(),
+        stdout=RPFM_LOG_HANDLE,
+        stderr=RPFM_LOG_HANDLE,
+        creationflags=creationflags,
     )
     _wait_for_port("127.0.0.1", 45127)
+
+
+def _rotate_rpfm_config_dir() -> None:
+    if os.name != "nt":
+        return
+    local_roots = [
+        Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")),
+        Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")),
+        Path.home() / "AppData" / "Local",
+        Path.home() / "AppData" / "Roaming",
+        _rpfm_local_appdata_root(),
+        ROOT / "work" / "rpfm-local-appdata" / "config",
+    ]
+    for local_appdata in local_roots:
+        config_dir = local_appdata / "FrodoWazEre" / "rpfm" / "config"
+        if not config_dir.exists():
+            continue
+        backup = config_dir.with_name(f"config.mtu-backup-{int(time.time())}")
+        try:
+            config_dir.rename(backup)
+        except OSError:
+            shutil.rmtree(config_dir, ignore_errors=True)
+
+
+def _rpfm_local_appdata_root() -> Path:
+    return ROOT / "work" / "rpfm-local-appdata"
+
+
+def _rpfm_env() -> dict[str, str]:
+    blocked_prefixes = ("PYINSTALLER_", "PYI_", "PYTHON")
+    blocked_keys = {"TK_PACK_EDITOR_ROOT", "_MEIPASS"}
+    env = {}
+    for key, value in os.environ.items():
+        upper = key.upper()
+        if upper in blocked_keys or any(upper.startswith(prefix) for prefix in blocked_prefixes):
+            continue
+        if upper == "PATH" and any(existing.upper() == "PATH" for existing in env):
+            continue
+        env[key] = value
+    if os.name != "nt":
+        config_root = _rpfm_local_appdata_root()
+        config_root.mkdir(parents=True, exist_ok=True)
+        env["XDG_CONFIG_HOME"] = str(config_root)
+    return env
 
 
 def _port_open(host: str, port: int) -> bool:
