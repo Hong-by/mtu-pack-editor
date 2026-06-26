@@ -177,6 +177,8 @@ const SAMPLE_CHARACTERS = [
   },
 ];
 
+const FAVORITE_APPEARANCE_STORAGE_KEY = 'mtuPackEditor.favoriteAppearanceKeys.v1';
+
 const state = {
   characters: SAMPLE_CHARACTERS,
   options: null,
@@ -191,7 +193,17 @@ const state = {
   skillTreeDrafts: {},
   activeSkillNode: null,
   skillCandidateTabs: {},
+  editCombatSort: 'default',
+  sourceCombatSort: 'default',
+  favoriteAppearanceKeys: loadFavoriteAppearanceKeys(),
 };
+
+const COMBAT_SORT_OPTIONS = [
+  { key: 'default', label: '기본 순서' },
+  { key: 'melee_desc', label: '근접 무기 높은 순' },
+  { key: 'missile_desc', label: '원거리 무기 높은 순' },
+  { key: 'armour_desc', label: '방어구 높은 순' },
+];
 
 const MANUAL_TITLE_EFFECTS = [
   ['사마예', '철학 있는 통치자', '전문성 +20, 결의 +50, 본능 +30, 회복력 +1, 방어할 때 사기 +10, 모든 부대에 화살 및 탄환 +25%(세력 전체)(상국, 세력지도자, 후계자일 때)'],
@@ -300,13 +312,86 @@ function hasUniqueImageSet(character) {
 }
 
 function browsableCharacters() {
-  return sortBrowsableCharacters(characters().filter((character) => (
+  return dedupeAppearanceItems(sortBrowsableCharacters(characters().filter((character) => (
     hasUniqueImageSet(character) && !character.imageOnly && !character.virtualImageOnly
-  )));
+  ))));
+}
+
+function rosterCharacters() {
+  if (isKoreaFilter(state.filter)) {
+    return sortBrowsableCharacters(characters().filter((character) => (
+      character.regionTag === 'korea'
+      && !isCompatTemplate(character)
+      && !character.imageOnly
+      && !character.virtualImageOnly
+    )));
+  }
+  return browsableCharacters();
+}
+
+function isCompatTemplate(character) {
+  return character?.templateFamily === 'compat' || String(character?.key || '').startsWith('ironic_template_');
+}
+
+function isKoreaFilter(filter) {
+  const value = String(filter || '');
+  return value === 'korea' || value.startsWith('korea_');
+}
+
+function koreaFactionFromFilter(filter) {
+  const value = String(filter || '');
+  return value.startsWith('korea_') ? value.slice('korea_'.length) : '';
 }
 
 function appearanceGalleryCharacters() {
-  return sortBrowsableCharacters(characters().filter(hasUniqueImageSet));
+  return sortFavoriteAppearances(dedupeAppearanceItems(sortBrowsableCharacters(characters().filter((character) => (
+    hasUniqueImageSet(character) && !isCompatTemplate(character)
+  )))));
+}
+
+function appearanceFavoriteKey(item) {
+  return String(item?.artSet || item?.key || '');
+}
+
+function isFavoriteAppearance(itemOrKey) {
+  const key = typeof itemOrKey === 'string' ? itemOrKey : appearanceFavoriteKey(itemOrKey);
+  return Boolean(key && state.favoriteAppearanceKeys.has(key));
+}
+
+function toggleFavoriteAppearance(key) {
+  if (!key) return;
+  if (state.favoriteAppearanceKeys.has(key)) {
+    state.favoriteAppearanceKeys.delete(key);
+  } else {
+    state.favoriteAppearanceKeys.add(key);
+  }
+  saveFavoriteAppearanceKeys();
+  renderAppearanceGallery();
+}
+
+function sortFavoriteAppearances(items) {
+  return [...items].sort((a, b) => Number(isFavoriteAppearance(b)) - Number(isFavoriteAppearance(a)));
+}
+
+function loadFavoriteAppearanceKeys() {
+  try {
+    const raw = window.localStorage?.getItem(FAVORITE_APPEARANCE_STORAGE_KEY);
+    const values = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(values) ? values.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveFavoriteAppearanceKeys() {
+  try {
+    window.localStorage?.setItem(
+      FAVORITE_APPEARANCE_STORAGE_KEY,
+      JSON.stringify([...state.favoriteAppearanceKeys].sort()),
+    );
+  } catch {
+    // Ignore storage errors; favorites are a convenience feature.
+  }
 }
 
 function sortBrowsableCharacters(items) {
@@ -377,6 +462,21 @@ function cloneBaseCharacters() {
   return browsableCharacters().filter((character) => !character.virtualImageOnly);
 }
 
+function selectableSourceCharacters() {
+  const byKey = new Map();
+  for (const character of browsableCharacters()) {
+    if (!character.imageOnly && !character.virtualImageOnly) {
+      byKey.set(character.key, character);
+    }
+  }
+  for (const character of characters()) {
+    if (character.regionTag === 'korea' && !isCompatTemplate(character) && !character.imageOnly && !character.virtualImageOnly) {
+      byKey.set(character.key, character);
+    }
+  }
+  return sortBrowsableCharacters([...byKey.values()]);
+}
+
 function titleSourceCharacters() {
   return characters().filter((character) => character.titleInitialCeoKey || character.titleKey);
 }
@@ -445,11 +545,11 @@ function appearanceSets() {
     .filter((item) => item?.key)
     .map((item) => ({
       key: item.key,
-      name: item.label || friendlyKey(item.key),
+      name: translatedAppearanceName(item) || item.label || friendlyKey(item.key),
       element: elementFromSubtype(`${item.key} ${item.uniform || ''}`),
-      portrait: portraitGlyph(item.label || item.key),
+      portrait: portraitGlyph(translatedAppearanceName(item) || item.label || item.key),
       artSet: item.key,
-      imageSetName: item.label || friendlyKey(item.key),
+      imageSetName: translatedAppearanceName(item) || item.label || friendlyKey(item.key),
       modelSetName: item.imageOnly || item.virtual ? '모델 없음' : (item.uniformLabel || item.uniform || friendlyKey(item.key)),
       portraitPath: item.portrait || '',
       cardPath: item.card || '',
@@ -464,16 +564,90 @@ function appearanceSets() {
       externalImageSet: Boolean(item.externalImageSet),
       imageOnly: Boolean(item.imageOnly || item.virtual),
       virtualImageOnly: Boolean(item.imageOnly || item.virtual),
-      hasImage: Boolean(item.portraitImagePath || item.cardImagePath),
+      hasImage: isCompleteImageSet(item),
     }));
   if (artSets.length) {
-    return sortAppearanceSets(artSets);
+    return dedupeAppearanceItems(sortAppearanceSets(artSets));
   }
-  return sortAppearanceSets(characters().map((item) => appearanceFromCharacter(item)));
+  return dedupeAppearanceItems(sortAppearanceSets(characters().map((item) => appearanceFromCharacter(item))));
+}
+
+function unitProfileChoices() {
+  const byKey = new Map();
+  for (const character of selectableSourceCharacters()) {
+    if (character?.unitProfile && character.unitProfile !== '-') {
+      byKey.set(character.key, character);
+    }
+  }
+  for (const row of state.options?.landUnits || []) {
+    const unit = landUnitChoiceFromRow(row);
+    if (unit?.key) byKey.set(unit.key, unit);
+  }
+  return [...byKey.values()].sort((a, b) => {
+    const aDirect = Number(Boolean(a.isLandUnitOption));
+    const bDirect = Number(Boolean(b.isLandUnitOption));
+    if (aDirect !== bDirect) return bDirect - aDirect;
+    return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+  });
+}
+
+function combatProfileChoices(sortKey = 'default') {
+  const selectableCharacters = selectableSourceCharacters().length ? selectableSourceCharacters() : characters();
+  return sortCombatProfileChoices(selectableCharacters, sortKey);
+}
+
+function sortCombatProfileChoices(items, sortKey) {
+  const scoring = {
+    melee_desc: (item) => item.weaponStatKey ? numericScore(item.weaponDamage) + numericScore(item.weaponApDamage) : -Infinity,
+    missile_desc: (item) => item.missileWeaponStatKey
+      ? numericScore(item.projectileDamage) + numericScore(item.projectileApDamage) + numericScore(item.projectileRange) / 1000
+      : -Infinity,
+    armour_desc: (item) => item.armourStatKey ? numericScore(item.baseDefense) : -Infinity,
+  };
+  const scoreFor = scoring[sortKey];
+  if (!scoreFor) return [...items];
+  return [...items].sort((a, b) => {
+    const diff = scoreFor(b) - scoreFor(a);
+    if (diff !== 0) return diff;
+    return a.name.localeCompare(b.name, 'ko');
+  });
+}
+
+function numericScore(value) {
+  return Number.isFinite(Number(value)) ? Number(value) : 0;
+}
+
+function landUnitChoiceFromRow(item) {
+  const row = item?.row || item || {};
+  const key = String(item?.key || row.key || '');
+  if (!key) return null;
+  return {
+    key,
+    name: item?.label || friendlyKey(key),
+    unitProfile: key,
+    landUnitKey: key,
+    unitCategory: row.category || row.unit_category || row.unitCategory || '',
+    unitClass: row.unit_class || row.unitClass || row.class || '',
+    unitChargeBonus: nullableNumber(row.charge_bonus),
+    unitMorale: nullableNumber(row.morale),
+    unitPrimaryAmmo: nullableNumber(row.primary_ammo),
+    unitMeleeAttack: nullableNumber(row.melee_attack),
+    unitMeleeDefence: nullableNumber(row.melee_defence),
+    source: 'pack',
+    isLandUnitOption: true,
+  };
+}
+
+function unitProfileChoiceByKey(key) {
+  return unitProfileChoices().find((item) => item.key === key)
+    || characters().find((item) => item.key === key)
+    || null;
 }
 
 function sortAppearanceSets(items) {
   return [...items].sort((a, b) => {
+    const favoriteDiff = Number(isFavoriteAppearance(b)) - Number(isFavoriteAppearance(a));
+    if (favoriteDiff) return favoriteDiff;
     const aImageOnly = Number(Boolean(a.imageOnly || a.virtualImageOnly));
     const bImageOnly = Number(Boolean(b.imageOnly || b.virtualImageOnly));
     if (aImageOnly !== bImageOnly) return aImageOnly - bImageOnly;
@@ -485,14 +659,158 @@ function sortAppearanceSets(items) {
   });
 }
 
+function dedupeAppearanceItems(items) {
+  const seen = new Set();
+  const deduped = [];
+  for (const item of items) {
+    const signature = appearanceSignature(item);
+    if (signature && seen.has(signature)) continue;
+    if (signature) seen.add(signature);
+    deduped.push(item);
+  }
+  return deduped;
+}
+
+function appearanceSignature(item) {
+  const normalizedPortrait = normalizeImageOnlyPath(item?.portraitImagePath || item?.portraitPath || item?.portrait);
+  const normalizedCard = normalizeImageOnlyPath(item?.cardImagePath || item?.cardPath || item?.card);
+  const slug = imageOnlyNameSlug(item);
+  if (sourceInfo(item).tag && slug && (item?.virtualImageOnly || String(item?.key || '').startsWith('image_only_'))) {
+    return `${sourceInfo(item).tag}:${slug}`;
+  }
+  if (normalizedPortrait || normalizedCard) {
+    return `${sourceInfo(item).tag}:${slug || ''}:${normalizedPortrait}:${normalizedCard}`;
+  }
+  return `${sourceInfo(item).tag}:${slug || normalizeLookupText(item?.name || item?.imageSetName || item?.key)}`;
+}
+
+function normalizeImageOnlyPath(value) {
+  return String(value || '')
+    .replace(/\\/g, '/')
+    .toLowerCase()
+    .replace(/^__image_only_reference__\/[^/]+\//, '')
+    .replace(/\/composites\/faces\/[^/]+\/(large_panel|small_panel)\//, '/composites/$1/')
+    .replace(/\/stills\/(halfbody_large|unitcards)\//, '/stills/$1/');
+}
+
+function translatedAppearanceName(item) {
+  const slug = imageOnlyNameSlug(item);
+  if (!slug) return '';
+  const info = sheetHeroAliasMap()[slug] || sheetHeroInfoFor(slug);
+  if (info?.kr) return info.kr;
+  if (IMAGE_NAME_TRANSLATIONS[slug]) return IMAGE_NAME_TRANSLATIONS[slug];
+  if (slug.startsWith('lady_')) {
+    const withoutLady = slug.replace(/^lady_/, '');
+    const ladyInfo = sheetHeroAliasMap()[withoutLady] || sheetHeroInfoFor(withoutLady);
+    if (ladyInfo?.kr) return ladyInfo.kr;
+    if (IMAGE_NAME_TRANSLATIONS[withoutLady]) return IMAGE_NAME_TRANSLATIONS[withoutLady];
+  }
+  if (slug.startsWith('dlc06_special_')) {
+    const withoutDlc = slug.replace(/^dlc06_special_/, '');
+    const dlcInfo = sheetHeroAliasMap()[withoutDlc] || sheetHeroInfoFor(withoutDlc);
+    if (dlcInfo?.kr) return dlcInfo.kr;
+    if (IMAGE_NAME_TRANSLATIONS[withoutDlc]) return IMAGE_NAME_TRANSLATIONS[withoutDlc];
+  }
+  if (slug.startsWith('dlc07_special_')) {
+    const withoutDlc = slug.replace(/^dlc07_special_/, '');
+    const dlcInfo = sheetHeroAliasMap()[withoutDlc] || sheetHeroInfoFor(withoutDlc);
+    if (dlcInfo?.kr) return dlcInfo.kr;
+    if (IMAGE_NAME_TRANSLATIONS[withoutDlc]) return IMAGE_NAME_TRANSLATIONS[withoutDlc];
+  }
+  if (slug.startsWith('ep_special_')) {
+    const withoutEp = slug.replace(/^ep_special_/, '');
+    const epInfo = sheetHeroAliasMap()[withoutEp] || sheetHeroInfoFor(withoutEp);
+    if (epInfo?.kr) return epInfo.kr;
+    if (IMAGE_NAME_TRANSLATIONS[withoutEp]) return IMAGE_NAME_TRANSLATIONS[withoutEp];
+  }
+  return '';
+}
+
+function imageOnlyNameSlug(item) {
+  const fields = [
+    item?.key,
+    item?.artSet,
+    item?.portrait,
+    item?.card,
+    item?.portraitPath,
+    item?.cardPath,
+    item?.portraitImagePath,
+    item?.cardImagePath,
+    item?.name,
+    item?.imageSetName,
+  ];
+  for (const field of fields) {
+    const slug = slugFromImageOnlyKey(field);
+    if (slug && sheetHeroAliasMap()[slug]) return slug;
+  }
+  for (const field of fields) {
+    const slug = slugFromImageOnlyKey(field);
+    if (slug) return slug;
+  }
+  return '';
+}
+
+function slugFromImageOnlyKey(value) {
+  let text = String(value || '').replace(/\\/g, '/').toLowerCase();
+  if (!text) return '';
+  text = text.split('/').pop() || text;
+  text = text.replace(/\.(png|dds|jpg|jpeg)$/i, '');
+  text = text.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  text = text
+    .replace(/^image_only_/, '')
+    .replace(/^3k_(main|mtu|dlc\d+|cp\d+|ep|ytr)_/, '')
+    .replace(/^ep_/, '')
+    .replace(/^mh_/, '')
+    .replace(/^ngc_(main_)?/, '')
+    .replace(/^yt_/, '')
+    .replace(/^ytr_/, '')
+    .replace(/^zt_/, '')
+    .replace(/^lb_main_/, '')
+    .replace(/^hero_special_/, '')
+    .replace(/^(fire|water|wood|metal|earth)_/, '')
+    .replace(/^king_/, 'king_')
+    .replace(/^special_/, '')
+    .replace(/^ep_special_/, '')
+    .replace(/^dlc\d+_special_/, '')
+    .replace(/_(hero|general)_(earth|fire|wood|water|metal).*$/, '')
+    .replace(/_(earth|fire|wood|water|metal)$/, '')
+    .replace(/^historical_/, '')
+    .replace(/^template_historical_/, '');
+  text = text
+    .replace(/_(3k|lb)_.*$/, '')
+    .replace(/_ngc_.*$/, '')
+    .replace(/_mh_.*$/, '')
+    .replace(/_ytr_.*$/, '');
+  text = text.replace(/^(.+)_\1$/, '$1');
+  if (text.startsWith('lady_')) {
+    const withoutLady = text.replace(/^lady_/, '');
+    if (sheetHeroAliasMap()[withoutLady] || IMAGE_NAME_TRANSLATIONS[withoutLady]) {
+      text = withoutLady;
+    }
+  }
+  text = text
+    .replace(/^dlc\d+_special_/, '')
+    .replace(/^ep_special_/, '')
+    .replace(/^mh_special_/, '')
+    .replace(/^ngc_special_/, '')
+    .replace(/^ytr_special_/, '')
+    .replace(/^yt_/, '')
+    .replace(/^zt_/, '')
+    .replace(/^nanman_/, '');
+  text = text.replace(/^(healer|veteran|scholar|young)_/, '');
+  text = text.replace(/^(lady_)?([a-z]+_[a-z]+(?:_[a-z]+)?)(?:_\2)+$/, '$1$2');
+  return text.replace(/^_+|_+$/g, '');
+}
+
 function appearanceFromCharacter(character) {
+  const translatedName = translatedAppearanceName(character);
   return {
     key: character?.artSet || character?.key || '',
-    name: character?.imageSetName || character?.name || '-',
+    name: translatedName || character?.imageSetName || character?.name || '-',
     element: character?.element || 'earth',
     portrait: character?.portrait || '將',
     artSet: character?.artSet || '',
-    imageSetName: character?.imageSetName || '-',
+    imageSetName: translatedName || character?.imageSetName || '-',
     modelSetName: character?.virtualImageOnly ? '모델 없음' : (character?.modelSetName || '-'),
     portraitPath: character?.portraitPath || '',
     cardPath: character?.cardPath || '',
@@ -506,8 +824,12 @@ function appearanceFromCharacter(character) {
     cardImageSourcePath: character?.cardImageSourcePath || '',
     imageOnly: Boolean(character?.virtualImageOnly),
     virtualImageOnly: Boolean(character?.virtualImageOnly),
-    hasImage: Boolean(character?.portraitImagePath || character?.cardImagePath),
+    hasImage: isCompleteImageSet(character),
   };
+}
+
+function isCompleteImageSet(item) {
+  return Boolean(item?.portraitImagePath && item?.cardImagePath && item?.imageComplete !== false);
 }
 
 function appearanceByKey(key) {
@@ -668,6 +990,49 @@ function manualSkillEffectFor(infoOrKey = '') {
   }) || null;
 }
 
+function manualBattleAbilitySummaryFor(infoOrKey = '') {
+  const info = typeof infoOrKey === 'string' ? { key: infoOrKey } : (infoOrKey || {});
+  const fields = [
+    info.key,
+    info.name,
+    info.effectSummary,
+    info.description,
+    ...(info.effects || []).map((effect) => `${effect.effectKey || ''} ${effect.name || ''}`),
+  ];
+  const haystack = normalizeLookupText(fields.join(' '));
+  if (!haystack) return '';
+  if (haystack.includes(normalizeLookupText('3k_main_skill_tempered_deflection')) || haystack.includes(normalizeLookupText('능숙한 훼방'))) {
+    return '발동형 · 자기 자신 · 20초 · 재사용 60초 · 범위 50 · 투사체 방어 확률 +50 · 코끼리 탑승 유닛 사용 불가';
+  }
+  if (haystack.includes(normalizeLookupText('3k_main_skill_tenacity_of_steel')) || haystack.includes(normalizeLookupText('강철같은 집념'))) {
+    return '패시브 · 자기 자신 · 단계별 근접 피해 증가: +5%, +10%, +25%, +50%, +100%';
+  }
+  return '';
+}
+
+function normalizedSkillInfoName(value = '') {
+  return normalizeLookupText(friendlySkillName(value))
+    .replace(/\blv\s*\d+\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function skillIndexEntryForKey(skillKey = '') {
+  const index = skillTreesData().skillIndex || {};
+  if (index[skillKey]) return index[skillKey];
+  const target = normalizedSkillInfoName(skillKey);
+  if (!target) return null;
+  const matches = Object.values(index).filter((item) => {
+    const name = normalizedSkillInfoName(item?.name || item?.key || '');
+    if (!name) return false;
+    return name === target || (
+      Math.min(name.length, target.length) >= 3
+      && (name.includes(target) || target.includes(name))
+    );
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
 function needsManualSkillEffect(info) {
   const text = `${info?.description || ''} ${info?.effectSummary || ''}`;
   if (!text.trim()) return true;
@@ -678,7 +1043,7 @@ function needsManualSkillEffect(info) {
 
 function enrichedSkillInfo(infoOrKey) {
   const base = typeof infoOrKey === 'string'
-    ? (skillTreesData().skillIndex?.[infoOrKey] || {
+    ? (skillIndexEntryForKey(infoOrKey) || {
         key: infoOrKey,
         name: friendlySkillName(infoOrKey),
         description: '',
@@ -689,12 +1054,14 @@ function enrichedSkillInfo(infoOrKey) {
   const baseName = String(base.name || '');
   const translatedName = friendlySkillName(baseName || base.key || '');
   const manual = manualSkillEffectFor(base);
+  const battleAbilitySummary = translateSkillEffectText(base.battleAbilitySummary || manualBattleAbilitySummaryFor(base));
   if (!manual) {
     return {
       ...base,
       name: translatedName || base.name,
       effectSummary: translateSkillEffectText(base.effectSummary || ''),
       description: translateSkillEffectText(base.description || ''),
+      battleAbilitySummary,
     };
   }
   return {
@@ -702,6 +1069,7 @@ function enrichedSkillInfo(infoOrKey) {
     name: baseName && !baseName.includes('_') && /[가-힣]/.test(baseName) ? base.name : manual.name,
     effectSummary: needsManualSkillEffect(base) ? manual.effects : translateSkillEffectText(base.effectSummary || manual.effects),
     manualEffect: manual.effects,
+    battleAbilitySummary,
   };
 }
 
@@ -712,6 +1080,32 @@ function titleOptionLabel(character) {
     : friendlyKey(character.titleKey || character.titleInitialCeoKey);
   const effectText = effect ? ` · ${effect.effects}` : '';
   return `${character.name} · ${translatedTitle}${effectText}`;
+}
+
+function skillDisplayText(info) {
+  return skillEffectSummaryText(info);
+}
+
+function skillTooltipText(info) {
+  if (!info) return '효과 정보 없음';
+  const effect = translateSkillEffectText(info.effectSummary || '');
+  const description = translateSkillEffectText(info.description || '');
+  const battle = translateSkillEffectText(info.battleAbilitySummary || '');
+  const parts = [];
+  if (effect && !effect.includes('효과 정보')) parts.push(`효과: ${effect}`);
+  if (description && description !== effect) parts.push(`설명: ${description}`);
+  if (battle) parts.push(`전투능력: ${battle}`);
+  return parts.join(' · ') || effect || description || '효과 정보 없음';
+}
+
+function skillEffectSummaryText(info) {
+  if (!info) return '효과 정보 없음';
+  const effect = translateSkillEffectText(info.effectSummary || '');
+  const battle = translateSkillEffectText(info.battleAbilitySummary || '');
+  if (effect && !effect.includes('효과 정보')) {
+    return effect;
+  }
+  return battle || '효과 정보 없음';
 }
 
 function sortTitleCandidates(items) {
@@ -745,8 +1139,15 @@ function normalizePackCharacter(item, summary) {
   const artSet = summary.artSets.find((candidate) => candidate.key === item.artSet);
   const combatStats = item.combatStats || {};
   const titleInfo = item.titleInfo || {};
-  const sheetHero = sheetHeroInfoFor(item.key);
-  const displayName = sheetHero?.kr || item.label || item.displayName || friendlyKey(item.key);
+  const sheetHero = sheetHeroInfoFor(item.key)
+    || sheetHeroInfoFor(item.portrait)
+    || sheetHeroInfoFor(item.card)
+    || sheetHeroAliasMap()[slugFromImageOnlyKey(item.key)]
+    || sheetHeroAliasMap()[slugFromImageOnlyKey(item.portrait)]
+    || sheetHeroAliasMap()[slugFromImageOnlyKey(item.card)];
+  const translatedImageName = translatedAppearanceName(item);
+  const internalDbName = item.regionTag === 'korea' ? (item.label || item.displayName) : '';
+  const displayName = internalDbName || sheetHero?.kr || translatedImageName || item.label || item.displayName || friendlyKey(item.key);
   const sheetTitle = sheetTitleInfoFor(titleInfo.ceoNodeKey || titleInfo.initialCeoKey || '', item.key);
   const manualTitle = manualTitleEffectFor(displayName, sheetTitle?.krTitle || titleInfo.label);
   return {
@@ -757,7 +1158,7 @@ function normalizePackCharacter(item, summary) {
     element,
     portrait: portraitGlyph(displayName || item.key),
     artSet: item.artSet || '',
-    imageSetName: artSet?.label || friendlyKey(item.artSet || item.key),
+    imageSetName: internalDbName || translatedImageName || artSet?.label || friendlyKey(item.artSet || item.key),
     modelSetName: item.uniformLabel || artSet?.uniformLabel || item.uniform || artSet?.uniform || friendlyKey(item.artSet || item.key),
     historicalSkill: historical.skillSet || '-',
     romanceSkill: romance.skillSet || historical.skillSet || '-',
@@ -788,6 +1189,8 @@ function normalizePackCharacter(item, summary) {
     armourAudioType: combatStats.armourAudioType || '',
     armourFromReference: Boolean(combatStats.armourFromReference),
     landUnitKey: combatStats.landUnitKey || '',
+    retinueKey: combatStats.retinueKey || '',
+    retinueSlotUnits: combatStats.retinueSlotUnits || [],
     unitMeleeAttack: nullableNumber(combatStats.unitMeleeAttack),
     unitMeleeDefence: nullableNumber(combatStats.unitMeleeDefence),
     unitChargeBonus: nullableNumber(combatStats.unitChargeBonus),
@@ -813,11 +1216,18 @@ function normalizePackCharacter(item, summary) {
     cardImagePath: item.cardImagePath || artSet?.cardImagePath || '',
     cardImageSourcePath: item.cardImageSourcePath || artSet?.cardImageSourcePath || '',
     imageAssets: item.imageAssets || artSet?.imageAssets || [],
-    hasImage: Boolean(item.portraitImagePath || item.cardImagePath || artSet?.portraitImagePath || artSet?.cardImagePath),
+    hasImage: isCompleteImageSet({
+      portraitImagePath: item.portraitImagePath || artSet?.portraitImagePath,
+      cardImagePath: item.cardImagePath || artSet?.cardImagePath,
+      imageComplete: item.imageComplete ?? artSet?.imageComplete,
+    }),
     uniform: item.uniform || artSet?.uniform || '',
     uniformLabel: item.uniformLabel || artSet?.uniformLabel || '',
     source: item.source || 'pack',
     referenceSourcePath: item.referenceSourcePath || '',
+    regionTag: item.regionTag || null,
+    koreaFactionTag: item.koreaFactionTag || null,
+    templateFamily: item.templateFamily || null,
   };
 }
 
@@ -954,9 +1364,36 @@ const SKILL_NAME_TRANSLATIONS = {
   'metal quickfire': '금속 속사',
   'quickfire': '속사',
   'emphatic volley': '강렬한 일제사격',
+  'rage of lu bu': '여포의 분노',
 };
 
 const SKILL_EFFECT_TRANSLATIONS = {
+  'rage of lu bu': '여포의 분노',
+  'fire charge bonus': '돌격 보너스',
+  'unit experience': '부대 경험치',
+  'run speed': '달리기 속도',
+  'night battles': '야간 전투',
+  'guerrilla deployment': '유격 배치',
+  'line of sight': '시야',
+  'unbreakable': '불굴',
+  'cause fear': '공포 유발',
+  'attack rate': '공격 속도',
+  'morale': '사기',
+  'defence': '방어',
+  'ambush attack chance': '매복 확률',
+  'ambush defence chance': '매복 회피 확률',
+  'commanding presence 25': '지휘관의 존재감',
+  'commanding presence 50': '지휘관의 존재감',
+  'coward a50': '겁쟁이',
+  'coward b50': '겁쟁이',
+  'encouragement 25': '격려',
+  'encouragement 50': '격려',
+  'forced march': '강행군',
+  'camp crushing': '진영 파괴',
+  'breakthrough in concentration': '집중 돌파',
+  'dignity of the empress': '품위',
+  'xianchenying': '선진영',
+  'cheers of encouragement': '격려의 함성',
   'campaign progression yellow turbans': '황건 세력 캠페인 진행',
   'stat mod missile defence': '원거리 방어',
   'effect technology research points': '기술 연구 점수',
@@ -964,6 +1401,88 @@ const SKILL_EFFECT_TRANSLATIONS = {
   'action cover cost bonus': '은폐 행동 비용',
   'action network cost bonus': '첩보망 행동 비용',
   'effect salary': '봉록',
+};
+
+const IMAGE_NAME_TRANSLATIONS = {
+  bao_sanniang: '포삼랑',
+  bian_huilan: '변혜란',
+  bu_lianshi: '보연사',
+  cao_cao: '조조',
+  cai_yan: '채염',
+  cai_yuxiang: '채옥향',
+  can_lang: '찬랑',
+  cao_jie: '조절',
+  cao_yang: '조양',
+  chen_dao: '진도',
+  cong_qian: '총전',
+  da_qiao: '대교',
+  du: '두씨',
+  dong_bai: '동백',
+  dong_li: '동리',
+  dong_peishan: '동패산',
+  gao_lan: '고람',
+  gongsun_jinting: '공손금정',
+  gongsun_tingping: '공손정평',
+  guan_suo: '관색',
+  guan_yinping: '관은병',
+  han_anyue: '한안월',
+  hu_cheer: '호거아',
+  hua_man: '화만',
+  huaman: '화만',
+  huang_yueying: '황월영',
+  liu_bei: '유비',
+  liu_huimin: '유혜민',
+  liu_limin: '유리민',
+  liu_pan: '유반',
+  lu_lingqi: '여령기',
+  lu_zheng: '노정',
+  ma_lanli: '마란리',
+  ma_yunlu: '마운록',
+  ma_zhong: '마충',
+  pan_feng: '반봉',
+  qiang_ehe: '아하',
+  qiang_shaoge: '소과',
+  qu_yi: '국의',
+  sun: '손인',
+  ta_dun: '답돈',
+  trieu: '조구',
+  wang_liting: '왕리정',
+  wei_xu: '위속',
+  wen_pin: '문빙',
+  white_tiger_yan: '엄백호',
+  wu_anguo: '무안국',
+  wu_minyu: '오민옥',
+  xiahou_ji: '하후희',
+  xiahou_lan: '하후란',
+  xing_daorong: '형도영',
+  xu_sheng: '서성',
+  xu_shu: '서서',
+  yan_yan: '엄안',
+  yan_yan: '엄안',
+  yang: '양씨',
+  zhang_ning: '장녕',
+  zhang_qiying: '장기영',
+  zhang_xingcai: '장성채',
+  zhang_xun: '장훈',
+  zhao: '조씨',
+  zhao_yu: '조우',
+  zhao_zhen: '조진',
+  zhu_zhi: '주치',
+  zou: '추씨',
+  zou_yuan: '추원',
+  king_duosi: '타사대왕',
+  king_mulu: '목록대왕',
+  king_shamoke: '사마가',
+  king_wutugu: '올돌골',
+  zhurong: '축융',
+  emperor_xian: '헌제',
+  emperor_ling: '영제',
+  empress_he: '하황후',
+  he_jin: '하진',
+  young_dong_zhuo: '젊은 동탁',
+  sima_ai: '사마예',
+  guo_tai: '곽태',
+  liao_hua: '요화',
 };
 
 function skillLookupKey(value) {
@@ -1087,10 +1606,12 @@ function unitSummaryMarkup(character, prefix) {
     : '연결된 land_units row를 찾지 못했습니다. 값은 입력할 수 있지만 저장 시 병종 수치 패치는 제외됩니다.';
   const rows = [
     ['land unit', character.landUnitKey || '미확인'],
+    ['retinue', character.retinueKey || ''],
+    ['초기 유닛', (character.retinueSlotUnits || []).join(', ')],
     ['분류', [character.unitCategory, character.unitClass].filter(Boolean).join(' / ') || '미확인'],
     ['근접 공격', combatValue(character.unitMeleeAttack)],
     ['근접 방어', combatValue(character.unitMeleeDefence)],
-  ];
+  ].filter(([, value]) => value !== '');
   return `
     <div class="equipment-note">${escapeHtml(unitNote)}</div>
     ${rows.map(([label, value]) => `
@@ -1130,15 +1651,19 @@ function renderRoster() {
   const query = $('searchInput').value.trim().toLowerCase();
   const list = $('characterList');
   list.innerHTML = '';
-  const visibleCharacters = browsableCharacters();
+  const visibleCharacters = rosterCharacters();
   if (!visibleCharacters.some((character) => character.key === state.selectedKey) && visibleCharacters.length) {
     state.selectedKey = visibleCharacters[0].key;
   }
   const filtered = visibleCharacters.filter((character) => {
     const spawnEvent = spawnEventMeta(character.spawnEvent);
-    const haystack = `${character.name} ${character.key} ${character.imageSetName} ${character.modelSetName} ${character.combatProfile} ${character.unitProfile} ${spawnEvent.name} ${character.element}`.toLowerCase();
+    const haystack = `${character.name} ${character.key} ${character.imageSetName} ${character.modelSetName} ${character.combatProfile} ${character.unitProfile} ${spawnEvent.name} ${character.element} ${character.regionTag || ''} ${character.koreaFactionTag || ''}`.toLowerCase();
     const matchesQuery = !query || haystack.includes(query);
-    const matchesFilter = state.filter === 'all' || character.element === state.filter;
+    const koreaFaction = koreaFactionFromFilter(state.filter);
+    const matchesFilter = state.filter === 'all'
+      || character.element === state.filter
+      || (state.filter === 'korea' && character.regionTag === 'korea')
+      || (koreaFaction && character.regionTag === 'korea' && character.koreaFactionTag === koreaFaction);
     return matchesQuery && matchesFilter;
   });
 
@@ -1198,6 +1723,9 @@ function renderSelected() {
 function renderAppearanceGallery() {
   $('appearanceGallery').innerHTML = appearanceGalleryCharacters().map((character) => `
     <button class="appearance-card ${character.key === selectedCharacter().key ? 'active' : ''}" data-key="${escapeHtml(character.artSet || character.key)}" type="button">
+      <span class="favorite-toggle ${isFavoriteAppearance(character) ? 'active' : ''}" data-favorite-key="${escapeHtml(appearanceFavoriteKey(character))}" role="button" tabindex="0" title="즐겨찾기">
+        ${starIconMarkup()}
+      </span>
       ${portraitMarkup(character, 'mini-portrait')}
       <strong>${sourceBadgeMarkup(character)} ${escapeHtml(displayNameWithDummyMarker(character))}</strong>
       <span>이미지: ${escapeHtml(character.imageSetName)}</span>
@@ -1218,6 +1746,23 @@ function renderAppearanceGallery() {
       renderValidation();
     });
   }
+  for (const button of document.querySelectorAll('.favorite-toggle')) {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleFavoriteAppearance(button.dataset.favoriteKey);
+    });
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleFavoriteAppearance(button.dataset.favoriteKey);
+    });
+  }
+}
+
+function starIconMarkup() {
+  return '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>';
 }
 
 function fillForms(character) {
@@ -1229,30 +1774,33 @@ function fillForms(character) {
   $('createMinRound').value = character.minRound;
   $('createMaxRound').value = character.maxRound;
 
-  const selectableCharacters = browsableCharacters().length ? browsableCharacters() : characters();
   const baseCandidates = cloneBaseCharacters();
   const selectedBase = packTemplateCharacters()[0] || baseCandidates[0] || character;
   const titleCandidates = allTitleChoices();
   const appearances = appearanceSets().filter((item) => {
     const combined = `${item.artSet || ''} ${item.imageSetName || ''} ${item.portraitPath || ''} ${item.cardPath || ''}`.toLowerCase();
-    const referenceSource = String(item.referenceSourcePath || '').toLowerCase();
-    const isBfg = item.externalImageSet || referenceSource.includes('bfg_');
-    return isBfg || (item.hasImage && !combined.includes('generic') && !combined.includes('scripted'));
+    return item.hasImage && !combined.includes('generic') && !combined.includes('scripted');
   });
   const modelAppearances = appearances.filter(canUseAsModelSet);
-  fillSelect('editImageSet', appearances.map((item) => option(item.key, `${sourceLabel(item)} ${item.hasImage ? '■' : '□'} ${displayNameWithDummyMarker(item)} · ${item.artSet}`)));
+  fillSelect('editImageSet', appearances.map((item) => option(item.key, `${sourceLabel(item)} 완전 ${displayNameWithDummyMarker(item)} · ${item.artSet}`)));
   fillSelect('editModelSet', modelAppearances.map((item) => option(item.key, `${sourceLabel(item)} ${displayNameWithDummyMarker(item)} · ${item.modelSetName}`)));
-  fillSelect('sourceImageSet', appearances.map((item) => option(item.key, `${sourceLabel(item)} ${item.hasImage ? '■' : '□'} ${displayNameWithDummyMarker(item)} · ${item.artSet}`)));
+  fillSelect('sourceImageSet', appearances.map((item) => option(item.key, `${sourceLabel(item)} 완전 ${displayNameWithDummyMarker(item)} · ${item.artSet}`)));
   fillSelect('sourceModelSet', modelAppearances.map((item) => option(item.key, `${sourceLabel(item)} ${displayNameWithDummyMarker(item)} · ${item.modelSetName}`)));
   fillSelect('sourceBase', baseCandidates.map((item) => option(item.key, item.name)));
+  const selectableCharacters = selectableSourceCharacters().length ? selectableSourceCharacters() : characters();
   fillSelect('sourceSkill', selectableCharacters.map((item) => option(item.key, `${item.name} · ${item.historicalSkill}`)));
   fillSelect('sourceTitle', titleCandidates.map((item) => option(titleChoiceValue(item), titleOptionLabel(item))));
   fillSelect('editAttributeSet', selectableCharacters.map((item) => option(item.key, `${item.name} · ${item.attributeSet}`)));
   fillSelect('sourceAttributeSet', selectableCharacters.map((item) => option(item.key, `${item.name} · ${item.attributeSet}`)));
-  fillSelect('editCombatProfile', selectableCharacters.map((item) => option(item.key, `${item.name} · ${equipmentBrief(item)}`)));
-  fillSelect('sourceCombatProfile', selectableCharacters.map((item) => option(item.key, `${item.name} · ${equipmentBrief(item)}`)));
-  fillSelect('editUnitProfile', selectableCharacters.map((item) => option(item.key, `${item.name} · ${item.unitProfile}`)));
-  fillSelect('sourceUnitProfile', selectableCharacters.map((item) => option(item.key, `${item.name} · ${item.unitProfile}`)));
+  fillSelect('editCombatSort', COMBAT_SORT_OPTIONS.map((item) => option(item.key, item.label)));
+  fillSelect('sourceCombatSort', COMBAT_SORT_OPTIONS.map((item) => option(item.key, item.label)));
+  $('editCombatSort').value = state.editCombatSort;
+  $('sourceCombatSort').value = state.sourceCombatSort;
+  refreshCombatProfileSelect('edit');
+  refreshCombatProfileSelect('source');
+  const unitChoices = unitProfileChoices();
+  fillSelect('editUnitProfile', unitChoices.map((item) => option(item.key, `${item.isLandUnitOption ? '병종' : item.name} · ${item.unitProfile}`)));
+  fillSelect('sourceUnitProfile', unitChoices.map((item) => option(item.key, `${item.isLandUnitOption ? '병종' : item.name} · ${item.unitProfile}`)));
   fillSelect('sourceSpawn', selectableCharacters.map((item) => option(item.key, `${item.name} · ${item.spawnAge}`)));
   fillSelect('editSpawnEvent', SPAWN_EVENTS.map((item) => option(item.key, `${item.name} · ${item.note}`)));
   fillSelect('sourceSpawnEvent', SPAWN_EVENTS.map((item) => option(item.key, `${item.name} · ${item.note}`)));
@@ -1273,8 +1821,8 @@ function fillForms(character) {
   $('sourceAttributeSet').value = character.key;
   $('editCombatProfile').value = character.key;
   $('sourceCombatProfile').value = character.key;
-  $('editUnitProfile').value = character.key;
-  $('sourceUnitProfile').value = character.key;
+  $('editUnitProfile').value = character.landUnitKey || character.key;
+  $('sourceUnitProfile').value = character.landUnitKey || character.key;
   $('sourceSpawn').value = character.key;
   $('editAgeRange').value = character.birthYear ?? '';
   $('createAgeRange').value = character.birthYear ?? '';
@@ -1296,6 +1844,16 @@ function fillForms(character) {
   updateImagePreviews();
   updateAllSpawnFieldLabels();
   renderSkillTreeEditors();
+}
+
+function refreshCombatProfileSelect(prefix) {
+  const sortId = `${prefix}CombatSort`;
+  const selectId = prefix === 'edit' ? 'editCombatProfile' : 'sourceCombatProfile';
+  const selectedValue = $(selectId).value;
+  const sortValue = $(sortId)?.value || state[`${prefix}CombatSort`] || 'default';
+  fillSelect(selectId, combatProfileChoices(sortValue).map((item) => option(item.key, `${item.name} · ${equipmentBrief(item)}`)));
+  setSelectValue(selectId, selectedValue);
+  syncEquipmentSummary(prefix, selectId);
 }
 
 function option(value, label) {
@@ -1536,7 +2094,7 @@ function syncEquipmentSummary(prefix, sourceId) {
 }
 
 function syncUnitSummary(prefix, sourceId) {
-  const character = characters().find((item) => item.key === $(sourceId).value);
+  const character = unitProfileChoiceByKey($(sourceId).value);
   if (!character) return;
   $(`${prefix}UnitSummary`).innerHTML = unitSummaryMarkup(character, prefix);
   for (const suffix of ['ChargeBonus', 'Morale', 'PrimaryAmmo']) {
@@ -1704,7 +2262,7 @@ function stageEdit() {
   const romance = characters().find((item) => item.key === $('editRomanceSkill').value);
   const attribute = characters().find((item) => item.key === $('editAttributeSet').value);
   const combat = characters().find((item) => item.key === $('editCombatProfile').value);
-  const unit = characters().find((item) => item.key === $('editUnitProfile').value);
+  const unit = unitProfileChoiceByKey($('editUnitProfile').value);
   const spawnEvent = spawnEventMeta($('editSpawnEvent').value);
   const armourPatch = armourPatchFrom('edit', combat);
   const itemNumber = queueItemNumberFor('patch_character');
@@ -1763,7 +2321,7 @@ function stageCreate() {
   const titleSource = resolveTitleChoice($('sourceTitle').value);
   const attribute = characters().find((item) => item.key === $('sourceAttributeSet').value);
   const combat = characters().find((item) => item.key === $('sourceCombatProfile').value);
-  const unit = characters().find((item) => item.key === $('sourceUnitProfile').value);
+  const unit = unitProfileChoiceByKey($('sourceUnitProfile').value);
   const spawn = characters().find((item) => item.key === $('sourceSpawn').value);
   const spawnEvent = spawnEventMeta($('sourceSpawnEvent').value);
   const armourPatch = armourPatchFrom('source', combat);
@@ -2184,12 +2742,13 @@ function renderSkillTreeEditor(prefix) {
             type="button"
             class="skill-node element-${element} ${node.key === activeNodeKey ? 'active' : ''} ${draft.replacements[node.key] ? 'changed' : ''}"
             data-skill-node="${escapeHtml(node.key)}"
+            data-skill-key="${escapeHtml(draft.replacements[node.key] || node.skillKey)}"
             data-skill-prefix="${prefix}"
             style="grid-column:${x};grid-row:${y}"
-            title="${escapeHtml(`${info.name}\n${info.description || info.effectSummary || '효과 정보 미확인'}`)}"
+            title="${escapeHtml(`${info.name}\n${skillTooltipText(info)}`)}"
           >
             <b>${escapeHtml(skillNodeLabel(node, draft))}</b>
-            <small>${escapeHtml(info.effectSummary || info.description || '효과 정보 미확인')}</small>
+            <small>${escapeHtml(skillDisplayText(info))}</small>
           </button>
         `;
       }).join('')}
@@ -2197,7 +2756,7 @@ function renderSkillTreeEditor(prefix) {
     <div class="skill-picker">
       <div class="skill-picker-title">
         <strong>${escapeHtml(activeInfo?.name || '노드 선택')}</strong>
-        <span>${escapeHtml(activeInfo?.description || activeInfo?.effectSummary || '교체할 노드를 클릭하세요.')}</span>
+        <span>${escapeHtml(activeInfo ? skillDisplayText(activeInfo) : '교체할 노드를 클릭하세요.')}</span>
       </div>
       <input class="skill-search" data-skill-search="${prefix}" placeholder="스킬 이름/효과 검색">
       ${skillCandidateTabsMarkup(prefix, activeCandidateTab)}
@@ -2227,18 +2786,16 @@ function renderSkillCandidates(prefix, query) {
       data-skill-candidate="${escapeHtml(item.key)}"
       data-skill-prefix="${prefix}"
       data-skill-target="${escapeHtml(activeNodeKey)}"
-      title="${escapeHtml(item.description || item.effectSummary || item.key)}"
+      title="${escapeHtml(`${item.name}\n${skillTooltipText(item)}`)}"
     >
       <b>${escapeHtml(item.name)}</b>
-      <span>${escapeHtml(item.description || item.effectSummary || '효과 정보 미확인')}</span>
+      <span>${escapeHtml(skillDisplayText(item))}</span>
     </button>
   `).join('') || '<p class="skill-tree-empty">검색 결과가 없습니다.</p>';
 }
 
 function skillEffectText(info) {
-  const base = translateSkillEffectText(info?.effectSummary || info?.description || '효과 정보 없음');
-  const battle = translateSkillEffectText(info?.battleAbilitySummary || '');
-  return battle ? `${base} · 전투능력: ${battle}` : base;
+  return skillDisplayText(info);
 }
 
 const SKILL_ELEMENT_TABS = [
@@ -2316,9 +2873,10 @@ function renderSkillTreeEditor(prefix) {
             type="button"
             class="skill-node element-${element} ${node.key === activeNode?.key ? 'active' : ''} ${replaced ? 'changed' : ''} ${grade ? 'recommended' : ''}"
             data-skill-node="${escapeHtml(node.key)}"
+            data-skill-key="${escapeHtml(replaced || node.skillKey)}"
             data-skill-prefix="${prefix}"
             style="grid-column:${x};grid-row:${y}"
-            title="${escapeHtml(`${grade ? `추천 기술 ${grade}급\n` : ''}${info.name}\n${skillEffectText(info)}`)}"
+            title="${escapeHtml(`${grade ? `추천 기술 ${grade}급\n` : ''}${info.name}\n${skillTooltipText(info)}`)}"
           >
             <b>${recommendedSkillStar(info)}${escapeHtml(info.name)}${replaced ? ' *' : ''}</b>
             <small>${escapeHtml(skillEffectText(info))}</small>
@@ -2369,7 +2927,7 @@ function renderSkillCandidates(prefix, query) {
       data-skill-candidate="${escapeHtml(item.key)}"
       data-skill-prefix="${prefix}"
       data-skill-target="${escapeHtml(activeNodeKey)}"
-      title="${escapeHtml(`${recommendedSkillGrade(item) ? `추천 기술 ${recommendedSkillGrade(item)}급\n` : ''}${item.name}\n${skillEffectText(item)}`)}"
+      title="${escapeHtml(`${recommendedSkillGrade(item) ? `추천 기술 ${recommendedSkillGrade(item)}급\n` : ''}${item.name}\n${skillTooltipText(item)}`)}"
     >
       <b>${recommendedSkillStar(item)}${escapeHtml(item.name)}</b>
       <span>${escapeHtml(skillEffectText(item))}</span>
@@ -2424,7 +2982,7 @@ function recipeFromQueue() {
       const attribute = characters().find((candidate) => candidate.key === payload.attributeSetSourceKey);
       const hist = characters().find((candidate) => candidate.key === payload.skillSources?.historical);
       const romance = characters().find((candidate) => candidate.key === payload.skillSources?.romance);
-      const unit = characters().find((candidate) => candidate.key === payload.unitProfileSourceKey);
+      const unit = unitProfileChoiceByKey(payload.unitProfileSourceKey);
       const retinueOverride = payload.landUnitClone?.newKey;
       if (payload.landUnitClone) {
         recipe.landUnitClones.push({
@@ -2495,7 +3053,7 @@ function recipeFromQueue() {
       const skill = characters().find((candidate) => candidate.key === payload.sourceKeys?.skill);
       const titleSource = resolveTitleChoice(payload.sourceKeys?.title);
       const detailSource = skill?.source === 'reference' ? packBase : (skill || packBase);
-      const unit = characters().find((candidate) => candidate.key === payload.sourceKeys?.unitProfile);
+      const unit = unitProfileChoiceByKey(payload.sourceKeys?.unitProfile);
       const spawn = characters().find((candidate) => candidate.key === payload.sourceKeys?.spawn);
       const selectedAgeRange = payload.spawn?.ageRange || spawn?.spawnAge || base?.spawnAge || baseTemplate.spawn_age_range;
       const slug = slugify(payload.newName);
@@ -2626,7 +3184,7 @@ function renderValidation() {
   );
   const unitPrefix = isCreate ? 'source' : 'edit';
   const unitKey = isCreate ? $('sourceUnitProfile')?.value : $('editUnitProfile')?.value;
-  const unitCharacter = characters().find((item) => item.key === unitKey);
+  const unitCharacter = unitProfileChoiceByKey(unitKey);
   const canCloneUnit = Boolean(unitCharacter?.landUnitKey && !unitCharacter?.unitFromReference);
   const unitInputs = ['ChargeBonus', 'Morale', 'PrimaryAmmo']
     .map((suffix) => $(`${unitPrefix}${suffix}`))
@@ -2841,6 +3399,14 @@ for (const button of document.querySelectorAll('.tab-btn')) {
 }
 $('editCombatProfile').addEventListener('change', () => syncEquipmentSummary('edit', 'editCombatProfile'));
 $('sourceCombatProfile').addEventListener('change', () => syncEquipmentSummary('source', 'sourceCombatProfile'));
+$('editCombatSort').addEventListener('change', () => {
+  state.editCombatSort = $('editCombatSort').value;
+  refreshCombatProfileSelect('edit');
+});
+$('sourceCombatSort').addEventListener('change', () => {
+  state.sourceCombatSort = $('sourceCombatSort').value;
+  refreshCombatProfileSelect('source');
+});
 $('editAttributeSet').addEventListener('change', () => syncAttributeSummary('edit', 'editAttributeSet'));
 $('sourceAttributeSet').addEventListener('change', () => syncAttributeSummary('source', 'sourceAttributeSet'));
 $('editUnitProfile').addEventListener('change', () => syncUnitSummary('edit', 'editUnitProfile'));

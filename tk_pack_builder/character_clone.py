@@ -10,22 +10,36 @@ CHARACTER_TABLE_ALIASES = {
     "character_generation_templates": [
         "character_generation_templates",
         "db/character_generation_templates_tables/_mtu_characters",
+        "db/character_generation_templates_tables/ironic_korea_characters",
+        "db/character_generation_templates_tables/korea_generics",
+        "db/character_generation_templates_tables/!!ironic_addon_korea",
     ],
     "character_generation_template_game_mode_details": [
         "character_generation_template_game_mode_details",
         "db/character_generation_template_game_mode_details_tables/_mtu_characters",
+        "db/character_generation_template_game_mode_details_tables/ironic_korea_characters",
+        "db/character_generation_template_game_mode_details_tables/korea_generics",
+        "db/character_generation_template_game_mode_details_tables/!!ironic_addon_korea",
     ],
     "campaign_character_art_sets": [
         "campaign_character_art_sets",
         "db/campaign_character_art_sets_tables/_mtu_characters",
+        "db/campaign_character_art_sets_tables/ironic_culture_korea",
+        "db/campaign_character_art_sets_tables/korea_tweak",
+        "db/campaign_character_art_sets_tables/!!ironic_addon_korea",
     ],
     "campaign_character_arts": [
         "campaign_character_arts",
         "db/campaign_character_arts_tables/_mtu_characters",
+        "db/campaign_character_arts_tables/ironic_culture_korea",
+        "db/campaign_character_arts_tables/korea_tweak",
+        "db/campaign_character_arts_tables/!!ironic_addon_korea",
     ],
     "character_generation_spawn_age_ranges": [
         "character_generation_spawn_age_ranges",
         "db/character_generation_spawn_age_ranges_tables/_mtu_characters",
+        "db/character_generation_spawn_age_ranges_tables/ironic_changed_ages",
+        "db/character_generation_spawn_age_ranges_tables/!!ironic_addon_korea",
     ],
     "ceo_initial_datas": [
         "ceo_initial_datas",

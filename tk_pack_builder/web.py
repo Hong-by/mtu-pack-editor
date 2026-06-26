@@ -38,6 +38,7 @@ RPFM_SERVER_CANDIDATES = [
 DEFAULT_RPFM_SERVER = next((path for path in RPFM_SERVER_CANDIDATES if path.is_file()), RPFM_SERVER_CANDIDATES[0])
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
 REFERENCE_SNAPSHOT = ROOT / "work" / "reference_snapshot.json"
+INTERNAL_DB_ROOT = ROOT / "work" / "internal_dbs"
 EXTRACTED_ASSET_ROOT = ROOT / "work" / "assets"
 IMAGE_ONLY_ASSET_PREFIX = "__image_only_reference__"
 RPFM_PROCESS: subprocess.Popen[bytes] | None = None
@@ -375,16 +376,257 @@ def _load_reference_snapshot() -> dict[str, Any] | None:
         return None
     with REFERENCE_SNAPSHOT.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
+    characters = payload.get("characters", {})
+    internal_dbs = _merge_internal_character_dbs(characters)
+    _annotate_image_completeness(characters)
     return {
         "ok": True,
         "analysis": payload.get("analysis", {}),
-        "characters": payload.get("characters", {}),
+        "characters": characters,
         "cache": {
             "hit": True,
             "type": "reference_snapshot",
             "path": str(REFERENCE_SNAPSHOT),
+            "internalDbs": internal_dbs,
         },
     }
+
+
+def _merge_internal_character_dbs(characters: dict[str, Any]) -> list[dict[str, Any]]:
+    if not isinstance(characters, dict) or not INTERNAL_DB_ROOT.is_dir():
+        return []
+    merge_target = characters.get("pack") if isinstance(characters.get("pack"), dict) else characters
+    merged: list[dict[str, Any]] = []
+    for db_path in sorted(INTERNAL_DB_ROOT.glob("*.json")):
+        try:
+            with db_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            continue
+        summary = payload.get("summary")
+        if not isinstance(summary, dict):
+            continue
+        _merge_character_summary(merge_target, summary)
+        counts = payload.get("counts", {})
+        merged.append(
+            {
+                "path": str(db_path),
+                "sourcePack": payload.get("sourcePack"),
+                "counts": counts if isinstance(counts, dict) else {},
+            }
+        )
+    return merged
+
+
+def _merge_character_summary(target: dict[str, Any], summary: dict[str, Any]) -> None:
+    for key in [
+        "characters",
+        "artSets",
+        "ageRanges",
+        "initialCeos",
+        "retinues",
+        "landUnits",
+        "mainUnits",
+        "retinueSlotInitialUnits",
+        "attributeSets",
+        "skillSets",
+        "subtypes",
+    ]:
+        _merge_summary_rows(target, summary, key)
+    for key in ["artRowsBySet", "attributeStatsBySet"]:
+        source_value = summary.get(key)
+        if isinstance(source_value, dict):
+            target.setdefault(key, {}).update(source_value)
+    source_skill_trees = summary.get("skillTrees")
+    if isinstance(source_skill_trees, dict):
+        target_skill_trees = target.setdefault("skillTrees", {})
+        if isinstance(target_skill_trees, dict):
+            for key, value in source_skill_trees.items():
+                if isinstance(value, dict):
+                    existing = target_skill_trees.setdefault(key, {})
+                    if isinstance(existing, dict):
+                        _merge_skill_tree_dict(existing, value)
+                    else:
+                        target_skill_trees[key] = value
+                elif isinstance(value, list):
+                    existing = target_skill_trees.setdefault(key, [])
+                    if isinstance(existing, list):
+                        _merge_rows_by_key(existing, value)
+                    else:
+                        target_skill_trees[key] = value
+                else:
+                    target_skill_trees[key] = value
+    source_loc_keys = summary.get("locKeys")
+    if isinstance(source_loc_keys, list):
+        existing_loc_keys = target.setdefault("locKeys", [])
+        if isinstance(existing_loc_keys, list):
+            seen = {str(value) for value in existing_loc_keys}
+            for value in source_loc_keys:
+                key = str(value)
+                if key not in seen:
+                    existing_loc_keys.append(value)
+                    seen.add(key)
+
+
+def _merge_internal_loc_dbs(loc_text: dict[str, str]) -> list[dict[str, Any]]:
+    report: list[dict[str, Any]] = []
+    for db_path in _internal_loc_db_paths():
+        started = time.perf_counter()
+        if not db_path.is_file():
+            continue
+        before_count = len(loc_text)
+        try:
+            with db_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            source_text = payload.get("locText")
+            if not isinstance(source_text, dict):
+                continue
+            for key, value in source_text.items():
+                loc_text.setdefault(str(key), str(value))
+            report.append({
+                "path": str(db_path),
+                "ok": True,
+                "internalLocDb": True,
+                "rowCount": len(source_text),
+                "addedRows": len(loc_text) - before_count,
+                "seconds": _elapsed(started),
+            })
+        except Exception as error:
+            report.append({
+                "path": str(db_path),
+                "ok": False,
+                "internalLocDb": True,
+                "error": str(error),
+                "seconds": _elapsed(started),
+            })
+    return report
+
+
+def _internal_loc_db_paths() -> list[Path]:
+    return _unique_paths([
+        INTERNAL_DB_ROOT / "localisation_kr.json",
+        ROOT / "work" / "internal_dbs" / "localisation_kr.json",
+    ])
+
+
+def _annotate_image_completeness(characters: dict[str, Any]) -> None:
+    if not isinstance(characters, dict):
+        return
+    pack = characters.get("pack")
+    if isinstance(pack, dict):
+        _annotate_summary_image_completeness(pack)
+    else:
+        _annotate_summary_image_completeness(characters)
+
+
+def _annotate_summary_image_completeness(summary: dict[str, Any]) -> None:
+    if not isinstance(summary, dict):
+        return
+    for group in ("characters", "artSets"):
+        rows = summary.get(group)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict):
+                _annotate_image_row_completeness(row)
+
+
+def _annotate_image_row_completeness(row: dict[str, Any]) -> None:
+    portrait_path = str(row.get("portraitImagePath") or "")
+    card_path = str(row.get("cardImagePath") or "")
+    portrait_source = str(row.get("portraitImageSourcePath") or row.get("referenceSourcePath") or "")
+    card_source = str(row.get("cardImageSourcePath") or row.get("referenceSourcePath") or portrait_source)
+    missing = []
+    if not _asset_available_from_cache(portrait_source, portrait_path):
+        missing.append("portrait")
+    if not _asset_available_from_cache(card_source, card_path):
+        missing.append("card")
+    row["imageComplete"] = not missing
+    row["imageMissingRequired"] = missing
+
+
+def _asset_available_from_cache(source_path: str, packed_path: str) -> bool:
+    if not packed_path:
+        return False
+    real_path = _real_packed_asset_path(packed_path)
+    if not source_path:
+        return bool(_find_extracted_asset(packed_path) or _find_extracted_asset(real_path))
+    source = Path(source_path)
+    candidates = [source]
+    fallback = _fallback_pack_path(source)
+    if fallback is not None and fallback != source:
+        candidates.append(fallback)
+    for candidate in candidates:
+        if _extracted_asset_path(candidate, packed_path).is_file():
+            return True
+        if real_path != packed_path and _extracted_asset_path(candidate, real_path).is_file():
+            return True
+    return False
+
+
+def _merge_skill_tree_dict(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for key, value in source.items():
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+            target[key] = _merge_skill_entry_dict(target[key], value)
+        else:
+            target[key] = value
+
+
+def _merge_skill_entry_dict(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = {**existing, **incoming}
+    existing_has_effect = _skill_entry_has_effect(existing)
+    incoming_has_effect = _skill_entry_has_effect(incoming)
+    if existing_has_effect and not incoming_has_effect:
+        for field in ("effects", "effectSummary", "description", "battleAbilitySummary"):
+            if existing.get(field):
+                merged[field] = existing[field]
+    return merged
+
+
+def _skill_entry_has_effect(entry: dict[str, Any]) -> bool:
+    effects = entry.get("effects")
+    if isinstance(effects, list) and effects:
+        return True
+    for field in ("effectSummary", "description", "battleAbilitySummary"):
+        value = str(entry.get(field) or "").strip()
+        if value and "효과 정보" not in value:
+            return True
+    return False
+
+
+def _merge_summary_rows(target: dict[str, Any], summary: dict[str, Any], key: str) -> None:
+    source_rows = summary.get(key)
+    if not isinstance(source_rows, list):
+        return
+    target_rows = target.setdefault(key, [])
+    if isinstance(target_rows, list):
+        _merge_rows_by_key(target_rows, source_rows)
+    else:
+        target[key] = source_rows
+
+
+def _merge_rows_by_key(target_rows: list[Any], source_rows: list[Any]) -> None:
+    index = {
+        str(row.get("key")): offset
+        for offset, row in enumerate(target_rows)
+        if isinstance(row, dict) and row.get("key") is not None
+    }
+    for row in source_rows:
+        if not isinstance(row, dict):
+            if row not in target_rows:
+                target_rows.append(row)
+            continue
+        key = row.get("key")
+        if key is None:
+            if row not in target_rows:
+                target_rows.append(row)
+            continue
+        lookup = str(key)
+        if lookup in index:
+            target_rows[index[lookup]] = {**target_rows[index[lookup]], **row}
+        else:
+            index[lookup] = len(target_rows)
+            target_rows.append(row)
 
 
 def _write_reference_snapshot(analysis: dict[str, Any], characters: dict[str, Any]) -> None:
@@ -489,11 +731,15 @@ def read_character_data(
     timings["readTables"] = _elapsed(step)
     step = time.perf_counter()
     loc_text = _read_all_loc_text(session)
+    internal_loc_report = _merge_internal_loc_dbs(loc_text)
     timings["readLoc"] = _elapsed(step)
     step = time.perf_counter()
     asset_files = session.list_files()
     timings["listPrimaryFiles"] = _elapsed(step)
     asset_sources: dict[str, str] = {}
+    step = time.perf_counter()
+    default_reference_report = _merge_default_stat_references(tables)
+    timings["mergeDefaultStatReferences"] = _elapsed(step)
     step = time.perf_counter()
     reference_report = _merge_reference_packs(
         tables,
@@ -507,12 +753,13 @@ def read_character_data(
     timings["mergeReferences"] = _elapsed(step)
     step = time.perf_counter()
     pack_summary = summarize_character_tables(tables, loc_text, asset_files, asset_sources)
+    _annotate_summary_image_completeness(pack_summary)
     timings["summarizePack"] = _elapsed(step)
     timings["total"] = _elapsed(started)
     data = {
         "pack": pack_summary,
         "vanilla": {"available": False, "error": None, "summary": None},
-        "referencePacks": reference_report,
+        "referencePacks": internal_loc_report + default_reference_report + reference_report,
         "timings": timings,
     }
     if include_vanilla:
@@ -667,6 +914,40 @@ def summarize_character_tables(
     combat_stats_by_initial_ceo = _combat_stats_by_initial_ceo(tables)
     attribute_stats_by_set = _attribute_stats_by_set(tables)
     land_units = {str(row.get("key")): row for row in tables.get("land_units", []) if row.get("key")}
+    retinue_units_by_retinue: dict[str, list[dict[str, Any]]] = {}
+    for row in tables.get("retinue_slot_initial_units", []):
+        retinue = str(row.get("retinue") or "")
+        unit = str(row.get("initial_unit_record") or "")
+        if retinue and unit:
+            retinue_units_by_retinue.setdefault(retinue, []).append(row)
+    land_unit_options = [
+        {
+            "key": row.get("key"),
+            "label": _land_unit_label(row, loc_text),
+            "row": row,
+        }
+        for row in tables.get("land_units", [])
+        if row.get("key")
+    ]
+    main_unit_options = [
+        {
+            "key": row.get("land_unit") or row.get("unit") or row.get("key"),
+            "label": _main_unit_label(row, loc_text),
+            "row": row,
+        }
+        for row in tables.get("main_units", [])
+        if row.get("land_unit") or row.get("unit") or row.get("key")
+    ]
+    retinue_slot_options = [
+        {
+            "retinue": row.get("retinue"),
+            "unit": row.get("initial_unit_record"),
+            "slotIndex": row.get("slot_index"),
+            "row": row,
+        }
+        for row in tables.get("retinue_slot_initial_units", [])
+        if row.get("retinue") and row.get("initial_unit_record")
+    ]
 
     characters = []
     for template in tables["character_generation_templates"]:
@@ -692,8 +973,9 @@ def summarize_character_tables(
         primary_art = _primary_art_row(art_rows)
         art_set_summary = next((row for row in art_sets if row["key"] == art_set), {})
         combat_stats = _combat_stats_for_details(details, combat_stats_by_initial_ceo) or {}
-        combat_stats.update(_unit_stats_for_details(key, details, land_units))
+        combat_stats.update(_unit_stats_for_details(key, details, land_units, retinue_units_by_retinue))
         title_info = _title_info_for_character(template, details, loc_text)
+        region_tag = _character_region_tag(template, details, reference_source)
         characters.append(
             {
                 "key": key,
@@ -720,6 +1002,7 @@ def summarize_character_tables(
                 "combatStats": combat_stats,
                 "attributeStats": _attribute_stats_for_details(details, attribute_stats_by_set),
                 "titleInfo": title_info,
+                "regionTag": region_tag,
                 "templateRow": template,
                 "details": details,
                 "source": "reference" if reference_source else "pack",
@@ -740,6 +1023,9 @@ def summarize_character_tables(
         "ageRanges": sorted(age_ranges, key=lambda item: str(item["key"])),
         "initialCeos": sorted(initial_ceos, key=lambda item: str(item["key"])),
         "retinues": _unique_options(row.get("retinue") for row in detail_rows),
+        "landUnits": sorted(land_unit_options, key=lambda item: str(item["key"])),
+        "mainUnits": sorted(main_unit_options, key=lambda item: str(item["key"])),
+        "retinueSlotInitialUnits": sorted(retinue_slot_options, key=lambda item: (str(item["retinue"]), int(item["slotIndex"] or 0), str(item["unit"]))),
         "attributeSets": _unique_options(row.get("attribute_set") for row in detail_rows),
         "attributeStatsBySet": attribute_stats_by_set,
         "skillSets": _unique_options(row.get("skill_set_override") for row in detail_rows),
@@ -858,11 +1144,85 @@ def _append_image_only_characters(
         existing_character_keys.add(character_key)
 
 
+def _character_region_tag(
+    template: dict[str, Any],
+    details: list[dict[str, Any]],
+    reference_source: Any,
+) -> str | None:
+    fields = [
+        template.get("key"),
+        template.get("art_set_override"),
+        template.get("_sourceTableName"),
+        template.get("_referenceSourcePath"),
+        reference_source,
+    ]
+    for detail in details:
+        row = detail.get("row") or {}
+        fields.extend([
+            detail.get("retinue"),
+            detail.get("attributeSet"),
+            detail.get("skillSet"),
+            detail.get("initialCeos"),
+            row.get("_sourceTableName"),
+            row.get("_referenceSourcePath"),
+        ])
+    text = " ".join(str(field or "").lower() for field in fields)
+    korea_tokens = (
+        "korea",
+        "korean",
+        "goguryeo",
+        "baekje",
+        "bakaja",
+        "silla",
+        "shitla",
+        "gaya",
+        "buyeo",
+        "tamna",
+        "tamno",
+        "dongye",
+        "okjeo",
+        "mahan",
+        "jinhan",
+        "samhan",
+        "ironic_culture_korea",
+        "ironic_addon_korea",
+    )
+    return "korea" if any(token in text for token in korea_tokens) else None
+
+
 def _non_image_only_reference_assets(assets: list[dict[str, str]]) -> list[dict[str, str]]:
     return [
         asset for asset in assets
         if not _is_image_only_reference(asset.get("sourcePath", ""))
     ]
+
+
+def _land_unit_label(row: dict[str, Any], loc_text: dict[str, str]) -> str:
+    key = str(row.get("key") or "")
+    for loc_key in (
+        f"land_units_onscreen_name_{key}",
+        f"land_units_screen_name_{key}",
+        f"land_units_name_{key}",
+    ):
+        value = loc_text.get(loc_key)
+        if value:
+            return value
+    return _friendly_key(key)
+
+
+def _main_unit_label(row: dict[str, Any], loc_text: dict[str, str]) -> str:
+    key = str(row.get("unit") or row.get("land_unit") or row.get("key") or "")
+    for loc_key in (
+        f"land_units_onscreen_name_{key}",
+        f"land_units_screen_name_{key}",
+        f"land_units_name_{key}",
+        f"main_units_onscreen_name_{key}",
+        f"main_units_screen_name_{key}",
+    ):
+        value = loc_text.get(loc_key)
+        if value:
+            return value
+    return _friendly_key(key)
 
 
 def _is_non_character_image_path(path: str) -> bool:
@@ -1102,6 +1462,24 @@ def _battle_ability_key_from_effect(effect_key: str) -> str:
     key = str(effect_key or "")
     if "_skill_ability_" in key:
         return key.replace("_skill_ability_", "_ability_")
+    skill_ability_aliases = {
+        "3k_main_skill_tenacity_of_steel": "3k_main_ability_tenacity_of_steel",
+        "3k_main_skill_tempered_deflection": "3k_main_ability_tempered_deflection",
+        "3k_main_skill_rage_of_lu_bu": "3k_main_ability_rage_of_lu_bu",
+        "3k_main_skill_unyeilding_earth": "3k_main_ability_unyielding_earth",
+        "3k_main_skill_emphatic_volley": "3k_main_ability_quickfire",
+        "3k_main_skill_overzealous_energy": "3k_main_ability_blood_fury",
+        "3k_main_skill_blood_soaked_wrath": "3k_main_ability_reign_of_terror",
+        "3k_main_skill_wildfire_raider": "3k_main_ability_wildfire",
+        "3k_main_skill_the_dragons_gaze": "3k_main_ability_the_dragon_s_gaze",
+        "3k_main_skill_fervent_cheer": "3k_main_ability_devastating_roar",
+        "3k_main_skill_natures_ally": "3k_dlc06_ability_natures_protection",
+        "3k_main_skill_shout": "3k_ytr_ability_commanding_shout",
+    }
+    if key in skill_ability_aliases:
+        return skill_ability_aliases[key]
+    if "_skill_" in key:
+        return key.replace("_skill_", "_ability_", 1)
     if "_ability_" in key:
         return key
     return ""
@@ -1208,6 +1586,7 @@ def _battle_ability_summary(
     invalid_flags: list[str],
 ) -> str:
     pieces = []
+    effect_pieces = []
     if special:
         if special.get("passive"):
             pieces.append("패시브")
@@ -1231,8 +1610,10 @@ def _battle_ability_summary(
         effect_range = _number_or_none(special.get("effect_range"))
         if effect_range and effect_range > 0:
             pieces.append(f"범위 {effect_range:g}")
+        splash_damage = _number_or_none(special.get("splash_attack_damage"))
+        if splash_damage and splash_damage > 0:
+            effect_pieces.append(f"광역 피해 {splash_damage:g}")
     phase_ids = [str(phase.get("id") or "") for phase in phases if phase]
-    effect_pieces = []
     for phase in phases:
         phase_id = str(phase.get("id") or "")
         if not special:
@@ -1271,7 +1652,7 @@ def _battle_ability_summary(
     if not pieces and not effect_pieces and phase_ids:
         return ", ".join(phase_ids)
     if effect_pieces:
-        pieces.append("효과: " + ", ".join(effect_pieces[:8]))
+        pieces.append("효과: " + ", ".join(effect_pieces[:12]))
     return " · ".join(pieces)
 
 
@@ -1295,9 +1676,28 @@ def _battle_stat_label(stat: str) -> str:
         "stat_speed": "속도",
         "stat_missile_damage_ap": "장갑 관통 원거리 피해",
         "stat_missile_damage_base": "기본 원거리 피해",
+        "stat_missile_block_chance": "투사체 방어 확률",
         "stat_reload": "재장전",
+        "stat_reloading": "재장전",
         "stat_ammunition": "탄약",
         "stat_fatigue": "피로",
+        "stat_melee_attack_interval": "근접 공격 간격",
+        "stat_resistance_all": "모든 저항",
+        "stat_resistance_missile": "원거리 저항",
+        "stat_shield_armour": "방패 장갑",
+        "stat_shield_defence": "방패 방어",
+        "stat_spotting_forest": "숲 탐지",
+        "stat_spotting_range_min_modifier": "탐지 범위",
+        "stat_spotting_scrub": "수풀 탐지",
+        "stat_visibility_sight": "시야",
+        "scalar_bracing": "버티기",
+        "scalar_charge_speed": "돌격 속도",
+        "scalar_entity_acceleration_modifier": "가속도",
+        "scalar_missile_damage_ap": "장갑 관통 원거리 피해",
+        "scalar_missile_damage_base": "기본 원거리 피해",
+        "scalar_speed": "속도",
+        "scalar_splash_attack_power": "광역 공격 위력",
+        "scalar_splash_attack_range": "광역 공격 범위",
     }
     return labels.get(stat, _friendly_key(stat))
 
@@ -1322,6 +1722,30 @@ def _battle_invalid_usage_label(flag: str) -> str:
         "unit_is_flying": "비행 유닛",
         "unit_is_routing": "패주 중",
         "unit_in_melee": "근접전 중",
+        "out_of_hero_duel_and_no_attack_target": "결투 밖에서 공격 대상 없음",
+        "unit_has_attack_target_more_than_5_meters_away": "공격 대상이 5m 밖에 있음",
+        "all_brothers_dead": "의형제 전원 사망",
+        "climbing": "등반 중",
+        "dismounted": "말에서 내림",
+        "enemy_alliance_weaker": "적 연합이 더 약함",
+        "engaged_in_melee": "근접전 중",
+        "health_above_20%": "생명력 20% 초과",
+        "manning_equipment": "장비 운용 중",
+        "morale_is_higher_than_wavering": "사기가 동요보다 높음",
+        "no_friendly_units_in_range_with_same_ability": "범위 내 같은 능력의 아군 없음",
+        "on_a_platform": "플랫폼 위",
+        "out_of_melee_and_hero_duel": "근접전/결투 밖",
+        "unit_cannot_afford_hp_cost": "생명력 비용 부족",
+        "unit_has_chosen_participation_in_pending_duel": "결투 참여 선택됨",
+        "unit_hidden": "은신 중",
+        "unit_is_in_active_duel": "결투 중",
+        "unit_is_in_active_or_pending_duel": "결투 중 또는 결투 대기 중",
+        "unit_is_in_unresolved_ended_duel": "종료 처리되지 않은 결투 중",
+        "unit_is_not_elephant": "코끼리 탑승 유닛 아님",
+        "unit_is_not_in_active_duel": "결투 중 아님",
+        "unit_is_not_in_forest": "숲 안이 아님",
+        "unit_is_not_target_in_pending_duel": "결투 대기 대상 아님",
+        "unit_is_under_fire": "사격을 받는 중",
     }
     return labels.get(flag, _friendly_key(flag))
 
@@ -2074,6 +2498,22 @@ def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dic
         for row in tables.get("character_generation_template_game_mode_details", [])
         if row.get("initial_ceos")
     )
+    initial_contexts: dict[str, list[str]] = {}
+    for row in tables.get("character_generation_template_game_mode_details", []):
+        initial_key = str(row.get("initial_ceos") or "")
+        if not initial_key:
+            continue
+        initial_contexts.setdefault(initial_key, []).append(
+            " ".join(
+                str(row.get(field) or "")
+                for field in (
+                    "character_generation_template",
+                    "retinue",
+                    "attribute_set",
+                    "skill_set_override",
+                )
+            )
+        )
 
     stats: dict[str, dict[str, Any]] = {}
     for initial_key in sorted(initial_keys):
@@ -2082,6 +2522,11 @@ def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dic
         name_token = _character_token_from_initial_ceo(initial_key)
         weapon = _best_equipment_variant(name_token, weapon_ceos, "weapon")
         armour = _best_equipment_variant(name_token, armour_ceos, "armour")
+        context = " ".join([initial_key, *initial_contexts.get(initial_key, [])])
+        if not weapon:
+            weapon = _default_equipment_variant_for_context(context, weapon_ceos, "weapon")
+        if not armour:
+            armour = _default_equipment_variant_for_context(context, armour_ceos, "armour")
         weapon_row = melee_weapons.get(str((weapon or {}).get("primary_melee_weapon") or ""))
         missile_weapon_row = missile_weapons.get(str((weapon or {}).get("primary_missile_weapon") or ""))
         projectile_row = projectiles.get(str((missile_weapon_row or {}).get("default_projectile") or ""))
@@ -2228,6 +2673,155 @@ def _best_equipment_variant(
     return sorted(candidates)[0][2]
 
 
+def _default_equipment_variant_for_context(
+    context: str,
+    variants_by_ceo: dict[str, dict[str, Any]],
+    equipment_kind: str,
+) -> dict[str, Any] | None:
+    element = _element_from_text(context)
+    if not element:
+        return None
+    rarity = _equipment_rarity_from_text(context)
+    for ceo_key in _default_equipment_candidates(element, rarity, equipment_kind):
+        row = variants_by_ceo.get(ceo_key)
+        if row:
+            return row
+    return None
+
+
+def _element_from_text(value: str) -> str:
+    lower = value.lower()
+    for element in ("fire", "wood", "earth", "metal", "water"):
+        if f"_{element}_" in lower or lower.endswith(f"_{element}") or f"korean_{element}" in lower:
+            return element
+    return ""
+
+
+def _equipment_rarity_from_text(value: str) -> str:
+    lower = value.lower()
+    if any(token in lower for token in ("legendary", "unique")):
+        return "unique"
+    if any(token in lower for token in ("exceptional", "extraordinary")):
+        return "exceptional"
+    if "refined" in lower:
+        return "refined"
+    return "common"
+
+
+def _default_equipment_candidates(element: str, rarity: str, equipment_kind: str) -> list[str]:
+    if equipment_kind == "weapon":
+        weapon_bases = {
+            "fire": "3k_main_ancillary_weapon_two_handed_axe",
+            "wood": "3k_main_ancillary_weapon_two_handed_spear",
+            "earth": "3k_main_ancillary_weapon_ceremonial_sword",
+            "metal": "3k_main_ancillary_weapon_double_edged_sword",
+            "water": "3k_main_ancillary_weapon_ceremonial_sword",
+        }
+        base = weapon_bases.get(element)
+        if not base:
+            return []
+        rarity_order = _rarity_fallbacks(rarity)
+        if base.endswith("ceremonial_sword") and "common" in rarity_order:
+            rarity_order = ["refined" if item == "common" else item for item in rarity_order]
+        return [f"{base}_{item}" for item in rarity_order]
+
+    armour_candidates = {
+        "fire": {
+            "common": [
+                "3k_main_ancillary_armour_medium_armour_wood_and_fire_common",
+                "3k_main_ancillary_armour_heavy_armour_wood_and_fire_common",
+            ],
+            "refined": [
+                "3k_main_ancillary_armour_medium_armour_wood_and_fire_refined",
+                "3k_main_ancillary_armour_heavy_armour_wood_and_fire_refined",
+            ],
+            "exceptional": [
+                "3k_main_ancillary_armour_medium_armour_fire_extraordinary",
+                "3k_main_ancillary_armour_heavy_armour_fire_extraordinary",
+            ],
+            "unique": [
+                "3k_main_ancillary_armour_medium_armour_fire_unique",
+                "3k_main_ancillary_armour_heavy_armour_fire_unique",
+            ],
+        },
+        "wood": {
+            "common": [
+                "3k_main_ancillary_armour_medium_armour_wood_and_fire_common",
+                "3k_main_ancillary_armour_heavy_armour_wood_and_fire_common",
+            ],
+            "refined": [
+                "3k_main_ancillary_armour_medium_armour_wood_and_fire_refined",
+                "3k_main_ancillary_armour_heavy_armour_wood_and_fire_refined",
+            ],
+            "exceptional": [
+                "3k_main_ancillary_armour_medium_armour_wood_extraordinary",
+                "3k_main_ancillary_armour_heavy_armour_wood_extraordinary",
+            ],
+            "unique": [
+                "3k_main_ancillary_armour_medium_armour_wood_unique",
+                "3k_main_ancillary_armour_heavy_armour_wood_unique",
+            ],
+        },
+        "earth": {
+            "common": [
+                "3k_main_ancillary_armour_medium_armour_earth_and_metal_common",
+                "3k_main_ancillary_armour_light_armour_earth_metal_and_water_common",
+            ],
+            "refined": [
+                "3k_main_ancillary_armour_medium_armour_earth_and_metal_refined",
+                "3k_main_ancillary_armour_light_armour_earth_metal_and_water_refined",
+            ],
+            "exceptional": [
+                "3k_main_ancillary_armour_medium_armour_earth_extraordinary",
+                "3k_main_ancillary_armour_light_armour_earth_extraordinary",
+            ],
+            "unique": [
+                "3k_main_ancillary_armour_medium_armour_earth_unique",
+                "3k_main_ancillary_armour_light_armour_earth_unique",
+            ],
+        },
+        "metal": {
+            "common": [
+                "3k_main_ancillary_armour_medium_armour_earth_and_metal_common",
+                "3k_main_ancillary_armour_light_armour_earth_metal_and_water_common",
+            ],
+            "refined": [
+                "3k_main_ancillary_armour_medium_armour_earth_and_metal_refined",
+                "3k_main_ancillary_armour_light_armour_earth_metal_and_water_refined",
+            ],
+            "exceptional": [
+                "3k_main_ancillary_armour_medium_armour_metal_extraordinary",
+                "3k_main_ancillary_armour_light_armour_metal_extraordinary",
+            ],
+            "unique": [
+                "3k_main_ancillary_armour_medium_armour_metal_unique",
+                "3k_main_ancillary_armour_light_armour_metal_unique",
+            ],
+        },
+        "water": {
+            "common": ["3k_main_ancillary_armour_strategist_light_armour_water_common"],
+            "refined": ["3k_main_ancillary_armour_strategist_light_armour_water_refined"],
+            "exceptional": ["3k_main_ancillary_armour_strategist_light_armour_water_extraordinary"],
+            "unique": ["3k_main_ancillary_armour_strategist_light_armour_water_unique"],
+        },
+    }
+    by_rarity = armour_candidates.get(element, {})
+    candidates: list[str] = []
+    for item in _rarity_fallbacks(rarity):
+        candidates.extend(by_rarity.get(item, []))
+    return candidates
+
+
+def _rarity_fallbacks(rarity: str) -> list[str]:
+    orders = {
+        "common": ["common", "refined", "exceptional", "unique"],
+        "refined": ["refined", "common", "exceptional", "unique"],
+        "exceptional": ["exceptional", "refined", "unique", "common"],
+        "unique": ["unique", "exceptional", "refined", "common"],
+    }
+    return orders.get(rarity, orders["common"])
+
+
 def _sum_numeric(row: dict[str, Any] | None, columns: tuple[str, ...]) -> int | float | None:
     if not row:
         return None
@@ -2255,8 +2849,8 @@ def _number_or_none(value: Any) -> int | float | None:
 def _read_character_tables(session: Any, source: str) -> dict[str, list[dict[str, Any]]]:
     tables = {}
     for alias in CHARACTER_TABLE_ALIASES:
-        table_name = resolve_character_table_name(session, alias) if source == "pack" else _resolve_source_table(session, alias, source)
-        tables[alias] = session.read_table(table_name, source)
+        rows = _read_character_alias_rows(session, alias, source)
+        tables[alias] = rows
     for alias in (
         "equipment_variants_weapons",
         "equipment_variants_armours",
@@ -2444,6 +3038,82 @@ def _merge_reference_packs(
     return report
 
 
+def _merge_default_stat_references(
+    tables: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    report: list[dict[str, Any]] = []
+    for reference_path in _default_stat_reference_db_paths():
+        started = time.perf_counter()
+        if not reference_path.is_file():
+            continue
+        before_counts = {alias: len(tables.get(alias, [])) for alias in _DEFAULT_STAT_REFERENCE_ALIASES}
+        try:
+            with reference_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            reference_tables = {
+                alias: rows
+                for alias, rows in (payload.get("tables") or {}).items()
+                if alias in _DEFAULT_STAT_REFERENCE_ALIASES and isinstance(rows, list)
+            }
+            for alias, rows in reference_tables.items():
+                target = tables.setdefault(alias, [])
+                if alias in {"equipment_variants_weapons", "equipment_variants_armours"}:
+                    _append_missing_rows_by_fields(target, rows, ("ceos_key", "game_mode"), str(reference_path))
+                else:
+                    _append_missing_rows(target, rows, _key_field_for_alias(alias), str(reference_path))
+            report.append({
+                "path": str(reference_path),
+                "ok": True,
+                "defaultStatReference": True,
+                "tables": sorted(reference_tables),
+                "added": {
+                    alias: len(tables.get(alias, [])) - before_counts.get(alias, 0)
+                    for alias in reference_tables
+                },
+                "seconds": _elapsed(started),
+            })
+        except Exception as error:
+            report.append({
+                "path": str(reference_path),
+                "ok": False,
+                "defaultStatReference": True,
+                "error": str(error),
+                "seconds": _elapsed(started),
+            })
+    return report
+
+
+_DEFAULT_STAT_REFERENCE_ALIASES = (
+    "ceo_initial_datas",
+    "equipment_variants_weapons",
+    "equipment_variants_armours",
+    "melee_weapons",
+    "missile_weapons",
+    "projectiles",
+    "unit_armour_types",
+    "land_units",
+)
+
+
+def _default_stat_reference_db_paths() -> list[Path]:
+    return _unique_paths([
+        INTERNAL_DB_ROOT / "default_stat_reference.json",
+        ROOT / "work" / "internal_dbs" / "default_stat_reference.json",
+    ])
+
+
+def _unique_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in paths:
+        key = str(path.resolve()).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+
 def _skip_reference_pack_for_fast_open(path: Path) -> bool:
     return False
 
@@ -2485,8 +3155,7 @@ def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
     tables: dict[str, list[dict[str, Any]]] = {}
     for alias in CHARACTER_TABLE_ALIASES:
         try:
-            table_name = _resolve_reference_character_table(session, alias)
-            tables[alias] = session.read_table(table_name)
+            tables[alias] = _read_character_alias_rows(session, alias, "pack")
         except ValueError:
             continue
     for alias in (
@@ -2509,9 +3178,9 @@ def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
                 "character_attribute_sets",
                 "character_attributes",
             }:
-                table_name = _resolve_reference_character_table(session, alias)
-            else:
-                table_name = _resolve_stat_table(session, alias, "pack")
+                tables[alias] = _read_character_alias_rows(session, alias, "pack")
+                continue
+            table_name = _resolve_stat_table(session, alias, "pack")
             tables[alias] = session.read_table(table_name)
         except (KeyError, ValueError):
             continue
@@ -2528,8 +3197,7 @@ def _read_data_pack_reference_tables(session: Any) -> dict[str, list[dict[str, A
     tables: dict[str, list[dict[str, Any]]] = {}
     for alias in ("character_attribute_sets", "character_attributes"):
         try:
-            table_name = _resolve_reference_character_table(session, alias)
-            tables[alias] = session.read_table(table_name)
+            tables[alias] = _read_character_alias_rows(session, alias, "pack")
         except ValueError:
             continue
     return tables
@@ -2597,16 +3265,20 @@ def _unit_stats_for_details(
     template_key: str,
     details: list[dict[str, Any]],
     land_units: dict[str, dict[str, Any]],
+    retinue_units_by_retinue: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
+    retinue_units_by_retinue = retinue_units_by_retinue or {}
     for game_mode in ("historical", "romance"):
         for detail in details:
             if detail.get("gameMode") != game_mode:
                 continue
-            row = land_units.get(str(detail.get("retinue") or ""))
+            retinue = str(detail.get("retinue") or "")
+            row = _land_unit_for_retinue(retinue, land_units, retinue_units_by_retinue)
             if row:
                 return _unit_stats_from_row(row)
     for detail in details:
-        row = land_units.get(str(detail.get("retinue") or ""))
+        retinue = str(detail.get("retinue") or "")
+        row = _land_unit_for_retinue(retinue, land_units, retinue_units_by_retinue)
         if row:
             return _unit_stats_from_row(row)
     name_token = _character_token_from_template(template_key)
@@ -2616,9 +3288,76 @@ def _unit_stats_for_details(
     return {}
 
 
+def _land_unit_for_retinue(
+    retinue: str,
+    land_units: dict[str, dict[str, Any]],
+    retinue_units_by_retinue: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any] | None:
+    if not retinue:
+        return None
+    direct = land_units.get(retinue)
+    if direct:
+        return direct
+    for candidate_key in _land_unit_candidate_keys_for_retinue(retinue):
+        row = land_units.get(candidate_key)
+        if row:
+            return row
+    slot_rows = sorted(
+        retinue_units_by_retinue.get(retinue, []),
+        key=lambda row: int(row.get("slot_index") or 0),
+    )
+    for slot in slot_rows:
+        unit_key = str(slot.get("initial_unit_record") or "")
+        row = land_units.get(unit_key)
+        if row:
+            return row
+    if slot_rows:
+        unit_key = str(slot_rows[0].get("initial_unit_record") or "")
+        if unit_key:
+            return {
+                "key": unit_key,
+                "retinueKey": retinue,
+                "retinueSlotUnits": [
+                    str(row.get("initial_unit_record") or "")
+                    for row in slot_rows
+                    if row.get("initial_unit_record")
+                ],
+            }
+    return None
+
+
+def _land_unit_candidate_keys_for_retinue(retinue: str) -> list[str]:
+    lower = retinue.lower()
+    candidates: list[str] = []
+    element = next((item for item in ("earth", "fire", "wood", "water", "metal") if f"_{item}" in lower), "")
+    if element:
+        candidates.extend([
+            f"3k_main_general_{element}_generic",
+            f"3k_main_general_{element}_unique",
+            f"3k_main_hero_{element}_generic",
+        ])
+    if lower.startswith("3k_main_general_tier_"):
+        suffix = lower.removeprefix("3k_main_general_tier_")
+        parts = suffix.split("_")
+        if parts and parts[-1] in {"earth", "fire", "wood", "water", "metal"}:
+            candidates.insert(0, f"3k_main_general_{parts[-1]}_generic")
+    if lower.startswith("3k_main_general_generic_") and element:
+        candidates.insert(0, f"3k_main_general_{element}_generic")
+    seen: set[str] = set()
+    unique: list[str] = []
+    for key in candidates:
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(key)
+    return unique
+
+
 def _unit_stats_from_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "landUnitKey": row.get("key"),
+        "retinueKey": row.get("retinueKey"),
+        "retinueSlotUnits": row.get("retinueSlotUnits") or [],
         "unitMeleeAttack": _number_or_none(row.get("melee_attack")),
         "unitMeleeDefence": _number_or_none(row.get("melee_defence")),
         "unitChargeBonus": _number_or_none(row.get("charge_bonus")),
@@ -2841,8 +3580,8 @@ def _name_text(value: Any, loc_text: dict[str, str]) -> str | None:
         return None
     name_id = str(value)
     return (
-        loc_text.get(f"names_alt_name_{name_id}")
-        or loc_text.get(f"names_name_{name_id}")
+        loc_text.get(f"names_name_{name_id}")
+        or loc_text.get(f"names_alt_name_{name_id}")
     )
 
 
@@ -2927,8 +3666,57 @@ def _friendly_key(value: str) -> str:
 
 
 def _friendly_character_label(value: str) -> str:
+    korea_generic = _korea_generic_character_label(value)
+    if korea_generic:
+        return korea_generic
     tokens = _name_tokens_from_template_key(value)
     return " ".join(tokens) if tokens else _friendly_key(value)
+
+
+def _korea_generic_character_label(value: str) -> str | None:
+    prefix = "3k_korea_template_generic_"
+    if not value.startswith(prefix):
+        return None
+    tokens = [
+        token for token in value.removeprefix(prefix).split("_")
+        if token and token not in {"hero"}
+    ]
+    if not tokens:
+        return None
+    element_names = {
+        "earth": "토",
+        "fire": "화",
+        "wood": "목",
+        "water": "수",
+        "metal": "금",
+    }
+    role_names = {
+        "agent": "요원",
+        "castellan": "성주",
+        "colonel": "부장",
+        "envoy": "사절",
+        "general": "장군",
+        "governor": "태수",
+        "minister": "대신",
+        "villager": "향촌 지도자",
+    }
+    rank_names = {
+        "legendary": "전설",
+        "normal": "일반",
+    }
+    gender_names = {
+        "f": "여성",
+        "m": "남성",
+    }
+    element = next((element_names[token] for token in tokens if token in element_names), "")
+    role = next((role_names[token] for token in tokens if token in role_names), "")
+    rank = next((rank_names[token] for token in tokens if token in rank_names), "")
+    gender = next((gender_names[token] for token in tokens if token in gender_names), "")
+    number = next((token for token in tokens if token.isdigit()), "")
+    parts = [part for part in [element, rank, gender, role] if part]
+    if number:
+        parts.append(number)
+    return " ".join(parts) if parts else None
 
 
 def _friendly_art_set_label(value: str, loc_text: dict[str, str] | None = None) -> str:
@@ -3217,6 +4005,36 @@ def _resolve_source_table(session: Any, alias: str, source: str) -> str:
     raise ValueError(f"Required character table is missing in {source}: {alias}")
 
 
+def _read_character_alias_rows(session: Any, alias: str, source: str) -> list[dict[str, Any]]:
+    table_names = _resolve_source_tables(session, alias, source)
+    rows: list[dict[str, Any]] = []
+    for table_name in table_names:
+        for row in session.read_table(table_name, source):
+            rows.append({**row, "_sourceTableName": table_name})
+    return rows
+
+
+def _resolve_source_tables(session: Any, alias: str, source: str) -> list[str]:
+    tables = set(session.list_tables(source))
+    candidates = CHARACTER_TABLE_ALIASES.get(alias, [alias])
+    exact_matches = [candidate for candidate in candidates if candidate in tables]
+    if exact_matches:
+        return exact_matches
+
+    matches = sorted(table for table in tables if table.startswith(f"db/{alias}_tables/"))
+    if len(matches) == 1:
+        return matches
+    if len(matches) > 1:
+        if alias == "ceo_initial_datas":
+            return matches
+        preferred = [
+            table for table in matches
+            if "/_mtu" in table or "/data__" in table
+        ]
+        return [preferred[0] if preferred else matches[0]]
+    raise ValueError(f"Required character table is missing in {source}: {alias}")
+
+
 def _resolve_stat_table(session: Any, alias: str, source: str) -> str:
     tables = set(session.list_tables(source))
     for candidate in TABLE_ALIASES[alias]:
@@ -3297,9 +4115,6 @@ def _reference_pack_paths(payload: dict[str, Any]) -> list[Path]:
         if not raw_path:
             continue
         paths.append(_resolve_user_path(raw_path))
-    for path in _default_localisation_pack_paths():
-        if path not in paths:
-            paths.append(path)
     return [
         path
         for _, path in sorted(
@@ -3325,25 +4140,7 @@ def _reference_pack_priority(path: Path) -> int:
 
 
 def _default_localisation_pack_paths() -> list[Path]:
-    candidates = [
-        ROOT / "work" / "packs" / "refs" / "local_kr.pack",
-        Path("E:/SteamLibrary/steamapps/common/Total War THREE KINGDOMS/data/local_kr.pack"),
-        Path("C:/Program Files (x86)/Steam/steamapps/common/Total War THREE KINGDOMS/data/local_kr.pack"),
-        Path("C:/Program Files/Steam/steamapps/common/Total War THREE KINGDOMS/data/local_kr.pack"),
-    ]
-    seen = set()
-    existing = []
-    for path in candidates:
-        try:
-            resolved = path.expanduser().resolve()
-        except OSError:
-            continue
-        key = str(resolved).lower()
-        if key in seen or not resolved.exists():
-            continue
-        seen.add(key)
-        existing.append(resolved)
-    return existing
+    return []
 
 
 def _detect_adapter(pack_path: Path) -> str:
@@ -3437,10 +4234,6 @@ def _rpfm_env() -> dict[str, str]:
         if upper == "PATH" and any(existing.upper() == "PATH" for existing in env):
             continue
         env[key] = value
-    if os.name != "nt":
-        config_root = _rpfm_local_appdata_root()
-        config_root.mkdir(parents=True, exist_ok=True)
-        env["XDG_CONFIG_HOME"] = str(config_root)
     return env
 
 

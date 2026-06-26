@@ -284,7 +284,7 @@ textarea:focus {
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(var(--skill-cols), minmax(0, 1fr));
-  grid-auto-rows: 96px;
+  grid-auto-rows: 112px;
   gap: 8px;
   padding: 10px;
   border: 1px solid var(--line);
@@ -358,12 +358,12 @@ textarea:focus {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
 }
 
 .skill-candidate span {
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 5;
 }
 
 .skill-node.active {
@@ -458,7 +458,7 @@ textarea:focus {
 
 .skill-candidates {
   min-width: 0;
-  max-height: 360px;
+  max-height: 440px;
   overflow-y: auto;
   overflow-x: hidden;
   display: grid;
@@ -468,12 +468,13 @@ textarea:focus {
 .skill-candidate {
   display: grid;
   gap: 5px;
-  min-height: 82px;
+  min-height: 96px;
   padding: 9px 10px;
 }
 
 .filter-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
@@ -743,6 +744,7 @@ dd {
 }
 
 .appearance-card {
+  position: relative;
   display: grid;
   gap: 6px;
   justify-items: start;
@@ -752,6 +754,48 @@ dd {
   padding: 10px;
   color: var(--ink);
   text-align: left;
+}
+
+.favorite-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: rgba(38, 49, 41, 0.78);
+  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.85));
+  line-height: 1;
+  cursor: pointer;
+}
+
+.favorite-toggle.active {
+  color: #c79313;
+}
+
+.favorite-toggle:hover,
+.favorite-toggle:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+.favorite-toggle svg {
+  width: 19px;
+  height: 19px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.favorite-toggle.active svg {
+  fill: currentColor;
 }
 
 .appearance-card.active,
@@ -769,6 +813,15 @@ dd {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.25;
+}
+
+.appearance-card .favorite-toggle {
+  color: rgba(38, 49, 41, 0.78);
+  line-height: 1;
+}
+
+.appearance-card .favorite-toggle.active {
+  color: #c79313;
 }
 
 .source-badge {

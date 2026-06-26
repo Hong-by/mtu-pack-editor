@@ -49,6 +49,12 @@
           <button class="filter" data-filter="wood" type="button">木</button>
           <button class="filter" data-filter="water" type="button">水</button>
           <button class="filter" data-filter="metal" type="button">金</button>
+          <button class="filter" data-filter="korea" type="button">韓</button>
+          <button class="filter" data-filter="korea_goguryeo" type="button">고구려</button>
+          <button class="filter" data-filter="korea_baekje" type="button">백제</button>
+          <button class="filter" data-filter="korea_silla" type="button">신라</button>
+          <button class="filter" data-filter="korea_gaya" type="button">가야</button>
+          <button class="filter" data-filter="korea_tamna" type="button">탐라</button>
         </div>
         <div id="characterList" class="character-list"></div>
       </aside>
@@ -145,6 +151,10 @@
               <strong>전투 유닛 / 장비 정보</strong>
               <span>장비, 무기, 투사체 수치는 현재 읽기 전용입니다.</span>
             </div>
+            <label>
+              <span>장비 정렬</span>
+              <select id="editCombatSort"></select>
+            </label>
             <label>
               <span>참고 장비 세트</span>
               <select id="editCombatProfile"></select>
@@ -256,6 +266,10 @@
               <strong>전투 유닛 / 장비 정보</strong>
               <span>신규 장수는 선택한 베이스의 장비 정보를 유지합니다.</span>
             </div>
+            <label>
+              <span>장비 정렬</span>
+              <select id="sourceCombatSort"></select>
+            </label>
             <label>
               <span>참고 장비 세트</span>
               <select id="sourceCombatProfile"></select>

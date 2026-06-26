@@ -40,6 +40,8 @@ $rpfmSource = Join-Path $root "work\rpfm-dist"
 $rpfmTarget = Join-Path $workDir "rpfm-dist"
 $snapshotSource = Join-Path $root "work\reference_snapshot.json"
 $snapshotTarget = Join-Path $workDir "reference_snapshot.json"
+$internalDbSource = Join-Path $root "work\internal_dbs"
+$internalDbTarget = Join-Path $workDir "internal_dbs"
 $assetSource = Join-Path $root "work\assets"
 $assetTarget = Join-Path $workDir "assets"
 robocopy (Join-Path $root "web") $webTarget /E | Out-Null
@@ -50,6 +52,12 @@ New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $workDir "packs") | Out-Null
 if (Test-Path $snapshotSource) {
     Copy-Item -LiteralPath $snapshotSource -Destination $snapshotTarget -Force
+}
+if (Test-Path $internalDbSource) {
+    robocopy $internalDbSource $internalDbTarget /E | Out-Null
+    if ($LASTEXITCODE -gt 7) {
+        throw "Failed to copy internal DB files. robocopy exit code: $LASTEXITCODE"
+    }
 }
 if (Test-Path $assetSource) {
     robocopy $assetSource $assetTarget /E | Out-Null
