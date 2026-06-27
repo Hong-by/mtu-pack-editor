@@ -16,6 +16,14 @@ ROOT = Path(os.environ.get("TK_PACK_EDITOR_ROOT", Path(__file__).resolve().paren
 RPFM_SCHEMA_STORE = ROOT / "work" / "rpfm-schema-store"
 THREE_KINGDOMS_SCHEMA_FILE = "schema_3k.ron"
 
+RPFM_TABLE_ALIASES = {
+    "names": [
+        "db/names_tables/_mtu_characters_names",
+        "db/names_tables/data__",
+        "db/names_tables/data",
+    ],
+}
+
 
 class PackAdapter(Protocol):
     def open_pack(self, file_path: Path) -> "PackSession":
@@ -302,8 +310,13 @@ class RpfmPackSession:
         if table_name.startswith(("db/", "ceo_db/")):
             return table_name
 
+        available_tables = self.list_tables(source)
+        for candidate in RPFM_TABLE_ALIASES.get(table_name, []):
+            if candidate in available_tables:
+                return candidate
+
         matches = [
-            path for path in self.list_tables(source)
+            path for path in available_tables
             if f"/{table_name}_tables/" in path or path.split("/")[-1] == table_name
         ]
         if len(matches) == 1:

@@ -202,6 +202,9 @@ def build_delta_pack_from_materials(
         def read_table(self, table_name: str, source: str = "pack") -> list[dict[str, Any]]:
             return source_session.read_table(table_name, source)
 
+        def _resolve_table_path(self, table_name: str, source: str = "pack") -> str:
+            return source_session._resolve_table_path(table_name, source)
+
         def list_files(self) -> list[str]:
             return writer_session.list_files()
 
@@ -888,7 +891,7 @@ def _apply_character_patch_name(
         return False
     try:
         names = _read_rows(session, "names", source_dbs)
-        names_table = session._resolve_table_path("names")
+        names_table = _source_table_path_for_rows(names, "names")
         source_name = _find_row(names, "id", current_forename) or (names[0] if names else {})
         name_row = {
             **source_name,
@@ -1024,7 +1027,7 @@ def _collect_character_clone_rows(
         opened_pack_keys,
     )
     names = _read_rows(session, "names", source_dbs)
-    names_table = session._resolve_table_path("names")
+    names_table = _source_table_path_for_rows(names, "names")
 
     created = 0
     for clone in clones:
@@ -1097,6 +1100,8 @@ def _collect_character_clone_rows(
             row for row in tables["character_generation_template_game_mode_details"]
             if row.get("character_generation_template") == clone.detail_source_template_key
         ]
+        if not source_details:
+            raise ValueError(f"Row not found: character_generation_template={clone.detail_source_template_key}")
         if clone.new_initial_ceo_key:
             if "ceo_initial_datas" not in tables:
                 raise ValueError("Source initial CEO table not found.")
@@ -1837,6 +1842,14 @@ def _read_rows(
                 row["_sourceTablePath"] = sibling_path
             rows.extend(sibling_rows)
     return rows
+
+
+def _source_table_path_for_rows(rows: list[dict[str, Any]], table_name: str) -> str:
+    for row in rows:
+        path = row.get("_sourceTablePath")
+        if path:
+            return str(path)
+    raise ValueError(f"RPFM table not found in pack: {table_name}")
 
 
 def _db_with_rows(source_db: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:

@@ -423,6 +423,18 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [{"key": "age"}],
                 },
+                "db/names_tables/_mtu_characters_names": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"id": "900"}],
+                },
+                "db/names_tables/data": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"id": "901"}],
+                },
+                "db/names_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"id": "1"}],
+                },
             },
             "loc": {},
             "assets": {},
@@ -441,6 +453,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                 template_key="source_template",
                 template_overrides={},
                 detail_overrides={},
+                display_name="new display",
                 art_overrides={"uniform": "new_uniform"},
             )],
             source_dbs,
@@ -450,6 +463,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
 
         template = rows_by_table["db/character_generation_templates_tables/_mtu_characters"][0]
         self.assertEqual(template["art_set_override"], "source_art")
+        self.assertIn("db/names_tables/data__", rows_by_table)
         art = rows_by_table["db/campaign_character_arts_tables/_mtu_characters"][0]
         self.assertEqual(art["art_set_id"], "source_art")
         self.assertEqual(art["portrait"], "source_image/")
