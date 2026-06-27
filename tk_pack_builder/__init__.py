@@ -1,3 +1,3 @@
 """CLI prototype for recipe.json + starter.pack -> output.pack."""
 
-__version__ = "1.0.5"
+__version__ = "2.0.0"
