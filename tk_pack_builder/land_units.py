@@ -11,6 +11,7 @@ ALLOWED_LAND_UNIT_OVERRIDES = {
     "charge_bonus",
     "morale",
     "primary_ammo",
+    "armour",
 }
 
 
@@ -31,6 +32,10 @@ def validate_land_unit_clone(session: PackSession, clone: LandUnitClone) -> None
     for column, value in clone.overrides.items():
         if column not in source:
             raise ValueError(f"Column is missing on land unit row: {clone.source_key}/{column}")
+        if column == "armour":
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Land unit armour override must be a non-empty string: {clone.new_key}/{column}")
+            continue
         if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
             raise ValueError(f"Land unit override must be a non-negative number: {clone.new_key}/{column}")
 

@@ -3,12 +3,18 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from .game import THREE_KINGDOMS_GAME_KEY
 from .rpfm_ws import RpfmWsClient
+
+
+ROOT = Path(os.environ.get("TK_PACK_EDITOR_ROOT", Path(__file__).resolve().parents[1])).resolve()
+RPFM_SCHEMA_STORE = ROOT / "work" / "rpfm-schema-store"
+THREE_KINGDOMS_SCHEMA_FILE = "schema_3k.ron"
 
 
 class PackAdapter(Protocol):
@@ -357,6 +363,7 @@ class RpfmAdapter:
         try:
             client.connect()
             _raise_rpfm_error(client.send({"SetGameSelected": [THREE_KINGDOMS_GAME_KEY, False]}))
+            _ensure_rpfm_schema_loaded(client)
             opened = client.send({"OpenPackFiles": [str(file_path)]})
             _raise_rpfm_error(opened)
             pack_key, pack_info = opened["data"]["StringContainerInfo"]
@@ -374,6 +381,61 @@ def _raise_rpfm_error(response: dict[str, Any]) -> None:
     data = response.get("data")
     if isinstance(data, dict) and "Error" in data:
         raise ValueError(data["Error"])
+
+
+def _ensure_rpfm_schema_loaded(client: RpfmWsClient) -> None:
+    if _rpfm_bool(client.send("IsSchemaLoaded")):
+        _backup_rpfm_schema(client)
+        return
+
+    _restore_rpfm_schema(client)
+    _raise_rpfm_error(client.send({"SetGameSelected": [THREE_KINGDOMS_GAME_KEY, False]}))
+    if _rpfm_bool(client.send("IsSchemaLoaded")):
+        _backup_rpfm_schema(client)
+        return
+
+    raise ValueError(
+        "RPFM schema is not loaded. Restore schema_3k.ron in work/rpfm-schema-store "
+        "or start RPFM once with a valid Three Kingdoms schema."
+    )
+
+
+def _rpfm_bool(response: dict[str, Any]) -> bool:
+    _raise_rpfm_error(response)
+    data = response.get("data", {})
+    if isinstance(data, dict) and "Bool" in data:
+        return bool(data["Bool"])
+    return False
+
+
+def _rpfm_path(client: RpfmWsClient, command: str) -> Path | None:
+    response = client.send(command)
+    _raise_rpfm_error(response)
+    data = response.get("data", {})
+    value = data.get("PathBuf") if isinstance(data, dict) else None
+    if not value:
+        return None
+    return Path(str(value))
+
+
+def _restore_rpfm_schema(client: RpfmWsClient) -> None:
+    source = RPFM_SCHEMA_STORE / THREE_KINGDOMS_SCHEMA_FILE
+    schemas_path = _rpfm_path(client, "SchemasPath")
+    if schemas_path is None or not source.is_file():
+        return
+    schemas_path.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, schemas_path / THREE_KINGDOMS_SCHEMA_FILE)
+
+
+def _backup_rpfm_schema(client: RpfmWsClient) -> None:
+    schemas_path = _rpfm_path(client, "SchemasPath")
+    if schemas_path is None:
+        return
+    source = schemas_path / THREE_KINGDOMS_SCHEMA_FILE
+    if not source.is_file():
+        return
+    RPFM_SCHEMA_STORE.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, RPFM_SCHEMA_STORE / THREE_KINGDOMS_SCHEMA_FILE)
 
 
 def _decode_rpfm_cell(value: Any) -> Any:

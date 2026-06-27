@@ -29,12 +29,7 @@ work\packs\refs\data.pack
 work\packs\refs\BFG_Originals.pack
 work\packs\refs\BFG_for_MTU.pack
 work\packs\refs\BFG_Nanman2.pack
-work\packs\refs\BFG_Yellow_Turban.pack
-work\packs\refs\LSHZ_lbdc_lh.pack
-work\packs\refs\AW-Design All in One Historical Figures.pack
-work\packs\refs\AW Addon-MinWUJang72.pack
-work\packs\refs\AW-Design All in One 2 Historical Figures.pack
-work\packs\refs\AW-Design All in One 3 Historical Figures.pack</textarea>
+work\packs\refs\BFG_Yellow_Turban.pack</textarea>
         <select id="saveModeSelect" class="save-mode" aria-label="저장 방식">
           <option value="patch_pack" selected>패치 pack</option>
           <option value="save_as">Save As 원본 복사</option>
@@ -42,7 +37,7 @@ work\packs\refs\AW-Design All in One 3 Historical Figures.pack</textarea>
         </select>
         <button id="loadPackButton" class="ghost-btn" type="button">팩 읽기</button>
         <button id="refreshPackButton" class="ghost-btn" type="button">DB 갱신</button>
-        <button id="validateButton" class="ghost-btn" type="button">검증</button>
+        <button id="validateButton" class="ghost-btn" type="button" hidden>검증</button>
         <button id="buildButton" class="primary-btn" type="button">저장</button>
         <button id="previewRecipeButton" class="ghost-btn" type="button">레시피 미리보기</button>
         <button id="saveDraftButton" class="ghost-btn" type="button">작업 저장</button>
@@ -99,8 +94,8 @@ work\packs\refs\AW-Design All in One 3 Historical Figures.pack</textarea>
 
         <div class="section-block">
           <div class="section-head">
-            <h3>이미지/모델 후보</h3>
-            <span>이미지 세트는 초상화/카드, 모델 세트는 전장/캠페인/전체 외형을 묶습니다.</span>
+            <h3>코어 이미지 소스</h3>
+            <span>선택한 작업에 사용할 초상화/카드 이미지 세트를 고릅니다.</span>
           </div>
           <div id="appearanceGallery" class="appearance-gallery"></div>
         </div>
@@ -158,16 +153,16 @@ work\packs\refs\AW-Design All in One 3 Historical Figures.pack</textarea>
           <div class="tab-section" data-tab-section="edit-combat">
             <div class="form-group">
             <div class="group-title">
-              <strong>전투 유닛 / 장비 정보</strong>
-              <span>장비, 무기, 투사체 수치는 현재 읽기 전용입니다.</span>
+              <strong>장비/부대 수치 패치</strong>
+              <span>장비 key는 유지하고 방어구 값만, 부대는 land unit 복제 row만 저장합니다.</span>
             </div>
             <label>
-              <span>참고 장비 세트</span>
+              <span>장비 key 참조</span>
               <select id="editCombatProfile"></select>
             </label>
             <div id="editEquipmentSummary" class="equipment-summary"></div>
             <label>
-              <span>병종/부대 타입</span>
+              <span>참고 부대 프로필</span>
               <select id="editUnitProfile"></select>
             </label>
             <div id="editUnitSummary" class="equipment-summary"></div>
@@ -269,16 +264,16 @@ work\packs\refs\AW-Design All in One 3 Historical Figures.pack</textarea>
           <div class="tab-section" data-tab-section="create-combat">
             <div class="form-group">
             <div class="group-title">
-              <strong>전투 유닛 / 장비 정보</strong>
-              <span>신규 장수는 선택한 베이스의 장비 정보를 유지합니다.</span>
+              <strong>장비/부대 수치 패치</strong>
+              <span>장비 key는 유지하고 방어구 값만, 부대는 land unit 복제 row만 저장합니다.</span>
             </div>
             <label>
-              <span>참고 장비 세트</span>
+              <span>장비 key 참조</span>
               <select id="sourceCombatProfile"></select>
             </label>
             <div id="sourceEquipmentSummary" class="equipment-summary"></div>
             <label>
-              <span>병종/부대 타입</span>
+              <span>참고 부대 프로필</span>
               <select id="sourceUnitProfile"></select>
             </label>
             <div id="sourceUnitSummary" class="equipment-summary"></div>

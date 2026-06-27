@@ -158,7 +158,18 @@ def validate(session: PackSession, recipe: Recipe, output_path: str | None = Non
             )
         seen_patch_keys.add(patch_key)
 
-        if not isinstance(patch.value, (int, float)):
+        string_patch = patch.stat_table == "armour" and patch.column == "audio_type"
+        if string_patch:
+            if not isinstance(patch.value, str) or not patch.value.strip():
+                messages.append(
+                    ValidationMessage(
+                        "error",
+                        "invalid_stat_value",
+                        f"Audio type must be a non-empty string: {patch.equipment_key}/{patch.column}",
+                    )
+                )
+                continue
+        elif not isinstance(patch.value, (int, float)):
             messages.append(
                 ValidationMessage(
                     "error",
@@ -200,12 +211,36 @@ def allow_reference_backed_clone_sources(messages: list[ValidationMessage]) -> l
         "Source age range not found:",
         "Source character art rows not found:",
     )
+    allowed_patch_fragments = (
+        "Character template not found:",
+        "Character game mode details not found:",
+    )
+    allowed_land_unit_fragments = (
+        "Source land unit not found:",
+    )
+    allowed_stat_fragments = (
+        "Equipment stat mapping not found:",
+        "Stat row is missing:",
+        "Required table is missing:",
+    )
     return [
         message
         for message in messages
         if not (
             message.code == "invalid_character_clone"
             and any(fragment in message.message for fragment in allowed_fragments)
+        ) and not (
+            message.code == "invalid_character_patch"
+            and any(fragment in message.message for fragment in allowed_patch_fragments)
+        ) and not (
+            message.code == "invalid_land_unit_clone"
+            and any(fragment in message.message for fragment in allowed_land_unit_fragments)
+        ) and not (
+            message.code == "invalid_stat_patch"
+            and any(fragment in message.message for fragment in allowed_stat_fragments)
+        ) and not (
+            message.code == "missing_table"
+            and message.message.startswith("Required table is missing:")
         )
     ]
 

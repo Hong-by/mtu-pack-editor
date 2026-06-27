@@ -41,7 +41,8 @@ body {
 
 #referencePackPaths,
 #loadPackButton,
-#refreshPackButton {
+#refreshPackButton,
+#saveModeSelect {
   display: none;
 }
 
@@ -702,7 +703,7 @@ dd {
 
 .appearance-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(138px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -726,7 +727,15 @@ dd {
 
 .appearance-card .mini-portrait {
   width: 100%;
-  height: 92px;
+  height: 116px;
+}
+
+.appearance-card strong {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .appearance-card span {
@@ -959,6 +968,16 @@ label {
 
 .group-title span {
   color: var(--muted);
+  font-size: 12px;
+}
+
+.group-title.compact {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.group-title.compact strong {
   font-size: 12px;
 }
 

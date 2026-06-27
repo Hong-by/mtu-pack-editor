@@ -193,6 +193,12 @@ const state = {
   skillCandidateTabs: {},
 };
 
+const INTERNAL_MATERIAL_BUILD = {
+  enabledForSaveMode: '',
+  materialPath: 'work\\internal_materials\\materials.v015.json',
+  coreAssetSourceId: '17309a40b912',
+};
+
 const MANUAL_TITLE_EFFECTS = [
   ['사마예', '철학 있는 통치자', '전문성 +20, 결의 +50, 본능 +30, 회복력 +1, 방어할 때 사기 +10, 모든 부대에 화살 및 탄환 +25%(세력 전체)(상국, 세력지도자, 후계자일 때)'],
   ['사마영', '사랑받는 통치자', '책략 +20, 권위 +25, 회복력 +1, 만족도 +10, 귀족들의 지지 +5, 농업 수입 +50%(세력 전체 / 상국 세력지도자, 후계자일 때)'],
@@ -269,11 +275,24 @@ const MANUAL_SKILL_EFFECTS = [
 const $ = (id) => document.getElementById(id);
 
 function selectedCharacter() {
-  return state.characters.find((character) => character.key === state.selectedKey) || state.characters[0];
+  const roster = browsableCharacters();
+  return roster.find((character) => realTemplateKey(character) === state.selectedKey || character.key === state.selectedKey)
+    || roster[0]
+    || state.characters.find(hasRealTemplateRow)
+    || state.characters[0];
 }
 
 function characters() {
   return state.characters;
+}
+
+function realTemplateKey(character) {
+  const key = character?.templateRow?.key || '';
+  return typeof key === 'string' ? key : String(key || '');
+}
+
+function hasRealTemplateRow(character) {
+  return Boolean(realTemplateKey(character));
 }
 
 function hasUniqueImageSet(character) {
@@ -289,12 +308,36 @@ function hasUniqueImageSet(character) {
 
 function browsableCharacters() {
   return sortBrowsableCharacters(characters().filter((character) => (
-    hasUniqueImageSet(character) && !character.imageOnly && !character.virtualImageOnly
+    hasRealTemplateRow(character) && hasUniqueImageSet(character) && !character.imageOnly && !character.virtualImageOnly
   )));
 }
 
 function appearanceGalleryCharacters() {
   return sortBrowsableCharacters(characters().filter(hasUniqueImageSet));
+}
+
+function activeImageSelectId() {
+  return state.mode === 'create' ? 'sourceImageSet' : 'editImageSet';
+}
+
+function currentImageSelectionKey() {
+  return $(activeImageSelectId())?.value || '';
+}
+
+function applyGalleryImageSelection(appearanceKey) {
+  const appearance = appearanceByKey(appearanceKey);
+  if (!appearance) return;
+  const imageSelectId = activeImageSelectId();
+  const imageSelect = $(imageSelectId);
+  if (imageSelect) imageSelect.value = appearanceKey;
+  if (state.mode === 'create') {
+    setSelectValue('sourceImageSet', appearanceKey);
+  } else {
+    setSelectValue('editImageSet', appearanceKey);
+  }
+  updateImagePreviews();
+  renderAppearanceGallery();
+  renderValidation();
 }
 
 function sortBrowsableCharacters(items) {
@@ -448,7 +491,10 @@ function appearanceSets() {
       imageAssets: item.imageAssets || [],
       uniform: item.imageOnly || item.virtual ? '' : (item.uniform || ''),
       uniformLabel: item.imageOnly || item.virtual ? '모델 없음' : (item.uniformLabel || ''),
+      isMale: item.isMale,
+      voiceoverActor: item.voiceoverActor || item.voiceover_actor || '',
       referenceSourcePath: item.referenceSourcePath || '',
+      rows: item.rows || [],
       externalImageSet: Boolean(item.externalImageSet),
       imageOnly: Boolean(item.imageOnly || item.virtual),
       virtualImageOnly: Boolean(item.imageOnly || item.virtual),
@@ -490,8 +536,11 @@ function appearanceFromCharacter(character) {
     cardImageSourcePath: character?.cardImageSourcePath || '',
     imageAssets: character?.imageAssets || [],
     uniform: character?.virtualImageOnly ? '' : (character?.uniform || ''),
+    isMale: character?.isMale ?? character?.templateRow?.is_male,
+    voiceoverActor: character?.voiceoverActor || character?.templateRow?.voiceover_actor || '',
     referenceSourcePath: character?.referenceSourcePath || '',
     cardImageSourcePath: character?.cardImageSourcePath || '',
+    rows: character?.rows || [],
     imageOnly: Boolean(character?.virtualImageOnly),
     virtualImageOnly: Boolean(character?.virtualImageOnly),
     hasImage: Boolean(character?.portraitImagePath || character?.cardImagePath),
@@ -504,14 +553,19 @@ function appearanceByKey(key) {
 }
 
 function imageAssetsFromAppearance(appearance) {
-  if (appearance?.externalImageSet) {
-    return [];
-  }
   if (appearance?.imageAssets?.length) {
-    return appearance.imageAssets.map((asset) => ({
-      path: asset.path,
-      sourcePath: asset.sourcePath || '',
-    }));
+    const seen = new Set();
+    return appearance.imageAssets
+      .map((asset) => ({
+        path: asset.path,
+        sourcePath: asset.sourcePath || '',
+      }))
+      .filter((asset) => {
+        const path = normalizeImageAssetPath(asset.path);
+        if (!path || isDuplicateCharacterFolderPath(path) || seen.has(path)) return false;
+        seen.add(path);
+        return true;
+      });
   }
   const assets = [];
   if (appearance?.portraitImagePath) {
@@ -527,6 +581,155 @@ function imageAssetsFromAppearance(appearance) {
     });
   }
   return assets;
+}
+
+function normalizeImageAssetPath(path) {
+  return String(path || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+}
+
+function isDuplicateCharacterFolderPath(path) {
+  const parts = normalizeImageAssetPath(path).split('/').filter(Boolean);
+  const index = parts.findIndex((part, i) => part === 'characters' && parts[i - 1] === 'ui');
+  return index >= 0
+    && parts[index + 1]
+    && parts[index + 2]
+    && parts[index + 1].toLowerCase() === parts[index + 2].toLowerCase();
+}
+
+function imageTokenFromAppearance(appearance) {
+  const portrait = String(appearance?.portraitPath || '').replace(/[\\/]+$/, '');
+  const card = String(appearance?.cardPath || '').replace(/[\\/]+$/, '');
+  return card || portrait.split(/[\\/]/).filter(Boolean).pop() || '';
+}
+
+function primaryArtRowFromAppearance(appearance) {
+  const rows = Array.isArray(appearance?.rows) ? appearance.rows : [];
+  return rows.find((row) => row?.has_come_of_age === true)
+    || rows.find((row) => Number(row?.age) >= 16)
+    || rows[0]
+    || {};
+}
+
+function imageArtOverridesFromAppearance(appearance) {
+  return compactObject({
+    portrait: appearance?.portraitPath,
+    card: appearance?.cardPath,
+  });
+}
+
+function modelArtOverridesFromAppearance(appearance) {
+  const row = primaryArtRowFromAppearance(appearance);
+  return compactObject({
+    uniform: row.uniform || appearance?.uniform,
+    land_animation: row.land_animation,
+    sea_uniform: row.sea_uniform,
+    sea_animation: row.sea_animation,
+    navy_uniform: row.navy_uniform,
+    navy_animation: row.navy_animation,
+    fallback_composite_display: row.fallback_composite_display,
+  });
+}
+
+function templateGenderOverridesFromAppearance(appearance, fallbackTemplate = {}) {
+  if (!appearance) return {};
+  const isMale = appearance.isMale ?? appearance.is_male;
+  const overrides = {};
+  if (isMale !== undefined && isMale !== null && isMale !== '') {
+    overrides.is_male = parseBoolean(isMale);
+  }
+  if (appearance.voiceoverActor || appearance.voiceover_actor) {
+    overrides.voiceover_actor = appearance.voiceoverActor || appearance.voiceover_actor;
+  } else if (Object.prototype.hasOwnProperty.call(overrides, 'is_male')) {
+    const subtype = String(fallbackTemplate.subtype || '');
+    const element = subtype.includes('water') ? 'water'
+      : subtype.includes('wood') ? 'wood'
+        : subtype.includes('fire') ? 'fire'
+          : subtype.includes('metal') ? 'metal'
+            : subtype.includes('earth') ? 'earth'
+              : 'metal';
+    overrides.voiceover_actor = overrides.is_male
+      ? `vo_actor_group_generic_male_${element}_general`
+      : `vo_actor_group_generic_female_${element}_general`;
+  }
+  return overrides;
+}
+
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const text = String(value || '').trim().toLowerCase();
+  return ['true', '1', 'yes', 'y'].includes(text);
+}
+
+function retinueKeyForCharacter(character) {
+  const explicit = character?.sourceRetinueKey || '';
+  if (explicit && explicit !== '-') return explicit;
+  const profile = character?.unitProfile || '';
+  return profile && profile !== '-' ? profile : '';
+}
+
+function retargetImageAssetPath(path, sourceToken, targetToken) {
+  const normalized = String(path || '').replace(/\\/g, '/');
+  if (!sourceToken || !targetToken) return normalized;
+  const parts = normalized.split('/');
+  const characterIndex = parts.findIndex((part, index) => (
+    part === 'characters' && parts[index - 1] === 'ui' && parts[index + 1]
+  ));
+  if (characterIndex >= 0) {
+    parts[characterIndex + 1] = targetToken;
+  }
+  const fileName = parts[parts.length - 1] || '';
+  const extensionIndex = fileName.lastIndexOf('.');
+  if (extensionIndex > 0 && fileName.slice(0, extensionIndex) === sourceToken) {
+    parts[parts.length - 1] = `${targetToken}${fileName.slice(extensionIndex)}`;
+  }
+  const lowerParts = parts.map((part) => part.toLowerCase());
+  const compositeIndex = lowerParts.indexOf('composites');
+  const panelIndex = compositeIndex >= 0 ? compositeIndex + 1 : -1;
+  const moodIndex = compositeIndex >= 0 ? compositeIndex + 2 : -1;
+  if (
+    panelIndex >= 0
+    && ['large_panel', 'small_panel'].includes(lowerParts[panelIndex])
+    && ['angry', 'happy', 'norm'].includes(lowerParts[moodIndex])
+  ) {
+    parts[parts.length - 1] = 'noanim.png';
+  }
+  return parts.join('/');
+}
+
+function retargetImageAssetPaths(path, sourceToken, targetToken) {
+  const primary = retargetImageAssetPath(path, sourceToken, targetToken);
+  const targets = [primary];
+  const parts = primary.split('/');
+  const lowerParts = parts.map((part) => part.toLowerCase());
+  const compositeIndex = lowerParts.indexOf('composites');
+  const panelIndex = compositeIndex >= 0 ? compositeIndex + 1 : -1;
+  const moodIndex = compositeIndex >= 0 ? compositeIndex + 2 : -1;
+  if (
+    panelIndex >= 0
+    && ['large_panel', 'small_panel'].includes(lowerParts[panelIndex])
+    && ['angry', 'happy', 'norm'].includes(lowerParts[moodIndex])
+  ) {
+    const moodFileParts = [...parts];
+    moodFileParts[moodFileParts.length - 1] = `${lowerParts[moodIndex]}.png`;
+    targets.push(moodFileParts.join('/'));
+  }
+  return [...new Set(targets)];
+}
+
+function customImageAssetsFromAppearance(appearance, targetToken) {
+  const sourceToken = imageTokenFromAppearance(appearance);
+  return imageAssetsFromAppearance(appearance).flatMap((asset) => (
+    retargetImageAssetPaths(asset.path, sourceToken, targetToken).map((targetPath) => ({
+      ...asset,
+      targetPath,
+    }))
+  ));
+}
+
+function retargetArtImageKey(value, targetToken) {
+  if (!value || !targetToken) return value;
+  return String(value).endsWith('/') ? `${targetToken}/` : targetToken;
 }
 
 function characterByAppearanceKey(key) {
@@ -710,7 +913,8 @@ function hydrateFromPackData(characterData) {
   if (!summary?.characters?.length) return;
   state.options = summary;
   state.characters = summary.characters.map((item) => normalizePackCharacter(item, summary));
-  state.selectedKey = (browsableCharacters()[0] || state.characters[0]).key;
+  const firstBrowsable = browsableCharacters()[0] || state.characters.find(hasRealTemplateRow);
+  state.selectedKey = realTemplateKey(firstBrowsable) || '';
   state.queue = [];
   state.editingQueueIndex = null;
   state.skillTreeDrafts = {};
@@ -776,6 +980,7 @@ function normalizePackCharacter(item, summary) {
     unitClass: combatStats.unitClass || '',
     unitFromReference: Boolean(combatStats.unitFromReference),
     unitReferenceSource: combatStats.unitReferenceSource || '',
+    sourceRetinueKey: combatStats.sourceRetinueKey || '',
     unitProfile: historical.retinue || romance.retinue || '-',
     weight: Number(item.weight ?? 0),
     minRound: Number(item.minSpawnRound ?? 0),
@@ -795,6 +1000,8 @@ function normalizePackCharacter(item, summary) {
     hasImage: Boolean(item.portraitImagePath || item.cardImagePath || artSet?.portraitImagePath || artSet?.cardImagePath),
     uniform: item.uniform || artSet?.uniform || '',
     uniformLabel: item.uniformLabel || artSet?.uniformLabel || '',
+    isMale: item.isMale ?? artSet?.isMale ?? item.templateRow?.is_male,
+    voiceoverActor: item.voiceoverActor || item.templateRow?.voiceover_actor || '',
     source: item.source || 'pack',
     referenceSourcePath: item.referenceSourcePath || '',
   };
@@ -887,15 +1094,30 @@ function equipmentBrief(character) {
   return `${melee} · ${missile} · ${armour}`;
 }
 
+function armourAudioTypeOptions(currentValue = '') {
+  const defaults = ['Cloth', 'Leather', 'Segmented_Light', 'Segmented_Medium', 'Segmented_Heavy'];
+  const values = new Set(defaults);
+  for (const character of characters()) {
+    if (character.armourAudioType) values.add(character.armourAudioType);
+  }
+  if (currentValue) values.add(currentValue);
+  return [...values].sort((a, b) => a.localeCompare(b));
+}
+
 function equipmentSummaryMarkup(character, prefix) {
   if (!character) return '<p class="empty">장비 정보를 확인할 수 없습니다.</p>';
-  const canPatchArmour = Boolean(character.source !== 'reference' && !character.armourFromReference && character.armourCeo && character.armourStatKey);
-  const armourWarning = character.armourStatKey?.includes('_unique')
+  const isCreate = prefix === 'source';
+  const canEditArmourStats = true;
+  const canPatchArmour = Boolean(character.armourCeo && character.armourStatKey);
+  const armourScope = character.armourStatKey?.includes('_unique') ? '고유' : '공용';
+  const armourWarning = armourScope === '고유'
     ? '고유 방어구라 영향 범위가 좁습니다.'
-    : '공용 방어구면 같은 key를 쓰는 다른 유닛에도 영향을 줄 수 있습니다.';
-  const armourNote = canPatchArmour
-    ? armourWarning
-    : '연결된 방어구 CEO를 찾지 못했습니다. 값은 입력할 수 있지만 저장 시 방어구 패치는 제외됩니다.';
+    : '공용 방어구라 같은 armour key를 쓰는 다른 캐릭터에도 영향이 갈 수 있습니다.';
+  const armourNote = isCreate
+    ? '신규 장수 생성에서는 새 unit_armour_types row를 만들고 복제 land unit의 armour에 연결합니다.'
+    : canPatchArmour
+      ? armourWarning
+      : '연결된 방어구 CEO를 찾지 못했습니다. 값은 입력할 수 있지만 저장 시 방어구 패치는 제외됩니다.';
   const rows = [
     ['근접 무기', character.weaponStatKey || '미확인'],
     ['근접 피해', character.weaponStatKey ? `${combatValue(character.weaponDamage)} / AP ${combatValue(character.weaponApDamage)}` : '미확인'],
@@ -906,17 +1128,34 @@ function equipmentSummaryMarkup(character, prefix) {
     ['Audio Type', character.armourAudioType || '미확인'],
   ];
   return `
-    <div class="equipment-note">무기/투사체 수정은 보류, 방어값은 armour_value로 저장됩니다.</div>
+    <div class="equipment-note">${isCreate ? '장비 key는 재료로만 사용합니다. 새 장수에는 새 방어구 row와 새 land unit row를 연결합니다.' : '장비 key는 바꾸지 않습니다. 기존 장수 수정에서는 해당 방어구가 참조하는 unit_armour_types row의 armour_value/audio_type을 patch합니다.'}</div>
+    <div class="group-title compact">
+      <strong>읽기 전용 장비 key</strong>
+      <span>방어구: ${escapeHtml(armourScope)}</span>
+    </div>
     ${rows.map(([label, value]) => `
       <div class="equipment-row">
         <span>${escapeHtml(label)}</span>
         <strong>${escapeHtml(value)}</strong>
       </div>
     `).join('')}
+    <div class="group-title compact">
+      <strong>수정 가능 값</strong>
+      <span>${isCreate ? 'new unit_armour_types row' : 'unit_armour_types row patch'}</span>
+    </div>
     <label class="armour-edit">
       <span>방어값</span>
-      <input id="${prefix}ArmourValue" type="number" min="0" value="${escapeHtml(character.baseDefense ?? '')}">
+      <input id="${prefix}ArmourValue" type="number" min="0" value="${escapeHtml(character.baseDefense ?? '')}" ${canEditArmourStats ? '' : 'disabled'}>
       <small>${escapeHtml(armourNote)}</small>
+    </label>
+    <label class="armour-edit">
+      <span>Audio Type</span>
+      <select id="${prefix}ArmourAudioType" ${canEditArmourStats ? '' : 'disabled'}>
+        ${armourAudioTypeOptions(character.armourAudioType).map((value) => `
+          <option value="${escapeHtml(value)}" ${value === character.armourAudioType ? 'selected' : ''}>${escapeHtml(value)}</option>
+        `).join('')}
+      </select>
+      <small>unit_armour_types.audio_type 값으로 저장됩니다.</small>
     </label>
   `;
 }
@@ -929,10 +1168,9 @@ function unitBrief(character) {
 function unitSummaryMarkup(character, prefix) {
   if (!character) return '<p class="empty">유닛 정보를 확인할 수 없습니다.</p>';
   const canCloneUnit = Boolean(character.landUnitKey)
-    && !character.unitFromReference
     && [character.unitChargeBonus, character.unitMorale, character.unitPrimaryAmmo].some((value) => value !== null);
   const unitNote = canCloneUnit
-    ? '돌격 보너스/사기/탄약은 새 land_units row로 복제 저장됩니다. 근공/근방은 현재 확인용입니다.'
+    ? '선택한 부대 프로필을 재료로 새 land_units row를 만들고 character_generation_template_game_mode_details.retinue에 연결합니다. 돌격/사기/탄약은 그 row에 저장됩니다.'
     : '연결된 land_units row를 찾지 못했습니다. 값은 입력할 수 있지만 저장 시 병종 수치 패치는 제외됩니다.';
   const rows = [
     ['land unit', character.landUnitKey || '미확인'],
@@ -942,12 +1180,20 @@ function unitSummaryMarkup(character, prefix) {
   ];
   return `
     <div class="equipment-note">${escapeHtml(unitNote)}</div>
+    <div class="group-title compact">
+      <strong>읽기 전용 부대 프로필</strong>
+      <span>근공/근방은 현재 직접 수정하지 않습니다.</span>
+    </div>
     ${rows.map(([label, value]) => `
       <div class="equipment-row">
         <span>${escapeHtml(label)}</span>
         <strong>${escapeHtml(value)}</strong>
       </div>
     `).join('')}
+    <div class="group-title compact">
+      <strong>복제 row 수정 값</strong>
+      <span>land_units clone + retinue 연결</span>
+    </div>
     <div class="unit-stat-grid">
       <label>
         <span>돌격 보너스</span>
@@ -980,8 +1226,8 @@ function renderRoster() {
   const list = $('characterList');
   list.innerHTML = '';
   const visibleCharacters = browsableCharacters();
-  if (!visibleCharacters.some((character) => character.key === state.selectedKey) && visibleCharacters.length) {
-    state.selectedKey = visibleCharacters[0].key;
+  if (!visibleCharacters.some((character) => realTemplateKey(character) === state.selectedKey) && visibleCharacters.length) {
+    state.selectedKey = realTemplateKey(visibleCharacters[0]);
   }
   const filtered = visibleCharacters.filter((character) => {
     const spawnEvent = spawnEventMeta(character.spawnEvent);
@@ -995,20 +1241,21 @@ function renderRoster() {
 
   for (const character of filtered) {
     const meta = elementMeta(character.element);
+    const templateKey = realTemplateKey(character);
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `character-card ${character.key === state.selectedKey ? 'active' : ''}`;
+    button.className = `character-card ${templateKey === state.selectedKey ? 'active' : ''}`;
     button.innerHTML = `
       ${portraitMarkup(character, 'mini-portrait')}
       <div class="card-main">
         <strong>${sourceBadgeMarkup(character)} ${escapeHtml(displayNameWithDummyMarker(character))}</strong>
         <span>${meta.name} · ${escapeHtml(character.retinue)}${character.source === 'reference' ? ' · 참조' : ''}</span>
-        <small>${escapeHtml(character.key)}</small>
+        <small>${escapeHtml(templateKey)}</small>
       </div>
       <b>${meta.label}</b>
     `;
     button.addEventListener('click', () => {
-      state.selectedKey = character.key;
+      state.selectedKey = templateKey;
       state.editingQueueIndex = null;
       renderAll();
     });
@@ -1018,11 +1265,12 @@ function renderRoster() {
 
 function renderSelected() {
   const character = selectedCharacter();
+  const templateKey = realTemplateKey(character) || character.key;
   const meta = elementMeta(character.element);
   $('portraitFrame').className = `portrait-frame element-${character.element}`;
   $('portraitFrame').innerHTML = portraitMarkup(character, 'portrait-image');
   $('selectedName').textContent = character.name;
-  $('selectedKey').textContent = character.key;
+  $('selectedKey').textContent = templateKey;
   $('elementBadge').className = `element-badge element-${character.element}`;
   $('elementBadge').textContent = `${meta.label} ${meta.name}`;
   $('currentImageSet').textContent = character.imageSetName;
@@ -1045,26 +1293,18 @@ function renderSelected() {
 }
 
 function renderAppearanceGallery() {
+  const selectedImageKey = currentImageSelectionKey();
   $('appearanceGallery').innerHTML = appearanceGalleryCharacters().map((character) => `
-    <button class="appearance-card ${character.key === selectedCharacter().key ? 'active' : ''}" data-key="${escapeHtml(character.artSet || character.key)}" type="button">
+    <button class="appearance-card ${(character.artSet || character.key) === selectedImageKey ? 'active' : ''}" data-key="${escapeHtml(character.artSet || character.key)}" type="button">
       ${portraitMarkup(character, 'mini-portrait')}
       <strong>${sourceBadgeMarkup(character)} ${escapeHtml(displayNameWithDummyMarker(character))}</strong>
       <span>이미지: ${escapeHtml(character.imageSetName)}</span>
-      <span>모델: ${escapeHtml(character.modelSetName)}</span>
     </button>
   `).join('');
 
   for (const card of document.querySelectorAll('.appearance-card')) {
     card.addEventListener('click', () => {
-      const appearance = appearanceByKey(card.dataset.key);
-      $('editImageSet').value = card.dataset.key;
-      $('sourceImageSet').value = card.dataset.key;
-      if (canUseAsModelSet(appearance)) {
-        $('editModelSet').value = card.dataset.key;
-        $('sourceModelSet').value = card.dataset.key;
-      }
-      updateImagePreviews();
-      renderValidation();
+      applyGalleryImageSelection(card.dataset.key);
     });
   }
 }
@@ -1350,12 +1590,14 @@ function renderSpawnHelp(prefix) {
 
 function setMode(mode) {
   state.mode = mode;
+  clearReferenceEditWarning();
   for (const button of document.querySelectorAll('.mode-btn')) {
     button.classList.toggle('active', button.dataset.mode === mode);
   }
   $('editPanel').classList.toggle('active', mode === 'edit');
   $('createPanel').classList.toggle('active', mode === 'create');
   refreshStageButtons();
+  renderAppearanceGallery();
   updateAllSpawnFieldLabels();
   renderValidation();
 }
@@ -1378,6 +1620,11 @@ function syncEquipmentSummary(prefix, sourceId) {
   if (armourInput) {
     armourInput.addEventListener('input', renderValidation);
     armourInput.addEventListener('change', renderValidation);
+  }
+  const audioInput = $(`${prefix}ArmourAudioType`);
+  if (audioInput) {
+    audioInput.addEventListener('input', renderValidation);
+    audioInput.addEventListener('change', renderValidation);
   }
   renderValidation();
 }
@@ -1433,7 +1680,7 @@ function attributeSummaryMarkup(character, prefix) {
 
 function armourPatchFrom(prefix, character) {
   const input = $(`${prefix}ArmourValue`);
-  if (!input || character?.source === 'reference' || character?.armourFromReference || !character?.armourCeo || !character?.armourStatKey) return null;
+  if (!input || !character?.armourCeo || !character?.armourStatKey) return null;
   const value = nullableNumber(input.value);
   if (value === null || value < 0 || value === character.baseDefense) return null;
   return {
@@ -1474,7 +1721,7 @@ function attributePatchDescription(clone) {
 }
 
 function unitStatCloneFrom(prefix, character, slug, index) {
-  if (!character?.landUnitKey || character?.unitFromReference) return null;
+  if (!character?.landUnitKey) return null;
   const fields = [
     ['ChargeBonus', 'charge_bonus', character.unitChargeBonus],
     ['Morale', 'morale', character.unitMorale],
@@ -1494,8 +1741,26 @@ function unitStatCloneFrom(prefix, character, slug, index) {
   return {
     sourceKey: character.landUnitKey,
     newKey: `hby_land_unit_${slug}_${index}`,
+    sourceRetinueKey: retinueKeyForCharacter(character),
+    newRetinueKey: `hby_land_unit_${slug}_${index}`,
     overrides,
     changes,
+  };
+}
+
+function armourAudioPatchFrom(prefix, character) {
+  const input = $(`${prefix}ArmourAudioType`);
+  if (!input || !character?.armourCeo || !character?.armourStatKey) return null;
+  const value = input.value.trim();
+  const previousValue = character.armourAudioType || '';
+  if (!value || value === previousValue) return null;
+  return {
+    equipmentKey: character.armourCeo,
+    statTable: 'armour',
+    column: 'audio_type',
+    value,
+    armourKey: character.armourStatKey,
+    previousValue,
   };
 }
 
@@ -1540,8 +1805,10 @@ function refreshStageButtons() {
 
 function stageEdit() {
   const character = selectedCharacter();
-  if (character.source === 'reference') {
-    state.serverMessages = [validationItem('warning', '참조 장수 수정 보류', '참조 pack 장수는 현재 pack 내부 row가 아니어서 기존 장수 수정 대상에서 제외됩니다. 신규 생성 재료로만 사용하세요.')];
+  clearReferenceEditWarning();
+  const targetTemplateKey = realTemplateKey(character);
+  if (!targetTemplateKey) {
+    state.serverMessages = [validationItem('error', '기존 장수 선택 오류', '선택한 항목에 실제 character_generation_templates key가 없습니다. 이미지 후보는 중앙 이미지 패널에서만 선택하세요.')];
     renderValidation();
     return;
   }
@@ -1554,21 +1821,24 @@ function stageEdit() {
   const unit = characters().find((item) => item.key === $('editUnitProfile').value);
   const spawnEvent = spawnEventMeta($('editSpawnEvent').value);
   const armourPatch = armourPatchFrom('edit', combat);
+  const armourAudioPatch = armourAudioPatchFrom('edit', combat);
   const itemNumber = queueItemNumberFor('patch_character');
-  const editSlug = slugify(`${character.key}_${itemNumber}`);
+  const editSlug = slugify(`${targetTemplateKey}_${itemNumber}`);
   const landUnitClone = unitStatCloneFrom('edit', unit, editSlug, itemNumber);
   const attributeSetClone = attributeSetCloneFrom('edit', attribute, editSlug, itemNumber);
   const editBirthYear = birthYearFromInput('editAgeRange', character.birthYear);
   const editAgeRange = ageRangePatch(character.spawnAge, editBirthYear, editSlug, itemNumber);
   const payload = {
-    targetKey: character.key,
+    targetKey: targetTemplateKey,
     displayName: $('editName').value.trim(),
     imageSetKey: imageSet?.key,
+    targetImageToken: imageTokenFromAppearance(appearanceFromCharacter(character)),
     modelSetKey: modelSet?.key,
     attributeSetSourceKey: attribute?.key,
     attributeSetClone,
     combatProfileSourceKey: combat?.key,
     armourPatch,
+    armourAudioPatch,
     landUnitClone,
     unitProfileSourceKey: unit?.key,
     subtype: $('editSubtype').value,
@@ -1591,15 +1861,17 @@ function stageEdit() {
     kind: 'patch_character',
     type: '기존 수정',
     title: `${character.name} 수정`,
-    description: `${$('editName').value} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 유지(${equipmentBrief(combat)})${armourPatch ? ` · 방어값 ${armourPatch.previousValue}→${armourPatch.value}` : ''} · 병종 ${unit?.name || '-'}${unitPatchDescription(landUnitClone)} · 등장 이벤트 ${spawnEvent.name} · 역사 ${hist?.name || '-'} · 낭만 ${romance?.name || '-'}`,
+    description: `${$('editName').value} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 유지(${equipmentBrief(combat)})${armourPatch ? ` · 방어값 ${armourPatch.previousValue}→${armourPatch.value}` : ''}${armourAudioPatch ? ` · Audio ${armourAudioPatch.previousValue || '-'}→${armourAudioPatch.value}` : ''} · 병종 ${unit?.name || '-'}${unitPatchDescription(landUnitClone)} · 등장 이벤트 ${spawnEvent.name} · 역사 ${hist?.name || '-'} · 낭만 ${romance?.name || '-'}`,
     payload,
   });
 }
 
 function stageCreate() {
+  clearReferenceEditWarning();
   const imageSet = appearanceByKey($('sourceImageSet').value);
+  const selectedBase = characters().find((item) => item.key === $('sourceBase').value);
   const appearanceBase = characterByAppearanceKey(imageSet?.key || $('sourceImageSet').value);
-  const base = appearanceBase || characters().find((item) => item.key === $('sourceBase').value);
+  const base = selectedBase || appearanceBase;
   if (!base) {
     state.serverMessages = [validationItem('error', '신규 생성 준비 실패', '새 장수를 만들 기본 템플릿을 자동 선택하지 못했습니다. pack을 다시 읽어주세요.')];
     renderValidation();
@@ -1614,6 +1886,7 @@ function stageCreate() {
   const spawn = characters().find((item) => item.key === $('sourceSpawn').value);
   const spawnEvent = spawnEventMeta($('sourceSpawnEvent').value);
   const armourPatch = armourPatchFrom('source', combat);
+  const armourAudioPatch = armourAudioPatchFrom('source', combat);
   const itemNumber = queueItemNumberFor('clone_character');
   const createSlug = slugify(`${base?.key || $('createName').value.trim() || 'new'}_${itemNumber}`);
   const landUnitClone = unitStatCloneFrom('source', unit, createSlug, itemNumber);
@@ -1637,6 +1910,7 @@ function stageCreate() {
     subtype: $('createSubtype').value,
     attributeSetClone,
     armourPatch,
+    armourAudioPatch,
     landUnitClone,
     spawn: {
       ageRange: createAgeRange?.newKey || spawnAgeSourceKey,
@@ -1653,7 +1927,7 @@ function stageCreate() {
     kind: 'clone_character',
     type: '신규 생성',
     title: `${$('createName').value || '새 장수'} 생성`,
-    description: `기본 ${base?.name || '-'} · 칭호 ${titleSource?.titleName || titleSource?.name || '-'} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 유지(${equipmentBrief(combat)})${armourPatch ? ` · 방어값 ${armourPatch.previousValue}→${armourPatch.value}` : ''} · 병종 ${unit?.name || '-'}${unitPatchDescription(landUnitClone)} · 스킬 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
+    description: `기본 ${base?.name || '-'} · 칭호 ${titleSource?.titleName || titleSource?.name || '-'} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 유지(${equipmentBrief(combat)})${armourPatch ? ` · 방어값 ${armourPatch.previousValue}→${armourPatch.value}` : ''}${armourAudioPatch ? ` · Audio ${armourAudioPatch.previousValue || '-'}→${armourAudioPatch.value}` : ''} · 병종 ${unit?.name || '-'}${unitPatchDescription(landUnitClone)} · 스킬 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
     payload,
   });
 }
@@ -1721,6 +1995,7 @@ function loadPatchQueueItem(item) {
   setSelectValue('editCombatProfile', payload.combatProfileSourceKey);
   syncEquipmentSummary('edit', 'editCombatProfile');
   if (payload.armourPatch && $('editArmourValue')) $('editArmourValue').value = payload.armourPatch.value;
+  if (payload.armourAudioPatch && $('editArmourAudioType')) $('editArmourAudioType').value = payload.armourAudioPatch.value;
   setSelectValue('editUnitProfile', payload.unitProfileSourceKey);
   syncUnitSummary('edit', 'editUnitProfile');
   applyLandUnitCloneToInputs('edit', payload.landUnitClone);
@@ -1754,6 +2029,7 @@ function loadCloneQueueItem(item) {
   setSelectValue('sourceCombatProfile', payload.sourceKeys?.combatProfile);
   syncEquipmentSummary('source', 'sourceCombatProfile');
   if (payload.armourPatch && $('sourceArmourValue')) $('sourceArmourValue').value = payload.armourPatch.value;
+  if (payload.armourAudioPatch && $('sourceArmourAudioType')) $('sourceArmourAudioType').value = payload.armourAudioPatch.value;
   setSelectValue('sourceUnitProfile', payload.sourceKeys?.unitProfile);
   syncUnitSummary('source', 'sourceUnitProfile');
   applyLandUnitCloneToInputs('source', payload.landUnitClone);
@@ -2148,17 +2424,19 @@ function detailOverrideFromSources(attribute, skill, unit, retinueOverride = nul
     overrides[mode] = compactObject({
       retinue: retinueOverride || unitDetails[mode]?.retinue || unit?.unitProfile,
       attribute_set: attributeDetails[mode]?.attributeSet || attribute?.attributeSet,
-      skill_set_override: mode === 'romance' ? (skillDetails[mode]?.skillSet || skill?.romanceSkill) : undefined,
+      skill_set_override: skillDetails[mode]?.skillSet || (mode === 'romance' ? skill?.romanceSkill : skill?.historicalSkill),
     });
   }
   return overrides;
 }
 
-function skillSetCloneFromPayload(recipe, snapshot, ownerKey, index) {
+function skillSetCloneFromPayload(recipe, snapshot, ownerKey, index, options = {}) {
   const replacements = Object.entries(snapshot?.replacements || {})
     .filter(([, skillKey]) => skillKey);
   if (!snapshot?.sourceSetKey || !replacements.length) return '';
-  const newSetKey = `hby_skillset_romance_${slugify(ownerKey)}_${index}`;
+  const newSetKey = options.keepSourceKey
+    ? snapshot.sourceSetKey
+    : `hby_skillset_romance_${slugify(ownerKey)}_${index}`;
   recipe.skillSetClones.push({
     sourceSetKey: snapshot.sourceSetKey,
     newSetKey,
@@ -2173,6 +2451,7 @@ function recipeFromQueue() {
     characterPatches: [],
     characterCloneRecipes: [],
     equipmentStatPatches: [],
+    armourTypeClones: [],
     landUnitClones: [],
     skillSetClones: [],
     attributeSetClones: [],
@@ -2188,11 +2467,16 @@ function recipeFromQueue() {
       const romance = characters().find((candidate) => candidate.key === payload.skillSources?.romance);
       const unit = characters().find((candidate) => candidate.key === payload.unitProfileSourceKey);
       const retinueOverride = payload.landUnitClone?.newKey;
+      const patchImageAssets = imageSet
+        ? customImageAssetsFromAppearance(imageSet, payload.targetImageToken || imageTokenFromAppearance(appearanceFromCharacter(characters().find((candidate) => realTemplateKey(candidate) === payload.targetKey || candidate.key === payload.targetKey))))
+        : [];
       if (payload.landUnitClone) {
         recipe.landUnitClones.push({
           sourceKey: payload.landUnitClone.sourceKey,
           newKey: payload.landUnitClone.newKey,
           overrides: payload.landUnitClone.overrides,
+          sourceRetinueKey: payload.landUnitClone.sourceRetinueKey || '',
+          newRetinueKey: payload.landUnitClone.newRetinueKey || payload.landUnitClone.newKey,
         });
       }
       if (payload.attributeSetClone) {
@@ -2209,22 +2493,26 @@ function recipeFromQueue() {
           overrides: payload.ageRangeClone.overrides,
         });
       }
-      const customRomanceSkillSet = skillSetCloneFromPayload(recipe, payload.skillTree, payload.targetKey, index + 1);
+      const customRomanceSkillSet = skillSetCloneFromPayload(recipe, payload.skillTree, payload.targetKey, index + 1, { keepSourceKey: true });
       const attributeSetOverride = payload.attributeSetClone?.newSetKey;
+      const historicalSkillSet = detailsByMode(hist).historical?.skillSet || hist?.historicalSkill;
       recipe.characterPatches.push({
         templateKey: payload.targetKey,
+        displayName: payload.displayName,
         templateOverrides: compactObject({
           weight: payload.spawn?.weight,
           spawn_age_range: payload.spawn?.ageRange,
           min_spawn_round: payload.spawn?.minRound,
           max_spawn_round: payload.spawn?.maxRound,
           subtype: payload.subtype,
-          art_set_override: imageSet?.artSet,
         }),
+        imageAssets: patchImageAssets,
+        artOverrides: modelArtOverridesFromAppearance(appearanceByKey(payload.modelSetKey)),
         detailOverrides: {
           historical: compactObject({
             retinue: retinueOverride || detailsByMode(unit).historical?.retinue || unit?.unitProfile,
             attribute_set: attributeSetOverride || detailsByMode(attribute).historical?.attributeSet || attribute?.attributeSet,
+            skill_set_override: historicalSkillSet,
           }),
           romance: compactObject({
             retinue: retinueOverride || detailsByMode(unit).romance?.retinue || unit?.unitProfile,
@@ -2241,18 +2529,28 @@ function recipeFromQueue() {
           value: payload.armourPatch.value,
         });
       }
+      if (payload.armourAudioPatch) {
+        recipe.equipmentStatPatches.push({
+          equipmentKey: payload.armourAudioPatch.equipmentKey,
+          statTable: payload.armourAudioPatch.statTable,
+          column: payload.armourAudioPatch.column,
+          value: payload.armourAudioPatch.value,
+        });
+      }
     }
 
     if (item.kind === 'clone_character') {
       const payload = item.payload;
       const appearanceBase = characterByAppearanceKey(payload.sourceKeys?.imageSet);
-      const base = appearanceBase || characters().find((candidate) => candidate.key === payload.sourceKeys?.base);
+      const selectedBase = characters().find((candidate) => candidate.key === payload.sourceKeys?.base);
+      const base = selectedBase || appearanceBase;
       const packBase = base?.source === 'reference'
         ? (packTemplateCharacters()[0] || base)
         : base;
       const baseTemplate = base?.templateRow || {};
       const baseDetails = detailsByMode(base);
       const imageSet = appearanceByKey(payload.sourceKeys?.imageSet);
+      const modelSet = appearanceByKey(payload.sourceKeys?.modelSet);
       const attribute = characters().find((candidate) => candidate.key === payload.sourceKeys?.attributeSet);
       const skill = characters().find((candidate) => candidate.key === payload.sourceKeys?.skill);
       const titleSource = resolveTitleChoice(payload.sourceKeys?.title);
@@ -2261,13 +2559,46 @@ function recipeFromQueue() {
       const spawn = characters().find((candidate) => candidate.key === payload.sourceKeys?.spawn);
       const selectedAgeRange = payload.spawn?.ageRange || spawn?.spawnAge || base?.spawnAge || baseTemplate.spawn_age_range;
       const slug = slugify(payload.newName);
-      const retinueOverride = payload.landUnitClone?.newKey;
+      const itemNumber = index + 1;
+      let effectiveLandUnitClone = payload.landUnitClone
+        ? {
+            sourceKey: payload.landUnitClone.sourceKey,
+            newKey: payload.landUnitClone.newKey,
+            overrides: { ...(payload.landUnitClone.overrides || {}) },
+          }
+        : null;
+      const armourOverrides = {};
+      const sourceArmourKey = payload.armourPatch?.armourKey || payload.armourAudioPatch?.armourKey;
+      if (payload.armourPatch) armourOverrides.armour_value = payload.armourPatch.value;
+      if (payload.armourAudioPatch) armourOverrides.audio_type = payload.armourAudioPatch.value;
+      if (sourceArmourKey && Object.keys(armourOverrides).length && unit?.landUnitKey) {
+        const newArmourKey = `hby_armour_type_${slug}_${itemNumber}`;
+        recipe.armourTypeClones.push({
+          sourceKey: sourceArmourKey,
+          newKey: newArmourKey,
+          overrides: armourOverrides,
+        });
+        effectiveLandUnitClone = effectiveLandUnitClone || {
+          sourceKey: unit.landUnitKey,
+          newKey: `hby_land_unit_${slug}_${itemNumber}`,
+          sourceRetinueKey: retinueKeyForCharacter(unit),
+          newRetinueKey: `hby_land_unit_${slug}_${itemNumber}`,
+          overrides: {},
+        };
+        effectiveLandUnitClone.overrides = {
+          ...effectiveLandUnitClone.overrides,
+          armour: newArmourKey,
+        };
+      }
+      const retinueOverride = effectiveLandUnitClone?.newKey;
       const attributeSetOverride = payload.attributeSetClone?.newSetKey;
-      if (payload.landUnitClone) {
+      if (effectiveLandUnitClone) {
         recipe.landUnitClones.push({
-          sourceKey: payload.landUnitClone.sourceKey,
-          newKey: payload.landUnitClone.newKey,
-          overrides: payload.landUnitClone.overrides,
+          sourceKey: effectiveLandUnitClone.sourceKey,
+          newKey: effectiveLandUnitClone.newKey,
+          overrides: effectiveLandUnitClone.overrides,
+          sourceRetinueKey: effectiveLandUnitClone.sourceRetinueKey || '',
+          newRetinueKey: effectiveLandUnitClone.newRetinueKey || effectiveLandUnitClone.newKey,
         });
       }
       if (payload.attributeSetClone) {
@@ -2285,7 +2616,6 @@ function recipeFromQueue() {
         });
       }
       const titleInitialCeo = titleSource?.titleInitialCeoKey || titleSource?.details?.find((detail) => detail.initialCeos)?.initialCeos;
-      const newInitialCeoKey = titleInitialCeo ? `hby_initial_ceo_${slug}_${index + 1}` : null;
       const detailOverrides = detailOverrideFromSources(attribute, skill, unit, retinueOverride);
       if (attributeSetOverride) {
         detailOverrides.historical = compactObject({
@@ -2298,6 +2628,15 @@ function recipeFromQueue() {
         });
       }
       const customRomanceSkillSet = skillSetCloneFromPayload(recipe, payload.skillTree, payload.newName || slug, index + 1);
+      const customTemplateKey = `hby_template_${slug}_${index + 1}`;
+      const customArtSetId = `hby_art_set_${slug}_${index + 1}`;
+      const customImageAssets = imageSet
+        ? imageAssetsFromAppearance(imageSet)
+        : [];
+      const templateGenderOverrides = templateGenderOverridesFromAppearance(modelSet, {
+        ...baseTemplate,
+        subtype: payload.subtype,
+      });
       if (customRomanceSkillSet) {
         detailOverrides.romance = compactObject({
           ...detailOverrides.romance,
@@ -2307,22 +2646,26 @@ function recipeFromQueue() {
       for (const mode of ['historical', 'romance']) {
         detailOverrides[mode] = compactObject({
           ...detailOverrides[mode],
-          initial_ceos: newInitialCeoKey || baseDetails[mode]?.initialCeos,
+          initial_ceos: titleInitialCeo || baseDetails[mode]?.initialCeos,
         });
       }
       recipe.characterCloneRecipes.push({
-        newTemplateKey: `hby_template_${slug}_${index + 1}`,
+        newTemplateKey: customTemplateKey,
         sourceTemplateKey: packBase?.key,
         detailSourceTemplateKey: detailSource?.key,
-        newArtSetId: null,
-        artSetSourceId: null,
+        newArtSetId: customArtSetId,
+        artSetSourceId: modelSet?.artSet || imageSet?.artSet || packBase?.artSet,
         newAgeRangeKey: null,
         ageRangeSourceKey: null,
-        newInitialCeoKey,
-        initialCeoSourceKey: titleInitialCeo || null,
+        newInitialCeoKey: null,
+        initialCeoSourceKey: null,
         spawnEvent: payload.spawn?.event,
         displayName: payload.newName,
-        imageAssets: imageAssetsFromAppearance(imageSet),
+        imageAssets: customImageAssets,
+        artOverrides: compactObject({
+          ...imageArtOverridesFromAppearance(imageSet),
+          ...modelArtOverridesFromAppearance(modelSet),
+        }),
         templateOverrides: compactObject({
           forename: baseTemplate.forename,
           family_name: baseTemplate.family_name,
@@ -2330,6 +2673,7 @@ function recipeFromQueue() {
           other_name: baseTemplate.other_name,
           is_male: baseTemplate.is_male,
           voiceover_actor: baseTemplate.voiceover_actor,
+          ...templateGenderOverrides,
           can_be_born: baseTemplate.can_be_born,
           ai_skill_generation: baseTemplate.ai_skill_generation,
           min_rounds_to_stay_in_a_pool: baseTemplate.min_rounds_to_stay_in_a_pool,
@@ -2340,18 +2684,10 @@ function recipeFromQueue() {
           min_spawn_round: payload.spawn?.minRound ?? spawn?.minRound,
           max_spawn_round: payload.spawn?.maxRound ?? spawn?.maxRound,
           subtype: payload.subtype,
-          art_set_override: imageSet?.artSet || packBase?.artSet,
+          art_set_override: customArtSetId,
         }),
         detailOverrides,
       });
-      if (payload.armourPatch) {
-        recipe.equipmentStatPatches.push({
-          equipmentKey: payload.armourPatch.equipmentKey,
-          statTable: payload.armourPatch.statTable,
-          column: payload.armourPatch.column,
-          value: payload.armourPatch.value,
-        });
-      }
     }
   });
 
@@ -2368,71 +2704,18 @@ function validationItem(level, title, detail) {
   return { level, title, detail };
 }
 
+function clearReferenceEditWarning() {
+  state.serverMessages = state.serverMessages.filter((message) => message.title !== '참조 장수 수정 보류');
+}
+
 function renderValidation() {
   const items = [];
-  const isCreate = state.mode === 'create';
-  const name = isCreate ? $('createName').value.trim() : $('editName').value.trim();
-  const minRound = Number((isCreate ? $('createMinRound') : $('editMinRound')).value);
-  const maxRound = Number((isCreate ? $('createMaxRound') : $('editMaxRound')).value);
-  const eventKey = isCreate ? $('sourceSpawnEvent').value : $('editSpawnEvent').value;
-  const armourInput = isCreate ? $('sourceArmourValue') : $('editArmourValue');
-  const armourValue = armourInput ? nullableNumber(armourInput.value) : null;
-  const combatKey = isCreate ? $('sourceCombatProfile')?.value : $('editCombatProfile')?.value;
-  const combatCharacter = characters().find((item) => item.key === combatKey);
-  const canPatchArmour = Boolean(
-    combatCharacter
-    && combatCharacter.source !== 'reference'
-    && !combatCharacter.armourFromReference
-    && combatCharacter.armourCeo
-    && combatCharacter.armourStatKey
-  );
-  const unitPrefix = isCreate ? 'source' : 'edit';
-  const unitKey = isCreate ? $('sourceUnitProfile')?.value : $('editUnitProfile')?.value;
-  const unitCharacter = characters().find((item) => item.key === unitKey);
-  const canCloneUnit = Boolean(unitCharacter?.landUnitKey && !unitCharacter?.unitFromReference);
-  const unitInputs = ['ChargeBonus', 'Morale', 'PrimaryAmmo']
-    .map((suffix) => $(`${unitPrefix}${suffix}`))
-    .filter(Boolean);
-  const attributeInputs = ATTRIBUTE_FIELDS
-    .map(([suffix]) => $(`${unitPrefix}Attr${suffix}`))
-    .filter(Boolean);
-
-  if (!name) {
-    items.push(validationItem('error', '이름 필요', '저장 전에 표시 이름을 입력해야 합니다.'));
-  }
-  if (isCreate && characters().some((character) => character.name === name)) {
-    items.push(validationItem('warning', '이름 중복 가능성', '기존 장수와 같은 표시 이름입니다. loc 충돌 검증이 필요합니다.'));
-  }
-  if (armourInput && canPatchArmour && (armourValue === null || armourValue < 0)) {
-    items.push(validationItem('error', '방어값 확인', '방어값은 0 이상의 숫자여야 합니다.'));
-  }
-  if (canCloneUnit && unitInputs.some((input) => nullableNumber(input.value) === null || nullableNumber(input.value) < 0)) {
-    items.push(validationItem('error', '유닛 수치 확인', '돌격 보너스, 사기, 탄약은 0 이상의 숫자여야 합니다.'));
-  }
-  if (attributeInputs.some((input) => nullableNumber(input.value) === null || nullableNumber(input.value) < 0)) {
-    items.push(validationItem('error', '오행 스탯 확인', '전문성, 결의, 책략, 본능, 권위는 0 이상의 숫자여야 합니다.'));
-  }
-  if (minRound > maxRound) {
-    items.push(validationItem('error', '등장 라운드 확인', '최소 라운드가 최대 라운드보다 클 수 없습니다.'));
-  }
-  if (eventKey === 'delayed_join' && (!Number.isFinite(minRound) || minRound < 1)) {
-    items.push(validationItem('error', '합류 턴 확인', '몇 턴 뒤 합류는 플레이어 합류 턴을 1 이상으로 입력해야 합니다.'));
-  }
-  if (!state.queue.length) {
-    items.push(validationItem('info', '작업 없음', '저장할 수정 또는 신규 생성 작업을 먼저 추가하세요.'));
-  }
-
-  for (const message of state.serverMessages) {
+  for (const message of state.serverMessages.slice(-1)) {
     const level = message.level === 'error' ? 'error' : message.level === 'warning' ? 'warning' : 'info';
     items.push(validationItem(level, message.title || message.code || 'server_message', message.detail || message.message || String(message)));
   }
 
-  if (!items.length) {
-    items.push(validationItem('ok', '저장 가능', '현재 화면 기준으로 막히는 항목은 없습니다.'));
-  }
-
-  const blocking = items.filter((item) => item.level === 'error').length;
-  $('validationCount').textContent = blocking ? `${blocking}개 막힘` : `${items.length}개`;
+  $('validationCount').textContent = items.length ? '1개' : '0개';
   $('validationList').innerHTML = items.map((item) => `
     <article class="validation-item ${item.level}">
       <b>${escapeHtml(item.title)}</b>
@@ -2444,11 +2727,12 @@ function renderValidation() {
 function previewRecipe() {
   const actualRecipe = recipeFromQueue();
   state.lastRecipe = actualRecipe;
+  const saveMode = $('saveModeSelect').value;
   const recipe = {
     ...actualRecipe,
     game: 'total_war_three_kingdoms',
     inputPack: $('inputPackPath').value,
-    outputMode: $('saveModeSelect').value,
+    outputMode: saveMode,
     note: 'UI 프로토타입용 미리보기입니다. 실제 pack 연동은 제외된 상태입니다.',
     operations: state.queue.map((item) => ({
       kind: item.kind,
@@ -2467,9 +2751,19 @@ function referencePackPaths() {
     .filter(Boolean);
 }
 
+function materialBuildOptions(saveMode = $('saveModeSelect').value) {
+  const enabled = saveMode === INTERNAL_MATERIAL_BUILD.enabledForSaveMode;
+  return {
+    enabled,
+    materialPath: INTERNAL_MATERIAL_BUILD.materialPath,
+    coreAssetSourceId: INTERNAL_MATERIAL_BUILD.coreAssetSourceId,
+  };
+}
+
 function serverPayload() {
   const saveMode = $('saveModeSelect').value;
   const inPlace = saveMode === 'in_place';
+  const materialBuild = materialBuildOptions(saveMode);
   return {
     adapter: 'rpfm',
     inputPath: $('inputPackPath').value,
@@ -2477,6 +2771,10 @@ function serverPayload() {
     referencePackPaths: referencePackPaths(),
     inPlace,
     delta: saveMode === 'patch_pack',
+    useInternalMaterials: materialBuild.enabled,
+    materialBuildMode: materialBuild.enabled ? 'internal_materials_v015' : 'pack_reference',
+    materialPath: materialBuild.enabled ? materialBuild.materialPath : '',
+    coreAssetSourceId: materialBuild.enabled ? materialBuild.coreAssetSourceId : '',
     recipe: recipeFromQueue(),
   };
 }
@@ -2559,12 +2857,10 @@ async function buildServerPack() {
   state.serverMessages = [validationItem('info', '저장 중', saveTarget)];
   renderValidation();
   try {
-    const data = await postJson('/api/build', serverPayload());
-    state.serverMessages = data.messages.length
-      ? data.messages.map((message) => ({ level: message.level || 'info', code: message.code, message: message.message }))
-      : [validationItem('ok', '저장 완료', 'pack 저장이 완료되었습니다.')];
+    await postJson('/api/build', serverPayload());
+    state.serverMessages = [validationItem('ok', '저장 완료', 'pack 생성이 완료되었습니다.')];
   } catch (error) {
-    state.serverMessages = [validationItem('error', '저장 실패', error.message)];
+    state.serverMessages = [validationItem('error', '저장 실패', `pack 생성에 실패했습니다: ${error.message}`)];
   }
   renderValidation();
 }

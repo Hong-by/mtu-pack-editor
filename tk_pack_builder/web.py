@@ -9,6 +9,7 @@ import socket
 import subprocess
 import time
 import hashlib
+import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +20,8 @@ from .adapters import adapter_for
 from .analyzer import analyze_pack
 from .builder import build_pack
 from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_name
+from . import delta_builder as delta_builder_module
+from .internal_materials import MaterialPackSession
 from .korean_names import korean_character_name
 from .pack_cache import PackCache
 from .recipe import recipe_from_dict
@@ -77,6 +80,14 @@ def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
     server.serve_forever()
 
 
+def _log_api_build_error(error: BaseException) -> None:
+    log_path = ROOT / "work" / "api-build-error.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] /api/build failed\n")
+        handle.write("".join(traceback.format_exception(type(error), error, error.__traceback__)))
+
+
 class WebHandler(BaseHTTPRequestHandler):
     server_version = "TKPackBuilderWeb/0.1"
 
@@ -117,8 +128,12 @@ class WebHandler(BaseHTTPRequestHandler):
                 return
             self.send_error(HTTPStatus.NOT_FOUND)
         except ValueError as error:
+            if self.path == "/api/build":
+                _log_api_build_error(error)
             self._send_json({"ok": False, "error": str(error)}, HTTPStatus.BAD_REQUEST)
         except Exception as error:
+            if self.path == "/api/build":
+                _log_api_build_error(error)
             self._send_json({"ok": False, "error": str(error)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -358,6 +373,15 @@ def _write_reference_snapshot(analysis: dict[str, Any], characters: dict[str, An
 
 
 def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("useInternalMaterials"):
+        material_path = _resolve_user_path(payload.get("materialPath") or "")
+        session = MaterialPackSession.open(material_path)
+        try:
+            recipe = recipe_from_dict(payload.get("recipe", {}))
+            messages = validate(session, recipe, payload.get("outputPath"))
+            return {"ok": not has_errors(messages), "messages": messages_to_dicts(messages)}
+        finally:
+            _close_session(session)
     session = _open_session(payload)
     try:
         recipe = recipe_from_dict(payload.get("recipe", {}))
@@ -370,13 +394,43 @@ def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("useInternalMaterials"):
+        if not payload.get("delta"):
+            raise ValueError("Internal materials build is only available for patch pack output.")
+        recipe = recipe_from_dict(payload.get("recipe", {}))
+        output_path = _resolve_user_path(payload["outputPath"]) if payload.get("outputPath") else None
+        if output_path is None:
+            raise ValueError("Patch pack output path is required.")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        material_path = _resolve_user_path(payload.get("materialPath") or "")
+        source_session = MaterialPackSession.open(material_path)
+        writer_session = _open_session(payload)
+        previous_core = delta_builder_module.CORE_ASSET_SOURCE_ID
+        if payload.get("coreAssetSourceId"):
+            delta_builder_module.CORE_ASSET_SOURCE_ID = str(payload["coreAssetSourceId"])
+        try:
+            delta_builder_module.build_delta_pack_from_materials(
+                source_session,
+                writer_session,
+                recipe,
+                output_path,
+                _reference_pack_paths(payload),
+            )
+        finally:
+            delta_builder_module.CORE_ASSET_SOURCE_ID = previous_core
+            _close_session(writer_session)
+            _close_session(source_session)
+        return {
+            "ok": True,
+            "messages": [{"level": "success", "code": "pack_written", "message": "팩 생성 완료"}],
+        }
     session = _open_session(payload)
     try:
         recipe = recipe_from_dict(payload.get("recipe", {}))
         output_path = _resolve_user_path(payload["outputPath"]) if payload.get("outputPath") else None
         if output_path is not None:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-        messages = build_pack(
+        build_pack(
             session,
             recipe,
             output_path,
@@ -385,8 +439,8 @@ def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
             reference_paths=_reference_pack_paths(payload),
         )
         return {
-            "ok": not any(message["level"] == "error" for message in messages),
-            "messages": messages,
+            "ok": True,
+            "messages": [{"level": "success", "code": "pack_written", "message": "팩 생성 완료"}],
         }
     finally:
         _close_session(session)
@@ -507,6 +561,7 @@ def summarize_character_tables(
                 "card": primary_art.get("card"),
                 "uniform": primary_art.get("uniform"),
                 "uniformLabel": _friendly_model_set_label(primary_art.get("uniform"), art_set_label),
+                "isMale": row.get("is_male"),
                 "referenceSourcePath": reference_source,
                 "externalImageSet": external_image_set,
                 "portraitImagePath": portrait_image_path,
@@ -546,6 +601,7 @@ def summarize_character_tables(
                 "card": primary_art.get("card"),
                 "uniform": primary_art.get("uniform"),
                 "uniformLabel": _friendly_model_set_label(primary_art.get("uniform"), art_set_label),
+                "isMale": next((row.get("is_male") for row in tables["campaign_character_art_sets"] if row.get("art_set_id") == art_set_id), None),
                 "referenceSourcePath": reference_source,
                 "virtual": True,
                 "externalImageSet": external_image_set,
@@ -624,10 +680,11 @@ def summarize_character_tables(
                 "ageRange": template.get("spawn_age_range"),
                 "minSpawnRound": template.get("min_spawn_round"),
                 "maxSpawnRound": template.get("max_spawn_round"),
-                "voiceoverActor": template.get("voiceover_actor"),
                 "portrait": primary_art.get("portrait"),
                 "card": primary_art.get("card"),
                 "uniform": primary_art.get("uniform"),
+                "isMale": template.get("is_male"),
+                "voiceoverActor": template.get("voiceover_actor"),
                 "portraitImagePath": art_set_summary.get("portraitImagePath"),
                 "portraitImageSourcePath": art_set_summary.get("portraitImageSourcePath"),
                 "cardImagePath": art_set_summary.get("cardImagePath"),
@@ -2087,13 +2144,15 @@ def _unit_stats_for_details(
         for detail in details:
             if detail.get("gameMode") != game_mode:
                 continue
-            row = land_units.get(str(detail.get("retinue") or ""))
+            retinue_key = str(detail.get("retinue") or "")
+            row = land_units.get(retinue_key)
             if row:
-                return _unit_stats_from_row(row)
+                return _unit_stats_from_row(row, retinue_key)
     for detail in details:
-        row = land_units.get(str(detail.get("retinue") or ""))
+        retinue_key = str(detail.get("retinue") or "")
+        row = land_units.get(retinue_key)
         if row:
-            return _unit_stats_from_row(row)
+            return _unit_stats_from_row(row, retinue_key)
     name_token = _character_token_from_template(template_key)
     row = _best_land_unit(name_token, land_units)
     if row:
@@ -2101,9 +2160,10 @@ def _unit_stats_for_details(
     return {}
 
 
-def _unit_stats_from_row(row: dict[str, Any]) -> dict[str, Any]:
+def _unit_stats_from_row(row: dict[str, Any], source_retinue_key: str = "") -> dict[str, Any]:
     return {
         "landUnitKey": row.get("key"),
+        "sourceRetinueKey": source_retinue_key,
         "unitMeleeAttack": _number_or_none(row.get("melee_attack")),
         "unitMeleeDefence": _number_or_none(row.get("melee_defence")),
         "unitChargeBonus": _number_or_none(row.get("charge_bonus")),
@@ -2657,6 +2717,8 @@ def _character_image_assets(
             lower_path = normalized_path.lower()
             if normalized_path in seen:
                 continue
+            if _is_duplicate_character_folder_path(normalized_path):
+                continue
             if not lower_path.startswith(prefix):
                 continue
             if not lower_path.endswith((".png", ".jpg", ".jpeg", ".dds")):
@@ -2667,6 +2729,21 @@ def _character_image_assets(
             })
             seen.add(normalized_path)
     return sorted(assets, key=lambda item: item["path"])
+
+
+def _is_duplicate_character_folder_path(path: str) -> bool:
+    parts = [part for part in path.replace("\\", "/").strip("/").split("/") if part]
+    try:
+        index = next(
+            i for i, part in enumerate(parts)
+            if part == "characters" and i > 0 and parts[i - 1] == "ui"
+        )
+    except StopIteration:
+        return False
+    return (
+        len(parts) > index + 2
+        and parts[index + 1].lower() == parts[index + 2].lower()
+    )
 
 
 def _composite_asset_prefix_from_path(path: str) -> str | None:
@@ -2835,12 +2912,19 @@ def _ensure_rpfm_server() -> None:
     global RPFM_PROCESS, RPFM_LOG_HANDLE
     if _port_open("127.0.0.1", 45127):
         return
+    if os.environ.get("MTU_RPFM_EXTERNAL_ONLY") == "1":
+        raise ValueError("RPFM server is not running on 127.0.0.1:45127.")
     if RPFM_PROCESS is not None and RPFM_PROCESS.poll() is None:
         _wait_for_port("127.0.0.1", 45127)
         return
     rpfm_server = resolve_rpfm_server(ROOT, DEFAULT_RPFM_SERVER)
     if not rpfm_server.is_file():
         raise ValueError(f"RPFM server binary not found: {rpfm_server}")
+    _stop_stale_rpfm_processes(rpfm_server.name)
+    redirect_root = ROOT / "work" / "rpfm-runtime-config"
+    redirect_root.mkdir(parents=True, exist_ok=True)
+    redirect_path = redirect_root / f"config-{int(time.time() * 1000)}"
+    (rpfm_server.parent / "config_folder.txt").write_text(str(redirect_path), encoding="utf-8")
     log_path = ROOT / "work" / "rpfm-server.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     if RPFM_LOG_HANDLE is not None and not RPFM_LOG_HANDLE.closed:
@@ -2856,6 +2940,18 @@ def _ensure_rpfm_server() -> None:
         creationflags=creationflags,
     )
     _wait_for_port("127.0.0.1", 45127)
+
+
+def _stop_stale_rpfm_processes(process_name: str) -> None:
+    if os.name != "nt":
+        return
+    subprocess.run(
+        ["taskkill", "/F", "/IM", process_name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    time.sleep(0.5)
 
 
 def _rotate_rpfm_config_dir() -> None:

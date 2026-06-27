@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import re
+import zlib
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -11,12 +13,21 @@ class StatPatch:
     equipment_key: str
     stat_table: str
     column: str
-    value: int | float
+    value: Any
     game_mode: str | None = None
 
 
 @dataclass(frozen=True)
 class LandUnitClone:
+    source_key: str
+    new_key: str
+    overrides: dict[str, Any]
+    source_retinue_key: str | None = None
+    new_retinue_key: str | None = None
+
+
+@dataclass(frozen=True)
+class ArmourTypeClone:
     source_key: str
     new_key: str
     overrides: dict[str, Any]
@@ -69,19 +80,23 @@ class CharacterPatch:
     template_key: str
     template_overrides: dict[str, Any]
     detail_overrides: dict[str, dict[str, Any]]
+    display_name: str | None = None
+    image_assets: list[dict[str, str]] | None = None
+    art_overrides: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
 class Recipe:
     mod_name: str
-    equipment_stat_patches: list[StatPatch]
-    land_unit_clones: list[LandUnitClone]
-    skill_set_clones: list[SkillSetClone]
-    attribute_set_clones: list[AttributeSetClone]
-    age_range_clones: list[AgeRangeClone]
-    character_clones: list[CharacterClone]
-    character_patches: list[CharacterPatch]
-    raw: dict[str, Any]
+    equipment_stat_patches: list[StatPatch] = field(default_factory=list)
+    armour_type_clones: list[ArmourTypeClone] = field(default_factory=list)
+    land_unit_clones: list[LandUnitClone] = field(default_factory=list)
+    skill_set_clones: list[SkillSetClone] = field(default_factory=list)
+    attribute_set_clones: list[AttributeSetClone] = field(default_factory=list)
+    age_range_clones: list[AgeRangeClone] = field(default_factory=list)
+    character_clones: list[CharacterClone] = field(default_factory=list)
+    character_patches: list[CharacterPatch] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 def load_recipe(path: Path) -> Recipe:
@@ -90,7 +105,8 @@ def load_recipe(path: Path) -> Recipe:
 
 
 def recipe_from_dict(data: dict[str, Any]) -> Recipe:
-    patches = [
+    data = _normalize_age_range_clones(data)
+    patches = _coalesce_stat_patches([
         StatPatch(
             equipment_key=item["equipmentKey"],
             stat_table=item["statTable"],
@@ -99,14 +115,24 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             game_mode=item.get("gameMode"),
         )
         for item in data.get("equipmentStatPatches", [])
-    ]
+    ])
     land_unit_clones = [
         LandUnitClone(
             source_key=item["sourceKey"],
             new_key=item["newKey"],
             overrides=item.get("overrides", {}),
+            source_retinue_key=item.get("sourceRetinueKey"),
+            new_retinue_key=item.get("newRetinueKey"),
         )
         for item in data.get("landUnitClones", [])
+    ]
+    armour_type_clones = [
+        ArmourTypeClone(
+            source_key=item["sourceKey"],
+            new_key=item["newKey"],
+            overrides=item.get("overrides", {}),
+        )
+        for item in data.get("armourTypeClones", [])
     ]
     skill_set_clones = [
         SkillSetClone(
@@ -167,12 +193,16 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             template_key=item["templateKey"],
             template_overrides=item.get("templateOverrides", {}),
             detail_overrides=item.get("detailOverrides", {}),
+            display_name=item.get("displayName"),
+            image_assets=item.get("imageAssets") or [],
+            art_overrides=item.get("artOverrides") or {},
         )
         for item in data.get("characterPatches", [])
     ]
     return Recipe(
         mod_name=data.get("modName", "unnamed_mod"),
         equipment_stat_patches=patches,
+        armour_type_clones=armour_type_clones,
         land_unit_clones=land_unit_clones,
         skill_set_clones=skill_set_clones,
         attribute_set_clones=attribute_set_clones,
@@ -181,3 +211,68 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
         character_patches=character_patches,
         raw=data,
     )
+
+
+def _coalesce_stat_patches(patches: list[StatPatch]) -> list[StatPatch]:
+    merged: dict[tuple[str, str, str, str | None], StatPatch] = {}
+    order: list[tuple[str, str, str, str | None]] = []
+    for patch in patches:
+        key = (
+            _canonical_equipment_key(patch.equipment_key),
+            patch.stat_table,
+            patch.column,
+            patch.game_mode,
+        )
+        if key not in merged:
+            order.append(key)
+        merged[key] = patch
+    return [merged[key] for key in order]
+
+
+def _canonical_equipment_key(value: str) -> str:
+    return str(value).replace("_ancilliary_", "_ancillary_")
+
+
+def _normalize_age_range_clones(data: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(data)
+    remaps: dict[str, str] = {}
+    age_items: list[dict[str, Any]] = []
+    for item in data.get("ageRangeClones", []):
+        age_item = dict(item)
+        source_key = str(age_item.get("sourceKey") or "")
+        new_key = str(age_item.get("newKey") or "")
+        overrides = age_item.get("overrides") or {}
+        if source_key and new_key == source_key and overrides:
+            new_key = _derived_age_range_key(source_key, overrides)
+            age_item["newKey"] = new_key
+            remaps[source_key] = new_key
+        age_items.append(age_item)
+    normalized["ageRangeClones"] = age_items
+    if not remaps:
+        return normalized
+
+    def remap_template_overrides(item: dict[str, Any]) -> dict[str, Any]:
+        copied = dict(item)
+        overrides = dict(copied.get("templateOverrides") or {})
+        age_key = str(overrides.get("spawn_age_range") or "")
+        if age_key in remaps:
+            overrides["spawn_age_range"] = remaps[age_key]
+            copied["templateOverrides"] = overrides
+        return copied
+
+    normalized["characterCloneRecipes"] = [
+        remap_template_overrides(item)
+        for item in data.get("characterCloneRecipes", [])
+    ]
+    normalized["characterPatches"] = [
+        remap_template_overrides(item)
+        for item in data.get("characterPatches", [])
+    ]
+    return normalized
+
+
+def _derived_age_range_key(source_key: str, overrides: dict[str, Any]) -> str:
+    seed = json.dumps([source_key, overrides], sort_keys=True, ensure_ascii=True).encode("utf-8")
+    suffix = zlib.crc32(seed) & 0xffffffff
+    slug = re.sub(r"[^a-zA-Z0-9_]+", "_", source_key).strip("_").lower()
+    return f"hby_age_{slug}_{suffix:08x}"[:120]

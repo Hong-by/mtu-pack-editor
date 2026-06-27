@@ -10,10 +10,12 @@ TABLE_ALIASES = {
     "equipment_variants_weapons": [
         "ceos_to_equipment_variants_weapons",
         "db/ceos_to_equipment_variants_tables/_mtu_characters_ceo_weapons",
+        "db/ceos_to_equipment_variants_tables/data__",
     ],
     "equipment_variants_armours": [
         "ceos_to_equipment_variants_armours",
         "db/ceos_to_equipment_variants_tables/_mtu_characters_ceo_armours",
+        "db/ceos_to_equipment_variants_tables/data__",
     ],
     "melee_weapons": [
         "melee_weapons",
@@ -34,6 +36,12 @@ TABLE_ALIASES = {
     "land_units": [
         "land_units",
         "db/land_units_tables/_mtu_characters_custom_battles_land_units",
+        "db/land_units_tables/data__",
+    ],
+    "main_units": [
+        "main_units",
+        "db/main_units_tables/_mtu_characters_custom_battles_main_units",
+        "db/main_units_tables/data__",
     ],
 }
 
@@ -78,6 +86,19 @@ NUMERIC_COLUMNS = {
     },
 }
 
+STRING_COLUMNS = {
+    "armour": {
+        "audio_type",
+    },
+}
+
+ALLOWED_COLUMNS = {
+    stat_table: set(columns)
+    for stat_table, columns in NUMERIC_COLUMNS.items()
+}
+for stat_table, columns in STRING_COLUMNS.items():
+    ALLOWED_COLUMNS.setdefault(stat_table, set()).update(columns)
+
 
 @dataclass(frozen=True)
 class StatTarget:
@@ -85,7 +106,7 @@ class StatTarget:
     table_name: str
     row_key: str
     column: str
-    value: int | float
+    value: Any
 
 
 def resolve_table_name(session: PackSession, alias: str) -> str:
@@ -96,62 +117,94 @@ def resolve_table_name(session: PackSession, alias: str) -> str:
     raise ValueError(f"Required table is missing: {alias}")
 
 
+def _matching_table_names(session: PackSession, alias: str) -> list[str]:
+    table_list = session.list_tables()
+    tables = set(table_list)
+    matches: list[str] = []
+    for candidate in TABLE_ALIASES[alias]:
+        if candidate in tables and candidate not in matches:
+            matches.append(candidate)
+    folder = f"/{alias}_tables/"
+    for path in table_list:
+        if folder in path and path not in matches:
+            matches.append(path)
+    if not matches:
+        raise ValueError(f"Required table is missing: {alias}")
+    return matches
+
+
+def _read_candidate_rows(session: PackSession, alias: str) -> list[tuple[str, dict[str, Any]]]:
+    rows: list[tuple[str, dict[str, Any]]] = []
+    for table_name in _matching_table_names(session, alias):
+        try:
+            for row in session.read_table(table_name):
+                rows.append((table_name, row))
+        except Exception:
+            continue
+    if not rows:
+        raise ValueError(f"Required table is missing: {alias}")
+    return rows
+
+
+def _rows_only(source: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+    return [row for _, row in source]
+
+
+def _require_row_with_table(
+    rows: list[tuple[str, dict[str, Any]]],
+    row_key: str,
+    column: str,
+    numeric: bool = True,
+) -> tuple[str, dict[str, Any]]:
+    for table_name, row in rows:
+        if row.get("key") == row_key:
+            if column not in row:
+                raise ValueError(f"Column is missing on stat row: {row_key}/{column}")
+            if numeric and not isinstance(row[column], (int, float)):
+                raise ValueError(f"Column is not numeric on stat row: {row_key}/{column}")
+            return table_name, row
+    raise ValueError(f"Stat row is missing: {row_key}")
+
+
 def resolve_stat_target(
     session: PackSession,
     equipment_key: str,
     stat_table: str,
     column: str,
-    value: int | float,
+    value: Any,
     game_mode: str | None,
 ) -> StatTarget:
-    if stat_table not in NUMERIC_COLUMNS:
+    if stat_table not in ALLOWED_COLUMNS:
         raise ValueError(f"Unsupported statTable: {stat_table}")
-    if column not in NUMERIC_COLUMNS[stat_table]:
+    if column not in ALLOWED_COLUMNS[stat_table]:
         raise ValueError(f"Column is not allowed for {stat_table}: {column}")
+    numeric = column in NUMERIC_COLUMNS.get(stat_table, set())
 
     if stat_table == "melee_weapon":
-        variants_table = resolve_table_name(session, "equipment_variants_weapons")
-        variants = session.read_table(variants_table)
+        variants = _rows_only(_read_candidate_rows(session, "equipment_variants_weapons"))
         variant = _find_variant(variants, equipment_key, game_mode, "primary_melee_weapon")
         row_key = variant["primary_melee_weapon"]
-        target_table = resolve_table_name(session, "melee_weapons")
-        _require_row(session.read_table(target_table), row_key, column)
+        target_table, _ = _require_row_with_table(_read_candidate_rows(session, "melee_weapons"), row_key, column)
         return StatTarget(stat_table, target_table, row_key, column, value)
 
     if stat_table == "armour":
-        variants_table = resolve_table_name(session, "equipment_variants_armours")
-        variants = session.read_table(variants_table)
-        try:
-            variant = _find_variant(variants, equipment_key, game_mode, "armour")
-        except ValueError:
-            if "_ancillary_" not in equipment_key:
-                raise
-            variant = _find_variant(
-                variants,
-                equipment_key.replace("_ancillary_", "_ancilliary_"),
-                game_mode,
-                "armour",
-            )
+        variants = _rows_only(_read_candidate_rows(session, "equipment_variants_armours"))
+        variant = _find_variant_any(variants, _equipment_key_spellings(equipment_key), game_mode, "armour")
         row_key = variant["armour"]
-        target_table = resolve_table_name(session, "unit_armour_types")
-        _require_row(session.read_table(target_table), row_key, column)
+        target_table, _ = _require_row_with_table(_read_candidate_rows(session, "unit_armour_types"), row_key, column, numeric=numeric)
         return StatTarget(stat_table, target_table, row_key, column, value)
 
     if stat_table == "land_unit":
         row_key = equipment_key
-        target_table = resolve_table_name(session, "land_units")
-        _require_row(session.read_table(target_table), row_key, column)
+        target_table, _ = _require_row_with_table(_read_candidate_rows(session, "land_units"), row_key, column)
         return StatTarget(stat_table, target_table, row_key, column, value)
 
-    variants_table = resolve_table_name(session, "equipment_variants_weapons")
-    variants = session.read_table(variants_table)
+    variants = _rows_only(_read_candidate_rows(session, "equipment_variants_weapons"))
     variant = _find_variant(variants, equipment_key, game_mode, "primary_missile_weapon")
     missile_key = variant["primary_missile_weapon"]
-    missile_table = resolve_table_name(session, "missile_weapons")
-    missile = _require_row(session.read_table(missile_table), missile_key, "default_projectile", numeric=False)
+    _, missile = _require_row_with_table(_read_candidate_rows(session, "missile_weapons"), missile_key, "default_projectile", numeric=False)
     row_key = missile["default_projectile"]
-    target_table = resolve_table_name(session, "projectiles")
-    _require_row(session.read_table(target_table), row_key, column)
+    target_table, _ = _require_row_with_table(_read_candidate_rows(session, "projectiles"), row_key, column)
     return StatTarget(stat_table, target_table, row_key, column, value)
 
 
@@ -173,6 +226,30 @@ def _find_variant(
     if len(matches) > 1 and game_mode is None:
         raise ValueError(f"Equipment stat mapping is ambiguous; provide gameMode: {equipment_key}")
     return matches[0]
+
+
+def _find_variant_any(
+    rows: list[dict[str, Any]],
+    equipment_keys: list[str],
+    game_mode: str | None,
+    stat_key_field: str,
+) -> dict[str, Any]:
+    last_error: ValueError | None = None
+    for equipment_key in equipment_keys:
+        try:
+            return _find_variant(rows, equipment_key, game_mode, stat_key_field)
+        except ValueError as error:
+            last_error = error
+    raise last_error or ValueError(f"Equipment stat mapping not found: {equipment_keys[0] if equipment_keys else ''}")
+
+
+def _equipment_key_spellings(equipment_key: str) -> list[str]:
+    candidates = [equipment_key]
+    if "_ancillary_" in equipment_key:
+        candidates.append(equipment_key.replace("_ancillary_", "_ancilliary_"))
+    if "_ancilliary_" in equipment_key:
+        candidates.append(equipment_key.replace("_ancilliary_", "_ancillary_"))
+    return list(dict.fromkeys(candidates))
 
 
 def _require_row(

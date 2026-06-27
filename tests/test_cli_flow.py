@@ -142,6 +142,74 @@ class CliFlowTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("forbidden_equipment_operation", result.stdout)
 
+    def test_character_patch_copies_detail_art_and_initial_ceo_dependencies(self) -> None:
+        tmp_path = ROOT / "work" / "test-output"
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        recipe = tmp_path / "character-patch-deps.json"
+        output = tmp_path / "character-patch-deps.pack"
+        recipe.write_text(
+            json.dumps(
+                {
+                    "modName": "character_patch_deps",
+                    "characterPatches": [
+                        {
+                            "templateKey": "3k_mtu_template_historical_chen_jiu_hero_wood",
+                            "templateOverrides": {
+                                "art_set_override": "3k_mtu_art_set_historical_dong_min_general"
+                            },
+                            "detailOverrides": {},
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tk_pack_builder",
+                "build",
+                "--recipe",
+                str(recipe),
+                "--input",
+                str(ROOT / "examples" / "starter.pack"),
+                "--output",
+                str(output),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(output.read_text(encoding="utf-8"))
+        tables = data["tables"]
+        self.assertIn("character_generation_templates", tables)
+        self.assertIn("character_generation_template_game_mode_details", tables)
+        self.assertIn("campaign_character_art_sets", tables)
+        self.assertIn("campaign_character_arts", tables)
+        self.assertIn("ceo_initial_datas", tables)
+        details = tables["character_generation_template_game_mode_details"]
+        self.assertEqual(
+            {row["game_mode"] for row in details},
+            {"historical", "romance"},
+        )
+        self.assertIn(
+            "3k_mtu_art_set_historical_dong_min_general",
+            {row["art_set_id"] for row in tables["campaign_character_art_sets"]},
+        )
+        self.assertIn(
+            "3k_mtu_art_set_historical_dong_min_general",
+            {row["art_set_id"] for row in tables["campaign_character_arts"]},
+        )
+        self.assertIn(
+            "3k_mtu_ceo_initial_data_character_historical_chen_jiu",
+            {row["key"] for row in tables["ceo_initial_datas"]},
+        )
+
     def test_read_table_uses_adapter_rows(self) -> None:
         result = subprocess.run(
             [

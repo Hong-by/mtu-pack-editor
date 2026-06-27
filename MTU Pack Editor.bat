@@ -41,27 +41,7 @@ pause
 exit /b 1
 
 :python_found
-set "RPFM_ARGS=--no-rpfm"
-if exist "work\rpfm-dist\rpfm_server.exe" set "RPFM_ARGS="
-if exist "work\rpfm-master\target\debug\rpfm_server.exe" set "RPFM_ARGS="
-if exist "work\rpfm-master\target\debug\rpfm_server" set "RPFM_ARGS="
-
-if "%RPFM_ARGS%"=="--no-rpfm" if exist "work\rpfm-master\Cargo.toml" (
-    echo RPFM source found, but rpfm_server.exe is missing.
-    echo Building RPFM server...
-    echo.
-    powershell -ExecutionPolicy Bypass -File scripts\build_rpfm_server.ps1
-    if errorlevel 1 (
-        echo.
-        echo RPFM server build failed. Install Visual Studio Build Tools with Desktop development with C++, then run this launcher again.
-        echo.
-        pause
-        exit /b 1
-    )
-    if exist "work\rpfm-master\target\debug\rpfm_server.exe" set "RPFM_ARGS="
-)
-
-"%PYTHON_EXE%" scripts\dev_server.py %RPFM_ARGS% --open-browser
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%PYTHON_EXE%' 'scripts\dev_server.py' --open-browser"
 
 echo.
 echo Server stopped.
