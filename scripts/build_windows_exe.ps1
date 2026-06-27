@@ -126,6 +126,21 @@ if (Test-Path $rpfmSource) {
 
 New-Item -ItemType Directory -Force -Path (Join-Path $appDir "output") | Out-Null
 
+$runtimeArtifacts = @(
+    (Join-Path $workDir "pack_cache.sqlite3"),
+    (Join-Path $workDir "api-build-error.log"),
+    (Join-Path $workDir "server.err.log"),
+    (Join-Path $workDir "server.out.log"),
+    (Join-Path $workDir "rpfm-server.err.log"),
+    (Join-Path $workDir "rpfm-server.out.log"),
+    (Join-Path $workDir "rpfm-server.log")
+)
+foreach ($artifact in $runtimeArtifacts) {
+    if (Test-Path -LiteralPath $artifact) {
+        Remove-Item -LiteralPath $artifact -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host ""
 Write-Host "Built: $exePath"
 Write-Host "Run it by double-clicking MTU Pack Editor.exe."
