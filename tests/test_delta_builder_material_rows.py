@@ -12,6 +12,7 @@ from tk_pack_builder.delta_builder import (
     _collect_land_unit_clone_rows,
     _collect_stat_patch_rows,
     _copy_skill_dependency,
+    _loc_db_with_rows,
     _read_rows,
 )
 from tk_pack_builder.internal_materials import MaterialPackSession
@@ -19,6 +20,44 @@ from tk_pack_builder.recipe import CharacterClone, CharacterPatch, LandUnitClone
 
 
 class DeltaBuilderMaterialRowsTest(unittest.TestCase):
+    def test_loc_writer_skips_empty_loc_template_rows(self) -> None:
+        class FakeClient:
+            def send(self, command):
+                path = command["DecodePackedFile"][1]
+                rows = [] if path == "text/empty.loc" else [
+                    [{"StringU8": "old_key"}, {"StringU8": "old_text"}, {"Boolean": True}]
+                ]
+                return {
+                    "data": {
+                        "LocRFileInfo": [{
+                            "table": {
+                                "definition": {
+                                    "fields": [
+                                        {"name": "key"},
+                                        {"name": "text"},
+                                        {"name": "tooltip"},
+                                    ],
+                                },
+                                "table_data": rows,
+                            },
+                        }],
+                    },
+                }
+
+        class FakeSession:
+            client = FakeClient()
+            pack_key = "pack"
+
+            def list_loc_files(self):
+                return ["text/empty.loc", "text/non_empty.loc"]
+
+        loc_db = _loc_db_with_rows(FakeSession(), {"new_key": "new_text"})  # type: ignore[arg-type]
+
+        self.assertEqual(
+            loc_db["table"]["table_data"],
+            [[{"StringU8": "new_key"}, {"StringU8": "new_text"}, {"Boolean": True}]],
+        )
+
     def test_age_range_clone_same_key_payload_is_remapped_to_new_key(self) -> None:
         recipe = recipe_from_dict({
             "ageRangeClones": [{

@@ -2066,12 +2066,24 @@ def _loc_db_with_rows(session: RpfmPackSession, rows: dict[str, str]) -> dict[st
     loc_files = session.list_loc_files()
     if not loc_files:
         raise ValueError("Source pack has no loc file to use as a loc table template.")
-    response = session.client.send({"DecodePackedFile": [session.pack_key, loc_files[0], "PackFile"]})
-    _raise_rpfm_error(response)
-    source = copy.deepcopy(response["data"]["LocRFileInfo"][0])
+    source: dict[str, Any] | None = None
+    for loc_file in loc_files:
+        response = session.client.send({"DecodePackedFile": [session.pack_key, loc_file, "PackFile"]})
+        _raise_rpfm_error(response)
+        candidate = copy.deepcopy(response["data"]["LocRFileInfo"][0])
+        if candidate.get("table", {}).get("table_data"):
+            source = candidate
+            break
+        if source is None:
+            source = candidate
+    if source is None:
+        raise ValueError("Source pack has no loc file to use as a loc table template.")
     table = source["table"]
-    template_row = table["table_data"][0]
     fields = [field["name"] for field in table["definition"]["fields"]]
+    template_row = table["table_data"][0] if table["table_data"] else [
+        _default_loc_template_cell(field_name)
+        for field_name in fields
+    ]
     table["table_data"] = [
         [
             _encode_rpfm_cell(template_cell, {"key": key, "text": text, "tooltip": True}.get(field_name))
@@ -2080,6 +2092,12 @@ def _loc_db_with_rows(session: RpfmPackSession, rows: dict[str, str]) -> dict[st
         for key, text in sorted(rows.items())
     ]
     return source
+
+
+def _default_loc_template_cell(field_name: str) -> dict[str, Any]:
+    if field_name == "tooltip":
+        return {"Boolean": False}
+    return {"StringU8": ""}
 
 
 def _copy_image_assets(
