@@ -61,6 +61,12 @@ work\packs\refs\BFG_Yellow_Turban.pack</textarea>
           <button class="filter" data-filter="water" type="button">水</button>
           <button class="filter" data-filter="metal" type="button">金</button>
         </div>
+        <div class="filter-row korea-filter-row" role="group" aria-label="한반도 세력 필터">
+          <button class="filter" data-filter="korea:goguryeo" type="button">고구려</button>
+          <button class="filter" data-filter="korea:baekje" type="button">백제</button>
+          <button class="filter" data-filter="korea:silla" type="button">신라</button>
+          <button class="filter" data-filter="korea:tamna" type="button">탐라</button>
+        </div>
         <div id="characterList" class="character-list"></div>
       </aside>
 
@@ -97,6 +103,7 @@ work\packs\refs\BFG_Yellow_Turban.pack</textarea>
             <h3>코어 이미지 소스</h3>
             <span>선택한 작업에 사용할 초상화/카드 이미지 세트를 고릅니다.</span>
           </div>
+          <input id="appearanceSearchInput" class="gallery-search" type="search" placeholder="이미지 이름, 폴더, key 검색">
           <div id="appearanceGallery" class="appearance-gallery"></div>
         </div>
       </section>
@@ -124,7 +131,7 @@ work\packs\refs\BFG_Yellow_Turban.pack</textarea>
           <div class="tab-section active" data-tab-section="edit-basic">
             <label>
               <span>표시 이름</span>
-              <input id="editName" placeholder="예: 부여월">
+              <input id="editName" placeholder="예: 공손금정">
             </label>
             <div id="editTitleSummary" class="equipment-summary"></div>
             <label>
@@ -147,6 +154,10 @@ work\packs\refs\BFG_Yellow_Turban.pack</textarea>
             <label>
               <span>모델 세트</span>
               <select id="editModelSet"></select>
+            </label>
+            <label>
+              <span>Voice</span>
+              <select id="editVoiceoverActor"></select>
             </label>
           </div>
 
@@ -258,6 +269,10 @@ work\packs\refs\BFG_Yellow_Turban.pack</textarea>
             <label>
               <span>모델 세트</span>
               <select id="sourceModelSet"></select>
+            </label>
+            <label>
+              <span>Voice</span>
+              <select id="sourceVoiceoverActor"></select>
             </label>
           </div>
 

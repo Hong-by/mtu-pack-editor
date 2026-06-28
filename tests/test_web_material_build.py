@@ -19,6 +19,45 @@ class FakeSession:
 
 
 class WebMaterialBuildTest(unittest.TestCase):
+    def test_auxiliary_catalog_does_not_append_korea_without_db_rows(self) -> None:
+        character_data = {"pack": {"characters": []}}
+        catalog = {
+            "characters": [
+                {
+                    "key": "3k_mod_template_historical_go_gyesu_hero_wood",
+                    "displayName": "고계수",
+                    "virtualImageOnly": False,
+                    "imageOnly": False,
+                }
+            ]
+        }
+
+        with (
+            patch.object(web, "_load_internal_character_catalog_pack", return_value=catalog),
+            patch.object(web, "korea_character_metadata", return_value={"isKoreaAddon": True}),
+        ):
+            web._merge_auxiliary_catalog_characters(character_data)
+
+        self.assertEqual(character_data["pack"]["characters"], [])
+
+    def test_auxiliary_catalog_skips_aw_image_only_characters(self) -> None:
+        character_data = {"pack": {"characters": []}}
+        catalog = {
+            "characters": [
+                {
+                    "key": "image_only_aw_test",
+                    "displayName": "AW test",
+                    "virtualImageOnly": True,
+                    "referenceSourcePath": "AW_mh_hero_special_water_diao_chan.pack",
+                }
+            ]
+        }
+
+        with patch.object(web, "_load_internal_character_catalog_pack", return_value=catalog):
+            web._merge_auxiliary_catalog_characters(character_data)
+
+        self.assertEqual(character_data["pack"]["characters"], [])
+
     def test_build_payload_uses_internal_materials_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -43,7 +82,12 @@ class WebMaterialBuildTest(unittest.TestCase):
                 })
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["messages"], [{"level": "success", "code": "pack_written", "message": "팩 생성 완료"}])
+        self.assertEqual(result["messages"], [{
+            "level": "success",
+            "code": "pack_written",
+            "message": "팩 생성 완료",
+            "detail": f"경로: {output}",
+        }])
         self.assertEqual(web.delta_builder_module.CORE_ASSET_SOURCE_ID, previous_core)
         open_session.assert_called_once()
         build.assert_called_once()

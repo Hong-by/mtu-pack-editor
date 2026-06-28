@@ -49,32 +49,10 @@ const SPAWN_EVENTS = [
   },
 ];
 
+const SKILL_TREE_EDITING_ENABLED = false;
+const FAVORITE_APPEARANCE_STORAGE_KEY = 'mtuPackEditor.favoriteAppearanceKeys.v1';
+
 const SAMPLE_CHARACTERS = [
-  {
-    key: '3k_mtu_template_historical_lady_buyeo_wol_hero_water',
-    name: '부여월',
-    element: 'water',
-    portrait: '月',
-    artSet: '3k_mtu_art_set_historical_lady_zou_yuan_general',
-    imageSetName: '부여월 이미지 세트',
-    modelSetName: '부여월 모델 세트',
-    historicalSkill: '손권 기반 전략가 스킬셋',
-    romanceSkill: '손권 기반 낭만 스킬셋',
-    retinue: '수 속성 전략가',
-    attributeSet: 'water strategist',
-    combatProfile: '전략가 기본 장비',
-    titleName: '부여월 칭호',
-    titleKey: '3k_mtu_ceo_node_career_historical_buyeo_wol_01',
-    titleStatus: 'read_only_spike',
-    baseAttack: 42,
-    baseDefense: 28,
-    unitProfile: '검 보병 호위대',
-    weight: 100,
-    minRound: 0,
-    maxRound: 999,
-    spawnAge: '대교 기반 연령대',
-    spawnEvent: 'round_pool',
-  },
   {
     key: '3k_mtu_template_historical_chen_jiu_hero_wood',
     name: '진구',
@@ -191,10 +169,13 @@ const state = {
   skillTreeDrafts: {},
   activeSkillNode: null,
   skillCandidateTabs: {},
+  selectedAppearanceCardKey: '',
+  imageGalleryQuery: '',
+  favoriteAppearanceKeys: loadFavoriteAppearanceKeys(),
 };
 
 const INTERNAL_MATERIAL_BUILD = {
-  enabledForSaveMode: '',
+  enabledForSaveMode: 'patch_pack',
   materialPath: 'work\\internal_materials\\materials.v015.json',
   coreAssetSourceId: '17309a40b912',
 };
@@ -308,12 +289,64 @@ function hasUniqueImageSet(character) {
 
 function browsableCharacters() {
   return sortBrowsableCharacters(characters().filter((character) => (
-    hasRealTemplateRow(character) && hasUniqueImageSet(character) && !character.imageOnly && !character.virtualImageOnly
+    hasRealTemplateRow(character)
+    && !character.imageOnly
+    && !character.virtualImageOnly
   )));
 }
 
 function appearanceGalleryCharacters() {
-  return sortBrowsableCharacters(characters().filter(hasUniqueImageSet));
+  const query = normalizeLookupText(state.imageGalleryQuery);
+  const items = selectableImageAppearances();
+  const filtered = query
+    ? items.filter((appearance) => normalizeLookupText(appearanceSearchText(appearance)).includes(query))
+    : items;
+  return sortFavoriteAppearances(filtered);
+}
+
+function appearanceFavoriteKey(item) {
+  return String(item?.key || item?.artSet || '');
+}
+
+function isFavoriteAppearance(itemOrKey) {
+  const key = typeof itemOrKey === 'string' ? itemOrKey : appearanceFavoriteKey(itemOrKey);
+  return Boolean(key && state.favoriteAppearanceKeys.has(key));
+}
+
+function toggleFavoriteAppearance(key) {
+  if (!key) return;
+  if (state.favoriteAppearanceKeys.has(key)) {
+    state.favoriteAppearanceKeys.delete(key);
+  } else {
+    state.favoriteAppearanceKeys.add(key);
+  }
+  saveFavoriteAppearanceKeys();
+  renderAppearanceGallery();
+}
+
+function sortFavoriteAppearances(items) {
+  return [...items].sort((a, b) => Number(isFavoriteAppearance(b)) - Number(isFavoriteAppearance(a)));
+}
+
+function loadFavoriteAppearanceKeys() {
+  try {
+    const raw = window.localStorage?.getItem(FAVORITE_APPEARANCE_STORAGE_KEY);
+    const values = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(values) ? values.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveFavoriteAppearanceKeys() {
+  try {
+    window.localStorage?.setItem(
+      FAVORITE_APPEARANCE_STORAGE_KEY,
+      JSON.stringify([...state.favoriteAppearanceKeys].sort()),
+    );
+  } catch {
+    // Ignore storage errors; favorites are a convenience feature.
+  }
 }
 
 function activeImageSelectId() {
@@ -324,9 +357,34 @@ function currentImageSelectionKey() {
   return $(activeImageSelectId())?.value || '';
 }
 
-function applyGalleryImageSelection(appearanceKey) {
-  const appearance = appearanceByKey(appearanceKey);
+function galleryCardKey(character) {
+  return character?.key || character?.artSet || '';
+}
+
+function appearanceKeyForGalleryCharacter(character) {
+  return character?.key || '';
+}
+
+function currentGallerySelectionKey() {
+  const selectedAppearanceKey = currentImageSelectionKey();
+  const storedCharacter = appearanceGalleryCharacters().find((character) => (
+    galleryCardKey(character) === state.selectedAppearanceCardKey
+  ));
+  if (storedCharacter && appearanceKeyForGalleryCharacter(storedCharacter) === selectedAppearanceKey) {
+    return state.selectedAppearanceCardKey;
+  }
+  const selectedCharacter = appearanceGalleryCharacters().find((character) => (
+    appearanceKeyForGalleryCharacter(character) === selectedAppearanceKey
+  ));
+  return galleryCardKey(selectedCharacter);
+}
+
+function applyGalleryImageSelection(cardKey) {
+  const character = appearanceGalleryCharacters().find((item) => galleryCardKey(item) === cardKey);
+  const appearanceKey = appearanceKeyForGalleryCharacter(character) || cardKey;
+  const appearance = character || appearanceByKey(appearanceKey);
   if (!appearance) return;
+  state.selectedAppearanceCardKey = cardKey;
   const imageSelectId = activeImageSelectId();
   const imageSelect = $(imageSelectId);
   if (imageSelect) imageSelect.value = appearanceKey;
@@ -352,16 +410,27 @@ function sortBrowsableCharacters(items) {
 }
 
 function sourceInfo(item) {
+  if (item?.isKoreaAddon) {
+    return { tag: 'KR', label: item.koreaFactionLabel || 'Korea', priority: -1 };
+  }
   const sourceFields = [
     item?.sourceTag,
     item?.referenceSourcePath,
+    item?.sourcePackName,
+    item?.sourceIdentity,
     item?.key,
+    item?.name,
+    item?.imageSetName,
+    item?.portraitPath,
+    item?.cardPath,
+    item?.portraitImagePath,
+    item?.cardImagePath,
   ];
   if (item?.virtualImageOnly || item?.imageOnly) {
     sourceFields.push(item?.portraitImageSourcePath, item?.cardImageSourcePath);
   }
   const text = sourceFields.filter(Boolean).join(' ').toLowerCase();
-  if (text.includes('aw-design') || text.includes('aw addon') || text.includes('aw ')) {
+  if (text.includes('aw-design') || text.includes('aw addon') || text.includes('aw ') || text.includes('aw-') || text.includes('aw_')) {
     return { tag: 'AW', label: 'AW', priority: 4 };
   }
   if (text.includes('bfg_')) return { tag: 'BFG', label: 'BFG', priority: 1 };
@@ -382,9 +451,25 @@ function isLshzImageOnly(item) {
 
 function displayNameWithDummyMarker(item) {
   const name = item?.name || item?.imageSetName || '-';
-  if (isAwImageOnly(item)) return `AW 이미지 더미 - ${name}`;
-  if (item?.virtualImageOnly || item?.imageOnly) return `이미지 더미 - ${name}`;
   return name;
+}
+
+function imageOnlySourceSuffix(item) {
+  if (!item?.virtualImageOnly && !item?.imageOnly) return '';
+  const identity = item.sourceIdentity
+    || [
+      sourcePackName(item),
+      item.portraitPath || item.portrait,
+      item.cardPath || item.card,
+    ].filter(Boolean).join(' · ');
+  return identity ? ` (${identity})` : '';
+}
+
+function sourcePackName(item) {
+  const explicit = item?.sourcePackName;
+  if (explicit) return explicit;
+  const source = item?.referenceSourcePath || item?.portraitImageSourcePath || item?.cardImageSourcePath || '';
+  return String(source).split(/[\\/]/).filter(Boolean).pop() || '';
 }
 
 function canUseAsModelSet(item) {
@@ -471,6 +556,15 @@ function packTemplateCharacters() {
   });
 }
 
+function firstCharacterWithDetails(...candidates) {
+  for (const character of candidates) {
+    if (!character) continue;
+    const details = detailsByMode(character);
+    if (details.historical || details.romance) return character;
+  }
+  return packTemplateCharacters()[0] || candidates.find(Boolean) || null;
+}
+
 function appearanceSets() {
   const artSets = (state.options?.artSets || [])
     .filter((item) => item?.key)
@@ -494,6 +588,8 @@ function appearanceSets() {
       isMale: item.isMale,
       voiceoverActor: item.voiceoverActor || item.voiceover_actor || '',
       referenceSourcePath: item.referenceSourcePath || '',
+      sourcePackName: item.sourcePackName || '',
+      sourceIdentity: item.sourceIdentity || '',
       rows: item.rows || [],
       externalImageSet: Boolean(item.externalImageSet),
       imageOnly: Boolean(item.imageOnly || item.virtual),
@@ -501,9 +597,25 @@ function appearanceSets() {
       hasImage: Boolean(item.portraitImagePath || item.cardImagePath),
     }));
   if (artSets.length) {
-    return sortAppearanceSets(artSets);
+    const byKey = new Map(artSets.map((item) => [item.key, item]));
+    for (const character of characters().filter((item) => item.virtualImageOnly || item.imageOnly)) {
+      const appearance = appearanceFromCharacter(character);
+      if (appearance.key) byKey.set(appearance.key, appearance);
+    }
+    return sortAppearanceSets([...byKey.values()]);
   }
   return sortAppearanceSets(characters().map((item) => appearanceFromCharacter(item)));
+}
+
+function selectableImageAppearances() {
+  return appearanceSets().filter((item) => {
+    if (sourceInfo(item).tag === 'AW') return false;
+    if (!item.portraitImagePath && !item.externalImageSet) return false;
+    const combined = `${item.artSet || ''} ${item.imageSetName || ''} ${item.portraitPath || ''} ${item.cardPath || ''}`.toLowerCase();
+    const referenceSource = String(item.referenceSourcePath || '').toLowerCase();
+    const isBfg = item.externalImageSet || referenceSource.includes('bfg_');
+    return isBfg || (!combined.includes('generic') && !combined.includes('scripted'));
+  });
 }
 
 function sortAppearanceSets(items) {
@@ -520,14 +632,16 @@ function sortAppearanceSets(items) {
 }
 
 function appearanceFromCharacter(character) {
+  const isImageOnly = Boolean(character?.virtualImageOnly || character?.imageOnly);
+  const displayName = imageDisplayName(character);
   return {
-    key: character?.artSet || character?.key || '',
-    name: character?.imageSetName || character?.name || '-',
+    key: isImageOnly ? (character?.key || character?.artSet || '') : (character?.artSet || character?.key || ''),
+    name: displayName,
     element: character?.element || 'earth',
     portrait: character?.portrait || '將',
     artSet: character?.artSet || '',
-    imageSetName: character?.imageSetName || '-',
-    modelSetName: character?.virtualImageOnly ? '모델 없음' : (character?.modelSetName || '-'),
+    imageSetName: displayName,
+    modelSetName: isImageOnly ? '모델 없음' : (character?.modelSetName || '-'),
     portraitPath: character?.portraitPath || '',
     cardPath: character?.cardPath || '',
     portraitImagePath: character?.portraitImagePath || '',
@@ -535,14 +649,16 @@ function appearanceFromCharacter(character) {
     cardImagePath: character?.cardImagePath || '',
     cardImageSourcePath: character?.cardImageSourcePath || '',
     imageAssets: character?.imageAssets || [],
-    uniform: character?.virtualImageOnly ? '' : (character?.uniform || ''),
+    uniform: isImageOnly ? '' : (character?.uniform || ''),
     isMale: character?.isMale ?? character?.templateRow?.is_male,
     voiceoverActor: character?.voiceoverActor || character?.templateRow?.voiceover_actor || '',
     referenceSourcePath: character?.referenceSourcePath || '',
+    sourcePackName: character?.sourcePackName || '',
+    sourceIdentity: character?.sourceIdentity || '',
     cardImageSourcePath: character?.cardImageSourcePath || '',
     rows: character?.rows || [],
-    imageOnly: Boolean(character?.virtualImageOnly),
-    virtualImageOnly: Boolean(character?.virtualImageOnly),
+    imageOnly: isImageOnly,
+    virtualImageOnly: isImageOnly,
     hasImage: Boolean(character?.portraitImagePath || character?.cardImagePath),
   };
 }
@@ -587,6 +703,15 @@ function normalizeImageAssetPath(path) {
   return String(path || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 }
 
+function gameImageAssetPath(path) {
+  const normalized = normalizeImageAssetPath(path);
+  const marker = '/ui/characters/';
+  const lower = normalized.toLowerCase();
+  const index = lower.indexOf(marker);
+  if (index >= 0) return normalized.slice(index + 1);
+  return normalized;
+}
+
 function isDuplicateCharacterFolderPath(path) {
   const parts = normalizeImageAssetPath(path).split('/').filter(Boolean);
   const index = parts.findIndex((part, i) => part === 'characters' && parts[i - 1] === 'ui');
@@ -597,9 +722,103 @@ function isDuplicateCharacterFolderPath(path) {
 }
 
 function imageTokenFromAppearance(appearance) {
-  const portrait = String(appearance?.portraitPath || '').replace(/[\\/]+$/, '');
-  const card = String(appearance?.cardPath || '').replace(/[\\/]+$/, '');
-  return card || portrait.split(/[\\/]/).filter(Boolean).pop() || '';
+  return imageFolderName(appearance) || imageFolderFromValue(appearance?.cardPath) || imageFolderFromValue(appearance?.portraitPath);
+}
+
+function imageTokenForAsset(appearance, assetPath) {
+  const normalized = normalizeImageAssetPath(assetPath).toLowerCase();
+  const value = normalized.includes('/stills/unitcards/')
+    ? appearance?.cardPath
+    : appearance?.portraitPath;
+  return String(value || imageTokenFromAppearance(appearance)).replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || '';
+}
+
+function imageFolderName(appearance) {
+  return imageFolderFromValue(appearance?.portraitImagePath)
+    || imageFolderFromValue(appearance?.cardImagePath)
+    || imageFolderFromValue(appearance?.portraitPath)
+    || imageFolderFromValue(appearance?.cardPath);
+}
+
+function imageFolderFromValue(value) {
+  const path = String(value || '').replace(/\\/g, '/').replace(/[\\/]+$/, '');
+  const parts = path.split('/').filter(Boolean);
+  if (!parts.length) return '';
+  const index = parts.lastIndexOf('characters');
+  if (index >= 0 && parts[index + 1]) return parts[index + 1];
+  const stillsIndex = parts.lastIndexOf('stills');
+  if (stillsIndex > 0) return parts[stillsIndex - 1];
+  if (parts.length === 1 && !/\.(png|jpg|jpeg|dds)$/i.test(parts[0])) return parts[0];
+  return '';
+}
+
+function imageDisplayName(item) {
+  const info = imageHeroInfo(item);
+  return info?.kr || item?.name || item?.imageSetName || friendlyKey(item?.artSet || item?.key);
+}
+
+function imageHeroInfo(item) {
+  const direct = sheetHeroInfoFor(item?.key) || sheetHeroInfoFor(item?.artSet);
+  if (direct) return direct;
+  for (const candidate of imageSlugCandidates(item)) {
+    const byAlias = sheetHeroAliasMap()[candidate];
+    if (byAlias) return byAlias;
+  }
+  return null;
+}
+
+function imageSlugCandidates(item) {
+  const values = [
+    item?.key,
+    item?.artSet,
+    item?.portraitPath,
+    item?.cardPath,
+    imageFolderName(item),
+  ];
+  const candidates = new Set();
+  for (const value of values) {
+    let text = String(value || '').toLowerCase();
+    text = text.split(/[\\/]/).filter(Boolean).pop() || text;
+    text = text.replace(/\.(png|jpg|jpeg|dds)$/i, '');
+    text = text.replace(/^image_only_/, '');
+    text = text.replace(/^(aw|lshz)_/i, '');
+    text = text.replace(/^(3k_)?(main|mtu|dlc\d+|ep|cp\d+)_hero_special_(earth|fire|wood|water|metal)_/, '');
+    text = text.replace(/^lb_main_hero_special_(earth|fire|wood|water|metal)_/, '');
+    text = text.replace(/^mh_hero_special_(earth|fire|wood|water|metal)_/, '');
+    text = text.replace(/^lady_/, '');
+    text = text.replace(/_(hero|general)_(earth|fire|wood|water|metal).*$/, '');
+    text = text.replace(/_(earth|fire|wood|water|metal)$/, '');
+    if (text) {
+      candidates.add(text);
+      candidates.add(text.replace(/_/g, ''));
+    }
+  }
+  return [...candidates];
+}
+
+function appearanceSearchText(appearance) {
+  return [
+    appearance?.key,
+    appearance?.name,
+    appearance?.imageSetName,
+    appearance?.artSet,
+    imageFolderName(appearance),
+    appearance?.portraitImagePath,
+    appearance?.cardImagePath,
+    appearance?.referenceSourcePath,
+    appearance?.portraitImageSourcePath,
+    appearance?.cardImageSourcePath,
+  ].filter(Boolean).join(' ');
+}
+
+function appearanceOption(appearance) {
+  const folder = imageFolderName(appearance);
+  const folderText = folder && folder !== appearance.artSet ? ` · ${folder}` : '';
+  return option(
+    appearance.key,
+    `${sourceLabel(appearance)} ${appearance.hasImage ? '■' : '□'} ${displayNameWithDummyMarker(appearance)} · ${appearance.artSet}${folderText}`,
+    appearanceSearchText(appearance),
+  );
 }
 
 function primaryArtRowFromAppearance(appearance) {
@@ -617,6 +836,14 @@ function imageArtOverridesFromAppearance(appearance) {
   });
 }
 
+function imageCardKeyFromAppearance(appearance) {
+  const path = String(appearance?.cardImagePath || '').replace(/\\/g, '/').replace(/[\\/]+$/, '');
+  const fileName = path.split('/').filter(Boolean).pop() || '';
+  const stem = fileName.replace(/\.(png|jpg|jpeg|dds)$/i, '');
+  if (stem) return stem;
+  return imageFolderFromValue(appearance?.cardPath);
+}
+
 function modelArtOverridesFromAppearance(appearance) {
   const row = primaryArtRowFromAppearance(appearance);
   return compactObject({
@@ -628,6 +855,12 @@ function modelArtOverridesFromAppearance(appearance) {
     navy_animation: row.navy_animation,
     fallback_composite_display: row.fallback_composite_display,
   });
+}
+
+function modelGenderOverridesFromAppearance(appearance, fallbackTemplate = {}) {
+  const overrides = templateGenderOverridesFromAppearance(appearance, fallbackTemplate);
+  if (Object.prototype.hasOwnProperty.call(overrides, 'is_male')) return overrides;
+  return overrides;
 }
 
 function templateGenderOverridesFromAppearance(appearance, fallbackTemplate = {}) {
@@ -647,9 +880,76 @@ function templateGenderOverridesFromAppearance(appearance, fallbackTemplate = {}
           : subtype.includes('metal') ? 'metal'
             : subtype.includes('earth') ? 'earth'
               : 'metal';
-    overrides.voiceover_actor = overrides.is_male
-      ? `vo_actor_group_generic_male_${element}_general`
-      : `vo_actor_group_generic_female_${element}_general`;
+    overrides.voiceover_actor = voiceoverActorForGender(overrides.is_male, subtype);
+  }
+  return overrides;
+}
+
+function voiceoverActorForGender(isMale, subtype = '') {
+  const value = String(subtype || '');
+  const element = value.includes('water') ? 'water'
+    : value.includes('wood') ? 'wood'
+      : value.includes('fire') ? 'fire'
+        : value.includes('metal') ? 'metal'
+          : value.includes('earth') ? 'earth'
+            : 'metal';
+  return isMale
+    ? `vo_actor_group_generic_male_${element}_general`
+    : `vo_actor_group_generic_female_${element}_general`;
+}
+
+function voiceoverActorOptions() {
+  const actors = new Set();
+  for (const character of characters()) {
+    if (character.voiceoverActor) actors.add(character.voiceoverActor);
+    if (character.templateRow?.voiceover_actor) actors.add(character.templateRow.voiceover_actor);
+  }
+  for (const appearance of appearanceSets()) {
+    if (appearance.voiceoverActor) actors.add(appearance.voiceoverActor);
+    if (appearance.voiceover_actor) actors.add(appearance.voiceover_actor);
+  }
+  for (const element of Object.values(ELEMENTS)) {
+    if (!element.subtype) continue;
+    actors.add(voiceoverActorForGender(true, element.subtype));
+    actors.add(voiceoverActorForGender(false, element.subtype));
+  }
+  return [
+    option('__auto__', '모델 기준 자동'),
+    option('__keep__', '원본 유지'),
+    ...[...actors]
+      .filter(Boolean)
+      .sort((a, b) => friendlyVoiceoverActor(a).localeCompare(friendlyVoiceoverActor(b), 'ko'))
+      .map((actor) => option(`voice:${actor}`, friendlyVoiceoverActor(actor))),
+  ];
+}
+
+function friendlyVoiceoverActor(actor) {
+  const value = String(actor || '');
+  if (!value) return '-';
+  const generic = value.match(/^vo_actor_group_generic_(male|female)_(earth|fire|wood|water|metal)_general$/);
+  if (generic) {
+    const gender = generic[1] === 'male' ? '남성' : '여성';
+    const element = {
+      earth: '토',
+      fire: '화',
+      wood: '목',
+      water: '수',
+      metal: '금',
+    }[generic[2]] || generic[2];
+    return `${gender} ${element} 기본 · ${value}`;
+  }
+  return `${value.replace(/^vo_actor_group_/, '')} · ${value}`;
+}
+
+function voiceoverActorFromSelection(selectionValue, modelSet, fallbackTemplate = {}) {
+  const value = String(selectionValue || '__auto__');
+  const overrides = modelGenderOverridesFromAppearance(modelSet, fallbackTemplate);
+  if (value === '__keep__') {
+    delete overrides.voiceover_actor;
+    return overrides;
+  }
+  if (value.startsWith('voice:')) {
+    overrides.voiceover_actor = value.slice('voice:'.length);
   }
   return overrides;
 }
@@ -678,12 +978,21 @@ function retargetImageAssetPath(path, sourceToken, targetToken) {
   if (characterIndex >= 0) {
     parts[characterIndex + 1] = targetToken;
   }
+  let lowerParts = parts.map((part) => part.toLowerCase());
+  if (!lowerParts.includes('composites') && characterIndex >= 0) {
+    const directPanelIndex = lowerParts.findIndex((part, index) => (
+      index > characterIndex + 1 && ['large_panel', 'small_panel'].includes(part)
+    ));
+    if (directPanelIndex >= 0) {
+      parts.splice(directPanelIndex, 0, 'composites');
+    }
+  }
   const fileName = parts[parts.length - 1] || '';
   const extensionIndex = fileName.lastIndexOf('.');
   if (extensionIndex > 0 && fileName.slice(0, extensionIndex) === sourceToken) {
     parts[parts.length - 1] = `${targetToken}${fileName.slice(extensionIndex)}`;
   }
-  const lowerParts = parts.map((part) => part.toLowerCase());
+  lowerParts = parts.map((part) => part.toLowerCase());
   const compositeIndex = lowerParts.indexOf('composites');
   const panelIndex = compositeIndex >= 0 ? compositeIndex + 1 : -1;
   const moodIndex = compositeIndex >= 0 ? compositeIndex + 2 : -1;
@@ -702,6 +1011,9 @@ function retargetImageAssetPaths(path, sourceToken, targetToken) {
   const targets = [primary];
   const parts = primary.split('/');
   const lowerParts = parts.map((part) => part.toLowerCase());
+  const characterIndex = lowerParts.findIndex((part, index) => (
+    part === 'characters' && lowerParts[index - 1] === 'ui' && parts[index + 1]
+  ));
   const compositeIndex = lowerParts.indexOf('composites');
   const panelIndex = compositeIndex >= 0 ? compositeIndex + 1 : -1;
   const moodIndex = compositeIndex >= 0 ? compositeIndex + 2 : -1;
@@ -713,18 +1025,41 @@ function retargetImageAssetPaths(path, sourceToken, targetToken) {
     const moodFileParts = [...parts];
     moodFileParts[moodFileParts.length - 1] = `${lowerParts[moodIndex]}.png`;
     targets.push(moodFileParts.join('/'));
+    if (lowerParts[moodIndex] === 'norm') {
+      const normalFileParts = [...parts];
+      normalFileParts[normalFileParts.length - 1] = 'normal.png';
+      targets.push(normalFileParts.join('/'));
+      if (characterIndex >= 0) {
+        targets.push(`ui/characters/${targetToken}/composites/noanim.png`);
+        targets.push(`ui/characters/${targetToken}/composites/normal.png`);
+      }
+    }
   }
   return [...new Set(targets)];
 }
 
-function customImageAssetsFromAppearance(appearance, targetToken) {
-  const sourceToken = imageTokenFromAppearance(appearance);
-  return imageAssetsFromAppearance(appearance).flatMap((asset) => (
-    retargetImageAssetPaths(asset.path, sourceToken, targetToken).map((targetPath) => ({
-      ...asset,
-      targetPath,
-    }))
+function customImageAssetsFromAppearance(appearance, targetToken, targetCardToken = targetToken) {
+  const sourceAssets = imageAssetsFromAppearance(appearance);
+  const retargetedAssets = sourceAssets.flatMap((asset) => (
+    retargetImageAssetPaths(asset.gamePath || gameImageAssetPath(asset.path), imageTokenForAsset(appearance, asset.gamePath || asset.path), targetToken)
+      .map((targetPath) => retargetStillFileToken(targetPath, targetToken, targetCardToken))
+      .map((targetPath) => ({
+        ...asset,
+        targetPath,
+      }))
   ));
+  return retargetedAssets;
+}
+
+function retargetStillFileToken(path, targetToken, targetCardToken) {
+  if (!targetCardToken || targetCardToken === targetToken) return path;
+  const normalized = String(path || '');
+  if (!normalized.toLowerCase().includes('/stills/')) return normalized;
+  return normalized.replace(new RegExp(`${escapeRegExp(targetToken)}(?=\\.png$)`, 'i'), targetCardToken);
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function retargetArtImageKey(value, targetToken) {
@@ -754,8 +1089,10 @@ function spawnEventMeta(key) {
 const SEARCHABLE_SELECT_IDS = new Set([
   'editImageSet',
   'editModelSet',
+  'editVoiceoverActor',
   'sourceImageSet',
   'sourceModelSet',
+  'sourceVoiceoverActor',
   'sourceBase',
   'sourceSkill',
   'sourceTitle',
@@ -1004,6 +1341,19 @@ function normalizePackCharacter(item, summary) {
     voiceoverActor: item.voiceoverActor || item.templateRow?.voiceover_actor || '',
     source: item.source || 'pack',
     referenceSourcePath: item.referenceSourcePath || '',
+    sourceTag: item.sourceTag || '',
+    sourcePackName: item.sourcePackName || '',
+    sourceIdentity: item.sourceIdentity || '',
+    imageOnly: Boolean(item.imageOnly),
+    virtualImageOnly: Boolean(item.virtualImageOnly),
+    externalImageSet: Boolean(item.externalImageSet),
+    isKoreaAddon: Boolean(item.isKoreaAddon),
+    koreaFaction: item.koreaFaction || '',
+    koreaFactionKey: item.koreaFactionKey || '',
+    koreaFactionLabel: item.koreaFactionLabel || '',
+    koreaRole: item.koreaRole || '',
+    koreaSubtype: item.koreaSubtype || '',
+    koreaSourceScript: item.koreaSourceScript || '',
   };
 }
 
@@ -1231,9 +1581,11 @@ function renderRoster() {
   }
   const filtered = visibleCharacters.filter((character) => {
     const spawnEvent = spawnEventMeta(character.spawnEvent);
-    const haystack = `${character.name} ${character.key} ${character.imageSetName} ${character.modelSetName} ${character.combatProfile} ${character.unitProfile} ${spawnEvent.name} ${character.element}`.toLowerCase();
+    const haystack = `${character.name} ${character.key} ${character.imageSetName} ${character.modelSetName} ${character.combatProfile} ${character.unitProfile} ${spawnEvent.name} ${character.element} ${character.koreaFactionLabel} ${character.koreaRole}`.toLowerCase();
     const matchesQuery = !query || haystack.includes(query);
-    const matchesFilter = state.filter === 'all' || character.element === state.filter;
+    const matchesFilter = state.filter === 'all'
+      || character.element === state.filter
+      || (state.filter.startsWith('korea:') && character.koreaFaction === state.filter.slice(6));
     return matchesQuery && matchesFilter;
   });
 
@@ -1249,7 +1601,7 @@ function renderRoster() {
       ${portraitMarkup(character, 'mini-portrait')}
       <div class="card-main">
         <strong>${sourceBadgeMarkup(character)} ${escapeHtml(displayNameWithDummyMarker(character))}</strong>
-        <span>${meta.name} · ${escapeHtml(character.retinue)}${character.source === 'reference' ? ' · 참조' : ''}</span>
+        <span>${meta.name} · ${escapeHtml(character.retinue)}${character.isKoreaAddon ? ` · ${escapeHtml(character.koreaFactionLabel)} · ${character.koreaRole === 'leader' ? '지도자' : '장수'}` : ''}${character.source === 'reference' ? ' · 참조' : ''}</span>
         <small>${escapeHtml(templateKey)}</small>
       </div>
       <b>${meta.label}</b>
@@ -1284,6 +1636,7 @@ function renderSelected() {
   $('currentSpawnEvent').textContent = spawnEventMeta(character.spawnEvent).name;
 
   $('selectedChips').innerHTML = `
+    ${character.isKoreaAddon ? `<span>${escapeHtml(character.koreaFactionLabel)} ${character.koreaRole === 'leader' ? '지도자' : character.koreaRole === 'event' ? '이벤트 장수' : '장수'}</span>` : ''}
     <span>${escapeHtml(character.retinue)}</span>
     <span>${escapeHtml(character.attributeSet)}</span>
     <span>${escapeHtml(character.spawnAge)}</span>
@@ -1293,20 +1646,41 @@ function renderSelected() {
 }
 
 function renderAppearanceGallery() {
-  const selectedImageKey = currentImageSelectionKey();
-  $('appearanceGallery').innerHTML = appearanceGalleryCharacters().map((character) => `
-    <button class="appearance-card ${(character.artSet || character.key) === selectedImageKey ? 'active' : ''}" data-key="${escapeHtml(character.artSet || character.key)}" type="button">
+  const selectedCardKey = currentGallerySelectionKey();
+  const galleryCharacters = appearanceGalleryCharacters();
+  $('appearanceGallery').innerHTML = galleryCharacters.map((character) => `
+    <button class="appearance-card ${galleryCardKey(character) === selectedCardKey ? 'active' : ''}" data-key="${escapeHtml(galleryCardKey(character))}" type="button">
+      <span class="favorite-toggle ${isFavoriteAppearance(character) ? 'active' : ''}" data-favorite-key="${escapeHtml(appearanceFavoriteKey(character))}" role="button" tabindex="0" title="즐겨찾기">
+        ${starIconMarkup()}
+      </span>
       ${portraitMarkup(character, 'mini-portrait')}
       <strong>${sourceBadgeMarkup(character)} ${escapeHtml(displayNameWithDummyMarker(character))}</strong>
       <span>이미지: ${escapeHtml(character.imageSetName)}</span>
     </button>
-  `).join('');
+  `).join('') || '<p class="empty">검색 결과가 없습니다.</p>';
 
   for (const card of document.querySelectorAll('.appearance-card')) {
     card.addEventListener('click', () => {
       applyGalleryImageSelection(card.dataset.key);
     });
   }
+  for (const button of document.querySelectorAll('.favorite-toggle')) {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleFavoriteAppearance(button.dataset.favoriteKey);
+    });
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleFavoriteAppearance(button.dataset.favoriteKey);
+    });
+  }
+}
+
+function starIconMarkup() {
+  return '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.77.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>';
 }
 
 function fillForms(character) {
@@ -1320,19 +1694,19 @@ function fillForms(character) {
 
   const selectableCharacters = browsableCharacters().length ? browsableCharacters() : characters();
   const baseCandidates = cloneBaseCharacters();
-  const selectedBase = packTemplateCharacters()[0] || baseCandidates[0] || character;
+  const selectedBase = baseCandidates.find((item) => item.key === character.key)
+    || packTemplateCharacters()[0]
+    || baseCandidates[0]
+    || character;
   const titleCandidates = allTitleChoices();
-  const appearances = appearanceSets().filter((item) => {
-    const combined = `${item.artSet || ''} ${item.imageSetName || ''} ${item.portraitPath || ''} ${item.cardPath || ''}`.toLowerCase();
-    const referenceSource = String(item.referenceSourcePath || '').toLowerCase();
-    const isBfg = item.externalImageSet || referenceSource.includes('bfg_');
-    return isBfg || (item.hasImage && !combined.includes('generic') && !combined.includes('scripted'));
-  });
+  const appearances = selectableImageAppearances();
   const modelAppearances = appearances.filter(canUseAsModelSet);
-  fillSelect('editImageSet', appearances.map((item) => option(item.key, `${sourceLabel(item)} ${item.hasImage ? '■' : '□'} ${displayNameWithDummyMarker(item)} · ${item.artSet}`)));
+  fillSelect('editImageSet', appearances.map(appearanceOption));
   fillSelect('editModelSet', modelAppearances.map((item) => option(item.key, `${sourceLabel(item)} ${displayNameWithDummyMarker(item)} · ${item.modelSetName}`)));
-  fillSelect('sourceImageSet', appearances.map((item) => option(item.key, `${sourceLabel(item)} ${item.hasImage ? '■' : '□'} ${displayNameWithDummyMarker(item)} · ${item.artSet}`)));
+  fillSelect('editVoiceoverActor', voiceoverActorOptions());
+  fillSelect('sourceImageSet', appearances.map(appearanceOption));
   fillSelect('sourceModelSet', modelAppearances.map((item) => option(item.key, `${sourceLabel(item)} ${displayNameWithDummyMarker(item)} · ${item.modelSetName}`)));
+  fillSelect('sourceVoiceoverActor', voiceoverActorOptions());
   fillSelect('sourceBase', baseCandidates.map((item) => option(item.key, item.name)));
   fillSelect('sourceSkill', selectableCharacters.map((item) => option(item.key, `${item.name} · ${item.historicalSkill}`)));
   fillSelect('sourceTitle', titleCandidates.map((item) => option(titleChoiceValue(item), titleOptionLabel(item))));
@@ -1352,8 +1726,10 @@ function fillForms(character) {
 
   $('editImageSet').value = character.artSet || character.key;
   $('editModelSet').value = character.artSet || character.key;
+  $('editVoiceoverActor').value = '__auto__';
   $('sourceImageSet').value = character.artSet || character.key;
   $('sourceModelSet').value = character.artSet || character.key;
+  $('sourceVoiceoverActor').value = '__auto__';
   $('sourceBase').value = selectedBase.key;
   $('sourceSkill').value = character.key;
   const selectedTitleChoice = titleCandidates.find((item) => item.key === character.key) || titleCandidates[0];
@@ -1387,8 +1763,8 @@ function fillForms(character) {
   renderSkillTreeEditors();
 }
 
-function option(value, label) {
-  return { value, label };
+function option(value, label, search = '') {
+  return { value, label, search };
 }
 
 function fillSelect(id, options) {
@@ -1451,7 +1827,7 @@ function filterSelectOptions(select) {
   const allOptions = select._allOptions || [];
   const selectedValue = select.value;
   const filtered = query
-    ? allOptions.filter((item) => `${item.label} ${item.value}`.toLowerCase().includes(query))
+    ? allOptions.filter((item) => `${item.label} ${item.value} ${item.search || ''}`.toLowerCase().includes(query))
     : allOptions;
   const selectedOption = allOptions.find((item) => item.value === selectedValue);
   const nextOptions = selectedOption && !filtered.some((item) => item.value === selectedValue)
@@ -1534,6 +1910,11 @@ function assetUrl(path, sourcePath = '') {
 document.addEventListener('error', (event) => {
   const target = event.target;
   if (!(target instanceof HTMLImageElement)) return;
+  const appearanceCard = target.closest('.appearance-card');
+  if (appearanceCard) {
+    appearanceCard.hidden = true;
+    return;
+  }
   const parent = target.parentElement;
   if (!parent?.matches('.mini-portrait, .portrait-image, .preview-art')) return;
   const fallback = document.createElement('span');
@@ -1636,6 +2017,7 @@ function syncUnitSummary(prefix, sourceId) {
   for (const suffix of ['ChargeBonus', 'Morale', 'PrimaryAmmo']) {
     const input = $(`${prefix}${suffix}`);
     if (input) {
+      input.disabled = true;
       input.addEventListener('input', renderValidation);
       input.addEventListener('change', renderValidation);
     }
@@ -1780,8 +2162,31 @@ function currentQueueEditKind() {
   return item.kind;
 }
 
+function nextQueueWorkNumber() {
+  return state.queue.reduce((maxValue, item) => {
+    const value = Number(item?.payload?.workNumber);
+    return Number.isFinite(value) && value > maxValue ? value : maxValue;
+  }, 0) + 1;
+}
+
 function queueItemNumberFor(kind) {
-  return currentQueueEditKind() === kind ? state.editingQueueIndex + 1 : state.queue.length + 1;
+  const item = state.queue[state.editingQueueIndex];
+  if (item?.kind === kind) {
+    const value = Number(item?.payload?.workNumber);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return nextQueueWorkNumber();
+}
+
+function queueWorkNumber(item, index) {
+  const value = Number(item?.payload?.workNumber);
+  return Number.isFinite(value) && value > 0 ? value : index + 1;
+}
+
+function queueWorkSlug(item, index, fallback) {
+  const fixed = item?.payload?.workSlug;
+  if (fixed) return fixed;
+  return slugify(`${fallback || item?.kind || 'work'}_${queueWorkNumber(item, index)}`);
 }
 
 function commitQueueItem(item) {
@@ -1818,13 +2223,12 @@ function stageEdit() {
   const romance = characters().find((item) => item.key === $('editRomanceSkill').value);
   const attribute = characters().find((item) => item.key === $('editAttributeSet').value);
   const combat = characters().find((item) => item.key === $('editCombatProfile').value);
-  const unit = characters().find((item) => item.key === $('editUnitProfile').value);
+  const unit = character;
   const spawnEvent = spawnEventMeta($('editSpawnEvent').value);
   const armourPatch = armourPatchFrom('edit', combat);
   const armourAudioPatch = armourAudioPatchFrom('edit', combat);
   const itemNumber = queueItemNumberFor('patch_character');
   const editSlug = slugify(`${targetTemplateKey}_${itemNumber}`);
-  const landUnitClone = unitStatCloneFrom('edit', unit, editSlug, itemNumber);
   const attributeSetClone = attributeSetCloneFrom('edit', attribute, editSlug, itemNumber);
   const editBirthYear = birthYearFromInput('editAgeRange', character.birthYear);
   const editAgeRange = ageRangePatch(character.spawnAge, editBirthYear, editSlug, itemNumber);
@@ -1834,13 +2238,12 @@ function stageEdit() {
     imageSetKey: imageSet?.key,
     targetImageToken: imageTokenFromAppearance(appearanceFromCharacter(character)),
     modelSetKey: modelSet?.key,
+    voiceoverActor: $('editVoiceoverActor').value,
     attributeSetSourceKey: attribute?.key,
     attributeSetClone,
     combatProfileSourceKey: combat?.key,
     armourPatch,
     armourAudioPatch,
-    landUnitClone,
-    unitProfileSourceKey: unit?.key,
     subtype: $('editSubtype').value,
     spawn: {
       ageRange: editAgeRange?.newKey || character.spawnAge,
@@ -1855,13 +2258,14 @@ function stageEdit() {
       historical: hist?.key,
       romance: romance?.key,
     },
-    skillTree: skillTreeSnapshot('edit'),
+    workNumber: itemNumber,
+    workSlug: editSlug,
   };
   commitQueueItem({
     kind: 'patch_character',
     type: '기존 수정',
     title: `${character.name} 수정`,
-    description: `${$('editName').value} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 유지(${equipmentBrief(combat)})${armourPatch ? ` · 방어값 ${armourPatch.previousValue}→${armourPatch.value}` : ''}${armourAudioPatch ? ` · Audio ${armourAudioPatch.previousValue || '-'}→${armourAudioPatch.value}` : ''} · 병종 ${unit?.name || '-'}${unitPatchDescription(landUnitClone)} · 등장 이벤트 ${spawnEvent.name} · 역사 ${hist?.name || '-'} · 낭만 ${romance?.name || '-'}`,
+    description: `${$('editName').value} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 유지(${equipmentBrief(combat)})${armourPatch ? ` · 방어값 ${armourPatch.previousValue}→${armourPatch.value}` : ''}${armourAudioPatch ? ` · Audio ${armourAudioPatch.previousValue || '-'}→${armourAudioPatch.value}` : ''} · 병종 참고 ${unit?.name || '-'} · 등장 이벤트 ${spawnEvent.name} · 스킬 참고 ${hist?.name || '-'} / ${romance?.name || '-'}`,
     payload,
   });
 }
@@ -1882,14 +2286,13 @@ function stageCreate() {
   const titleSource = resolveTitleChoice($('sourceTitle').value);
   const attribute = characters().find((item) => item.key === $('sourceAttributeSet').value);
   const combat = characters().find((item) => item.key === $('sourceCombatProfile').value);
-  const unit = characters().find((item) => item.key === $('sourceUnitProfile').value);
+  const unit = base;
   const spawn = characters().find((item) => item.key === $('sourceSpawn').value);
   const spawnEvent = spawnEventMeta($('sourceSpawnEvent').value);
   const armourPatch = armourPatchFrom('source', combat);
   const armourAudioPatch = armourAudioPatchFrom('source', combat);
   const itemNumber = queueItemNumberFor('clone_character');
   const createSlug = slugify(`${base?.key || $('createName').value.trim() || 'new'}_${itemNumber}`);
-  const landUnitClone = unitStatCloneFrom('source', unit, createSlug, itemNumber);
   const attributeSetClone = attributeSetCloneFrom('source', attribute, createSlug, itemNumber);
   const spawnAgeSourceKey = spawn?.spawnAge || base?.spawnAge || base?.templateRow?.spawn_age_range;
   const createBirthYear = birthYearFromInput('createAgeRange', spawn?.birthYear || base?.birthYear);
@@ -1900,18 +2303,17 @@ function stageCreate() {
       base: base?.key,
       imageSet: imageSet?.key,
       modelSet: modelSet?.key,
+      voiceoverActor: $('sourceVoiceoverActor').value,
       skill: skill?.key,
       title: titleChoiceValue(titleSource),
       attributeSet: attribute?.key,
       combatProfile: combat?.key,
-      unitProfile: unit?.key,
       spawn: spawn?.key,
     },
     subtype: $('createSubtype').value,
     attributeSetClone,
     armourPatch,
     armourAudioPatch,
-    landUnitClone,
     spawn: {
       ageRange: createAgeRange?.newKey || spawnAgeSourceKey,
       birthYear: createBirthYear,
@@ -1921,13 +2323,14 @@ function stageCreate() {
       event: $('sourceSpawnEvent').value,
     },
     ageRangeClone: createAgeRange?.changed ? createAgeRange : null,
-    skillTree: skillTreeSnapshot('source'),
+    workNumber: itemNumber,
+    workSlug: createSlug,
   };
   commitQueueItem({
     kind: 'clone_character',
     type: '신규 생성',
     title: `${$('createName').value || '새 장수'} 생성`,
-    description: `기본 ${base?.name || '-'} · 칭호 ${titleSource?.titleName || titleSource?.name || '-'} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 유지(${equipmentBrief(combat)})${armourPatch ? ` · 방어값 ${armourPatch.previousValue}→${armourPatch.value}` : ''}${armourAudioPatch ? ` · Audio ${armourAudioPatch.previousValue || '-'}→${armourAudioPatch.value}` : ''} · 병종 ${unit?.name || '-'}${unitPatchDescription(landUnitClone)} · 스킬 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
+    description: `기본 ${base?.name || '-'} · 칭호 ${titleSource?.titleName || titleSource?.name || '-'} · 이미지 ${imageSet?.name || '-'} · 모델 ${modelSet?.name || '-'} · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 유지(${equipmentBrief(combat)})${armourPatch ? ` · 방어값 ${armourPatch.previousValue}→${armourPatch.value}` : ''}${armourAudioPatch ? ` · Audio ${armourAudioPatch.previousValue || '-'}→${armourAudioPatch.value}` : ''} · 병종 참고 ${unit?.name || '-'} · 스킬 참고 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
     payload,
   });
 }
@@ -1989,6 +2392,7 @@ function loadPatchQueueItem(item) {
   $('editName').value = payload.displayName || $('editName').value;
   setSelectValue('editImageSet', payload.imageSetKey);
   setSelectValue('editModelSet', payload.modelSetKey);
+  setSelectValue('editVoiceoverActor', payload.voiceoverActor || '__auto__');
   setSelectValue('editAttributeSet', payload.attributeSetSourceKey);
   syncAttributeSummary('edit', 'editAttributeSet');
   applyAttributeSetCloneToInputs('edit', payload.attributeSetClone);
@@ -1996,9 +2400,7 @@ function loadPatchQueueItem(item) {
   syncEquipmentSummary('edit', 'editCombatProfile');
   if (payload.armourPatch && $('editArmourValue')) $('editArmourValue').value = payload.armourPatch.value;
   if (payload.armourAudioPatch && $('editArmourAudioType')) $('editArmourAudioType').value = payload.armourAudioPatch.value;
-  setSelectValue('editUnitProfile', payload.unitProfileSourceKey);
   syncUnitSummary('edit', 'editUnitProfile');
-  applyLandUnitCloneToInputs('edit', payload.landUnitClone);
   setSelectValue('editSubtype', payload.subtype);
   $('editWeight').value = payload.spawn?.weight ?? $('editWeight').value;
   $('editAgeRange').value = payload.spawn?.birthYear ?? birthYearForAgeRange(payload.spawn?.ageRange) ?? $('editAgeRange').value;
@@ -2020,6 +2422,7 @@ function loadCloneQueueItem(item) {
   setSelectValue('sourceBase', payload.sourceKeys?.base);
   setSelectValue('sourceImageSet', payload.sourceKeys?.imageSet);
   setSelectValue('sourceModelSet', payload.sourceKeys?.modelSet);
+  setSelectValue('sourceVoiceoverActor', payload.sourceKeys?.voiceoverActor || '__auto__');
   setSelectValue('sourceSkill', payload.sourceKeys?.skill);
   setSelectValue('sourceTitle', payload.sourceKeys?.title);
   renderTitleSummary('source', resolveTitleChoice($('sourceTitle').value));
@@ -2030,9 +2433,7 @@ function loadCloneQueueItem(item) {
   syncEquipmentSummary('source', 'sourceCombatProfile');
   if (payload.armourPatch && $('sourceArmourValue')) $('sourceArmourValue').value = payload.armourPatch.value;
   if (payload.armourAudioPatch && $('sourceArmourAudioType')) $('sourceArmourAudioType').value = payload.armourAudioPatch.value;
-  setSelectValue('sourceUnitProfile', payload.sourceKeys?.unitProfile);
   syncUnitSummary('source', 'sourceUnitProfile');
-  applyLandUnitCloneToInputs('source', payload.landUnitClone);
   setSelectValue('sourceSpawn', payload.sourceKeys?.spawn);
   setSelectValue('createSubtype', payload.subtype);
   $('createWeight').value = payload.spawn?.weight ?? $('createWeight').value;
@@ -2198,8 +2599,8 @@ function renderSkillTreeEditor(prefix) {
     container.innerHTML = '<p class="skill-tree-empty">낭만 스킬트리 데이터를 찾지 못했습니다. 참조 pack을 다시 읽어주세요.</p>';
     return;
   }
-  const draft = skillTreeDraft(prefix, setKey);
-  const activeNodeKey = state.activeSkillNode?.prefix === prefix ? state.activeSkillNode.nodeKey : '';
+  const draft = SKILL_TREE_EDITING_ENABLED ? skillTreeDraft(prefix, setKey) : { replacements: {} };
+  const activeNodeKey = SKILL_TREE_EDITING_ENABLED && state.activeSkillNode?.prefix === prefix ? state.activeSkillNode.nodeKey : '';
   const xs = [...new Set(tree.nodes.map((node) => Number(node.position?.x ?? 0)))].sort((a, b) => a - b);
   const ys = [...new Set(tree.nodes.map((node) => Number(node.position?.y ?? 0)))].sort((a, b) => a - b);
   const gridStyle = `--skill-cols:${Math.max(xs.length, 1)};--skill-rows:${Math.max(ys.length, 1)}`;
@@ -2338,11 +2739,12 @@ function renderSkillTreeEditor(prefix) {
     <div class="skill-tree-head">
       <div>
         <strong>${escapeHtml(skillTreeOwnerName(prefix))} 낭만 스킬트리</strong>
-        <span>${tree.nodes.length}개 노드 · 바꿀 노드를 클릭한 뒤 아래 후보를 선택하세요.</span>
+        <span>${tree.nodes.length}개 노드 · 현재는 보기 전용입니다.</span>
       </div>
-      <button type="button" class="ghost-btn mini" data-skill-reset="${prefix}">초기화</button>
+      ${SKILL_TREE_EDITING_ENABLED ? `<button type="button" class="ghost-btn mini" data-skill-reset="${prefix}">초기화</button>` : ''}
     </div>
-    <div class="skill-tree-board" style="${gridStyle}">
+    ${SKILL_TREE_EDITING_ENABLED ? '' : '<p class="skill-tree-readonly">스킬트리 노드 교체는 아직 수정 팩 생성에 반영되지 않아 UI에서 잠가뒀습니다. 위의 역사/낭만 스킬셋 선택만 현재 저장 대상입니다.</p>'}
+    <div class="skill-tree-board ${SKILL_TREE_EDITING_ENABLED ? '' : 'readonly'}" style="${gridStyle}">
       ${tree.nodes.map((node) => {
         const x = xs.indexOf(Number(node.position?.x ?? 0)) + 1;
         const y = ys.indexOf(Number(node.position?.y ?? 0)) + 1;
@@ -2350,21 +2752,20 @@ function renderSkillTreeEditor(prefix) {
         const info = skillInfo(replaced || node.skillKey);
         const element = info.element || 'none';
         return `
-          <button
-            type="button"
+          <${SKILL_TREE_EDITING_ENABLED ? 'button' : 'div'}
+            ${SKILL_TREE_EDITING_ENABLED ? 'type="button"' : 'role="listitem"'}
             class="skill-node element-${element} ${node.key === activeNode?.key ? 'active' : ''} ${replaced ? 'changed' : ''}"
-            data-skill-node="${escapeHtml(node.key)}"
-            data-skill-prefix="${prefix}"
+            ${SKILL_TREE_EDITING_ENABLED ? `data-skill-node="${escapeHtml(node.key)}" data-skill-prefix="${prefix}"` : ''}
             style="grid-column:${x};grid-row:${y}"
             title="${escapeHtml(`${info.name}\n${skillEffectText(info)}`)}"
           >
             <b>${escapeHtml(info.name)}${replaced ? ' *' : ''}</b>
             <small>${escapeHtml(skillEffectText(info))}</small>
-          </button>
+          </${SKILL_TREE_EDITING_ENABLED ? 'button' : 'div'}>
         `;
       }).join('')}
     </div>
-    <div class="skill-picker">
+    ${SKILL_TREE_EDITING_ENABLED ? `<div class="skill-picker">
       <div class="skill-picker-title">
         <strong>교체할 노드: ${escapeHtml(activeInfo?.name || '노드 선택')}</strong>
         <span>${escapeHtml(skillEffectText(activeInfo))}</span>
@@ -2374,7 +2775,7 @@ function renderSkillTreeEditor(prefix) {
       <div class="skill-candidates" data-skill-candidates="${prefix}">
         ${renderSkillCandidates(prefix, '')}
       </div>
-    </div>
+    </div>` : ''}
   `;
 }
 
@@ -2415,16 +2816,14 @@ function renderSkillCandidates(prefix, query) {
   `).join('') || '<p class="skill-tree-empty">검색 결과가 없습니다.</p>';
 }
 
-function detailOverrideFromSources(attribute, skill, unit, retinueOverride = null) {
+function detailOverrideFromSources(attribute, unit, retinueOverride = null) {
   const overrides = {};
   const attributeDetails = detailsByMode(attribute);
-  const skillDetails = detailsByMode(skill);
   const unitDetails = detailsByMode(unit);
   for (const mode of ['historical', 'romance']) {
     overrides[mode] = compactObject({
       retinue: retinueOverride || unitDetails[mode]?.retinue || unit?.unitProfile,
       attribute_set: attributeDetails[mode]?.attributeSet || attribute?.attributeSet,
-      skill_set_override: skillDetails[mode]?.skillSet || (mode === 'romance' ? skill?.romanceSkill : skill?.historicalSkill),
     });
   }
   return overrides;
@@ -2448,6 +2847,7 @@ function skillSetCloneFromPayload(recipe, snapshot, ownerKey, index, options = {
 function recipeFromQueue() {
   const recipe = {
     modName: 'mtu_custom_character_workflow',
+    workItems: [],
     characterPatches: [],
     characterCloneRecipes: [],
     equipmentStatPatches: [],
@@ -2459,26 +2859,25 @@ function recipeFromQueue() {
   };
 
   state.queue.forEach((item, index) => {
+    const before = recipeSliceCursor(recipe);
     if (item.kind === 'patch_character') {
       const payload = item.payload;
+      const itemNumber = queueWorkNumber(item, index);
+      const workSlug = queueWorkSlug(item, index, payload.targetKey);
+      const targetCharacter = characters().find((candidate) => realTemplateKey(candidate) === payload.targetKey || candidate.key === payload.targetKey);
+      const patchArtSetId = targetCharacter?.artSet
+        ? `hby_art_set_patch_${workSlug}`
+        : '';
       const imageSet = appearanceByKey(payload.imageSetKey);
       const attribute = characters().find((candidate) => candidate.key === payload.attributeSetSourceKey);
-      const hist = characters().find((candidate) => candidate.key === payload.skillSources?.historical);
-      const romance = characters().find((candidate) => candidate.key === payload.skillSources?.romance);
-      const unit = characters().find((candidate) => candidate.key === payload.unitProfileSourceKey);
-      const retinueOverride = payload.landUnitClone?.newKey;
+      const unit = targetCharacter;
+      const retinueOverride = null;
+      const targetImageToken = payload.targetImageToken
+        || imageTokenFromAppearance(appearanceFromCharacter(targetCharacter));
+      const targetCardToken = imageCardKeyFromAppearance(appearanceFromCharacter(targetCharacter)) || targetImageToken;
       const patchImageAssets = imageSet
-        ? customImageAssetsFromAppearance(imageSet, payload.targetImageToken || imageTokenFromAppearance(appearanceFromCharacter(characters().find((candidate) => realTemplateKey(candidate) === payload.targetKey || candidate.key === payload.targetKey))))
+        ? customImageAssetsFromAppearance(imageSet, targetImageToken, targetCardToken)
         : [];
-      if (payload.landUnitClone) {
-        recipe.landUnitClones.push({
-          sourceKey: payload.landUnitClone.sourceKey,
-          newKey: payload.landUnitClone.newKey,
-          overrides: payload.landUnitClone.overrides,
-          sourceRetinueKey: payload.landUnitClone.sourceRetinueKey || '',
-          newRetinueKey: payload.landUnitClone.newRetinueKey || payload.landUnitClone.newKey,
-        });
-      }
       if (payload.attributeSetClone) {
         recipe.attributeSetClones.push({
           sourceSetKey: payload.attributeSetClone.sourceSetKey,
@@ -2493,9 +2892,12 @@ function recipeFromQueue() {
           overrides: payload.ageRangeClone.overrides,
         });
       }
-      const customRomanceSkillSet = skillSetCloneFromPayload(recipe, payload.skillTree, payload.targetKey, index + 1, { keepSourceKey: true });
       const attributeSetOverride = payload.attributeSetClone?.newSetKey;
-      const historicalSkillSet = detailsByMode(hist).historical?.skillSet || hist?.historicalSkill;
+      const modelSet = appearanceByKey(payload.modelSetKey);
+      const templateGenderOverrides = voiceoverActorFromSelection(payload.voiceoverActor, modelSet, {
+        ...(targetCharacter?.templateRow || {}),
+        subtype: payload.subtype,
+      });
       recipe.characterPatches.push({
         templateKey: payload.targetKey,
         displayName: payload.displayName,
@@ -2505,19 +2907,28 @@ function recipeFromQueue() {
           min_spawn_round: payload.spawn?.minRound,
           max_spawn_round: payload.spawn?.maxRound,
           subtype: payload.subtype,
+          art_set_override: patchArtSetId,
+          ...templateGenderOverrides,
         }),
         imageAssets: patchImageAssets,
-        artOverrides: modelArtOverridesFromAppearance(appearanceByKey(payload.modelSetKey)),
+        artSetOverrides: compactObject({
+          is_male: templateGenderOverrides.is_male,
+        }),
+        artOverrides: {
+          ...(imageSet && targetImageToken ? {
+            portrait: `${targetImageToken}/`,
+            card: targetCardToken,
+          } : {}),
+          ...modelArtOverridesFromAppearance(modelSet),
+        },
         detailOverrides: {
           historical: compactObject({
             retinue: retinueOverride || detailsByMode(unit).historical?.retinue || unit?.unitProfile,
             attribute_set: attributeSetOverride || detailsByMode(attribute).historical?.attributeSet || attribute?.attributeSet,
-            skill_set_override: historicalSkillSet,
           }),
           romance: compactObject({
             retinue: retinueOverride || detailsByMode(unit).romance?.retinue || unit?.unitProfile,
             attribute_set: attributeSetOverride || detailsByMode(attribute).romance?.attributeSet || attribute?.attributeSet,
-            skill_set_override: customRomanceSkillSet || detailsByMode(romance).romance?.skillSet || romance?.romanceSkill,
           }),
         },
       });
@@ -2541,66 +2952,24 @@ function recipeFromQueue() {
 
     if (item.kind === 'clone_character') {
       const payload = item.payload;
+      const itemNumber = queueWorkNumber(item, index);
+      const slug = queueWorkSlug(item, index, payload.sourceKeys?.base || payload.newName);
       const appearanceBase = characterByAppearanceKey(payload.sourceKeys?.imageSet);
       const selectedBase = characters().find((candidate) => candidate.key === payload.sourceKeys?.base);
       const base = selectedBase || appearanceBase;
-      const packBase = base?.source === 'reference'
-        ? (packTemplateCharacters()[0] || base)
-        : base;
+      const packBase = firstCharacterWithDetails(base);
       const baseTemplate = base?.templateRow || {};
       const baseDetails = detailsByMode(base);
       const imageSet = appearanceByKey(payload.sourceKeys?.imageSet);
       const modelSet = appearanceByKey(payload.sourceKeys?.modelSet);
       const attribute = characters().find((candidate) => candidate.key === payload.sourceKeys?.attributeSet);
-      const skill = characters().find((candidate) => candidate.key === payload.sourceKeys?.skill);
       const titleSource = resolveTitleChoice(payload.sourceKeys?.title);
-      const detailSource = skill?.source === 'reference' ? packBase : (skill || packBase);
-      const unit = characters().find((candidate) => candidate.key === payload.sourceKeys?.unitProfile);
+      const detailSource = firstCharacterWithDetails(packBase, selectedBase, appearanceBase);
+      const unit = detailSource;
       const spawn = characters().find((candidate) => candidate.key === payload.sourceKeys?.spawn);
       const selectedAgeRange = payload.spawn?.ageRange || spawn?.spawnAge || base?.spawnAge || baseTemplate.spawn_age_range;
-      const slug = slugify(payload.newName);
-      const itemNumber = index + 1;
-      let effectiveLandUnitClone = payload.landUnitClone
-        ? {
-            sourceKey: payload.landUnitClone.sourceKey,
-            newKey: payload.landUnitClone.newKey,
-            overrides: { ...(payload.landUnitClone.overrides || {}) },
-          }
-        : null;
-      const armourOverrides = {};
-      const sourceArmourKey = payload.armourPatch?.armourKey || payload.armourAudioPatch?.armourKey;
-      if (payload.armourPatch) armourOverrides.armour_value = payload.armourPatch.value;
-      if (payload.armourAudioPatch) armourOverrides.audio_type = payload.armourAudioPatch.value;
-      if (sourceArmourKey && Object.keys(armourOverrides).length && unit?.landUnitKey) {
-        const newArmourKey = `hby_armour_type_${slug}_${itemNumber}`;
-        recipe.armourTypeClones.push({
-          sourceKey: sourceArmourKey,
-          newKey: newArmourKey,
-          overrides: armourOverrides,
-        });
-        effectiveLandUnitClone = effectiveLandUnitClone || {
-          sourceKey: unit.landUnitKey,
-          newKey: `hby_land_unit_${slug}_${itemNumber}`,
-          sourceRetinueKey: retinueKeyForCharacter(unit),
-          newRetinueKey: `hby_land_unit_${slug}_${itemNumber}`,
-          overrides: {},
-        };
-        effectiveLandUnitClone.overrides = {
-          ...effectiveLandUnitClone.overrides,
-          armour: newArmourKey,
-        };
-      }
-      const retinueOverride = effectiveLandUnitClone?.newKey;
+      const retinueOverride = null;
       const attributeSetOverride = payload.attributeSetClone?.newSetKey;
-      if (effectiveLandUnitClone) {
-        recipe.landUnitClones.push({
-          sourceKey: effectiveLandUnitClone.sourceKey,
-          newKey: effectiveLandUnitClone.newKey,
-          overrides: effectiveLandUnitClone.overrides,
-          sourceRetinueKey: effectiveLandUnitClone.sourceRetinueKey || '',
-          newRetinueKey: effectiveLandUnitClone.newRetinueKey || effectiveLandUnitClone.newKey,
-        });
-      }
       if (payload.attributeSetClone) {
         recipe.attributeSetClones.push({
           sourceSetKey: payload.attributeSetClone.sourceSetKey,
@@ -2616,7 +2985,7 @@ function recipeFromQueue() {
         });
       }
       const titleInitialCeo = titleSource?.titleInitialCeoKey || titleSource?.details?.find((detail) => detail.initialCeos)?.initialCeos;
-      const detailOverrides = detailOverrideFromSources(attribute, skill, unit, retinueOverride);
+      const detailOverrides = detailOverrideFromSources(attribute, unit, retinueOverride);
       if (attributeSetOverride) {
         detailOverrides.historical = compactObject({
           ...detailOverrides.historical,
@@ -2627,22 +2996,16 @@ function recipeFromQueue() {
           attribute_set: attributeSetOverride,
         });
       }
-      const customRomanceSkillSet = skillSetCloneFromPayload(recipe, payload.skillTree, payload.newName || slug, index + 1);
-      const customTemplateKey = `hby_template_${slug}_${index + 1}`;
-      const customArtSetId = `hby_art_set_${slug}_${index + 1}`;
+      const customTemplateKey = `hby_template_${slug}_${itemNumber}`;
+      const customArtSetId = `hby_art_set_${slug}_${itemNumber}`;
+      const customImageToken = customTemplateKey;
       const customImageAssets = imageSet
-        ? imageAssetsFromAppearance(imageSet)
+        ? customImageAssetsFromAppearance(imageSet, customImageToken)
         : [];
-      const templateGenderOverrides = templateGenderOverridesFromAppearance(modelSet, {
+      const templateGenderOverrides = voiceoverActorFromSelection(payload.sourceKeys?.voiceoverActor, modelSet, {
         ...baseTemplate,
         subtype: payload.subtype,
       });
-      if (customRomanceSkillSet) {
-        detailOverrides.romance = compactObject({
-          ...detailOverrides.romance,
-          skill_set_override: customRomanceSkillSet,
-        });
-      }
       for (const mode of ['historical', 'romance']) {
         detailOverrides[mode] = compactObject({
           ...detailOverrides[mode],
@@ -2663,7 +3026,8 @@ function recipeFromQueue() {
         displayName: payload.newName,
         imageAssets: customImageAssets,
         artOverrides: compactObject({
-          ...imageArtOverridesFromAppearance(imageSet),
+          portrait: `${customImageToken}/`,
+          card: customImageToken,
           ...modelArtOverridesFromAppearance(modelSet),
         }),
         templateOverrides: compactObject({
@@ -2689,9 +3053,43 @@ function recipeFromQueue() {
         detailOverrides,
       });
     }
+    recipe.workItems.push({
+      kind: item.kind,
+      type: item.type,
+      title: item.title,
+      workNumber: item.payload?.workNumber || index + 1,
+      workSlug: item.payload?.workSlug || '',
+      recipe: recipeSlice(recipe, before),
+    });
   });
 
   return recipe;
+}
+
+function recipeSliceCursor(recipe) {
+  return {
+    characterPatches: recipe.characterPatches.length,
+    characterCloneRecipes: recipe.characterCloneRecipes.length,
+    equipmentStatPatches: recipe.equipmentStatPatches.length,
+    armourTypeClones: recipe.armourTypeClones.length,
+    landUnitClones: recipe.landUnitClones.length,
+    skillSetClones: recipe.skillSetClones.length,
+    attributeSetClones: recipe.attributeSetClones.length,
+    ageRangeClones: recipe.ageRangeClones.length,
+  };
+}
+
+function recipeSlice(recipe, before) {
+  return {
+    characterPatches: recipe.characterPatches.slice(before.characterPatches),
+    characterCloneRecipes: recipe.characterCloneRecipes.slice(before.characterCloneRecipes),
+    equipmentStatPatches: recipe.equipmentStatPatches.slice(before.equipmentStatPatches),
+    armourTypeClones: recipe.armourTypeClones.slice(before.armourTypeClones),
+    landUnitClones: recipe.landUnitClones.slice(before.landUnitClones),
+    skillSetClones: recipe.skillSetClones.slice(before.skillSetClones),
+    attributeSetClones: recipe.attributeSetClones.slice(before.attributeSetClones),
+    ageRangeClones: recipe.ageRangeClones.slice(before.ageRangeClones),
+  };
 }
 
 function compactObject(value) {
@@ -2822,6 +3220,11 @@ async function loadPack(options = {}) {
     state.serverMessages = [validationItem('info', '팩 읽기 완료', `${state.characters.length}명 로드 · ${cacheText}${referenceText}${timingText}`)];
     renderAll();
   } catch (error) {
+    if (!forceRefresh && isMissingSnapshotError(error)) {
+      state.loadingPack = false;
+      await loadPack({ forceRefresh: true });
+      return;
+    }
     state.serverMessages = [validationItem(
       'error',
       forceRefresh ? 'DB 갱신 실패' : 'DB 스냅샷 없음',
@@ -2831,6 +3234,15 @@ async function loadPack(options = {}) {
   } finally {
     state.loadingPack = false;
   }
+}
+
+function isMissingSnapshotError(error) {
+  const message = String(error?.message || '');
+  return message.includes('DB') && (
+    message.includes('스냅샷')
+    || message.includes('갱신')
+    || message.includes('pack 원본')
+  );
 }
 
 async function validateServerRecipe() {
@@ -2857,8 +3269,10 @@ async function buildServerPack() {
   state.serverMessages = [validationItem('info', '저장 중', saveTarget)];
   renderValidation();
   try {
-    await postJson('/api/build', serverPayload());
-    state.serverMessages = [validationItem('ok', '저장 완료', 'pack 생성이 완료되었습니다.')];
+    const data = await postJson('/api/build', serverPayload());
+    state.serverMessages = data.messages?.length
+      ? data.messages
+      : [validationItem(data.ok === false ? 'error' : 'ok', data.ok === false ? '저장 검증 실패' : '저장 완료', 'pack 생성이 완료되었습니다.')];
   } catch (error) {
     state.serverMessages = [validationItem('error', '저장 실패', `pack 생성에 실패했습니다: ${error.message}`)];
   }
@@ -2892,6 +3306,12 @@ for (const button of document.querySelectorAll('.filter')) {
 }
 
 $('searchInput').addEventListener('input', renderRoster);
+if ($('appearanceSearchInput')) {
+  $('appearanceSearchInput').addEventListener('input', () => {
+    state.imageGalleryQuery = $('appearanceSearchInput').value;
+    renderAppearanceGallery();
+  });
+}
 $('editModeButton').addEventListener('click', () => setMode('edit'));
 $('createModeButton').addEventListener('click', () => setMode('create'));
 for (const button of document.querySelectorAll('.tab-btn')) {
@@ -2899,6 +3319,8 @@ for (const button of document.querySelectorAll('.tab-btn')) {
 }
 $('editCombatProfile').addEventListener('change', () => syncEquipmentSummary('edit', 'editCombatProfile'));
 $('sourceCombatProfile').addEventListener('change', () => syncEquipmentSummary('source', 'sourceCombatProfile'));
+$('editVoiceoverActor').addEventListener('change', renderValidation);
+$('sourceVoiceoverActor').addEventListener('change', renderValidation);
 $('editAttributeSet').addEventListener('change', () => syncAttributeSummary('edit', 'editAttributeSet'));
 $('sourceAttributeSet').addEventListener('change', () => syncAttributeSummary('source', 'sourceAttributeSet'));
 $('editUnitProfile').addEventListener('change', () => syncUnitSummary('edit', 'editUnitProfile'));
@@ -2923,8 +3345,17 @@ $('sourceSpawn').addEventListener('change', () => {
   if (spawn) $('createAgeRange').value = spawn.birthYear ?? birthYearForAgeRange(spawn.spawnAge) ?? '';
   renderValidation();
 });
-$('editImageSet').addEventListener('change', updateImagePreviews);
-$('sourceImageSet').addEventListener('change', updateImagePreviews);
+$('editImageSet').addEventListener('change', () => {
+  state.selectedAppearanceCardKey = '';
+  updateImagePreviews();
+  renderAppearanceGallery();
+});
+$('sourceImageSet').addEventListener('change', () => {
+  state.selectedAppearanceCardKey = '';
+  updateImagePreviews();
+  renderAppearanceGallery();
+  renderValidation();
+});
 $('editSpawnEvent').addEventListener('change', () => {
   updateSpawnFieldLabels('edit');
   renderValidation();
@@ -2957,6 +3388,10 @@ $('workQueue').addEventListener('keydown', (event) => {
   loadQueueItem(Number(item.dataset.loadQueue));
 });
 document.addEventListener('click', (event) => {
+  if (!SKILL_TREE_EDITING_ENABLED && event.target.closest('[data-skill-reset], [data-skill-element-tab], [data-skill-node], [data-skill-candidate]')) {
+    event.preventDefault();
+    return;
+  }
   const reset = event.target.closest('[data-skill-reset]');
   if (reset) {
     const prefix = reset.dataset.skillReset;
@@ -2999,6 +3434,10 @@ document.addEventListener('click', (event) => {
   }
 });
 document.addEventListener('input', (event) => {
+  if (!SKILL_TREE_EDITING_ENABLED && event.target.closest('[data-skill-search]')) {
+    event.preventDefault();
+    return;
+  }
   const search = event.target.closest('[data-skill-search]');
   if (!search) return;
   const prefix = search.dataset.skillSearch;

@@ -83,6 +83,7 @@ class CharacterPatch:
     display_name: str | None = None
     image_assets: list[dict[str, str]] | None = None
     art_overrides: dict[str, Any] | None = None
+    art_set_overrides: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ class Recipe:
     age_range_clones: list[AgeRangeClone] = field(default_factory=list)
     character_clones: list[CharacterClone] = field(default_factory=list)
     character_patches: list[CharacterPatch] = field(default_factory=list)
+    work_items: list[dict[str, Any]] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -196,6 +198,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             display_name=item.get("displayName"),
             image_assets=item.get("imageAssets") or [],
             art_overrides=item.get("artOverrides") or {},
+            art_set_overrides=item.get("artSetOverrides") or {},
         )
         for item in data.get("characterPatches", [])
     ]
@@ -209,6 +212,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
         age_range_clones=age_range_clones,
         character_clones=character_clones,
         character_patches=character_patches,
+        work_items=data.get("workItems", []),
         raw=data,
     )
 

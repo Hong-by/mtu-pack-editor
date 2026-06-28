@@ -72,6 +72,10 @@ def main() -> int:
             webbrowser.open(url)
         print("Press Ctrl+C to stop servers started by this launcher.")
 
+        if not processes:
+            while True:
+                time.sleep(0.5)
+
         while processes:
             for process in list(processes):
                 code = process.poll()

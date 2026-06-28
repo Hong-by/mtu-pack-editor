@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
-SCHEMA_VERSION = 35
+SCHEMA_VERSION = 37
 
 
 class PackCache:
@@ -24,27 +25,33 @@ class PackCache:
     ) -> dict[str, Any] | None:
         fingerprint = _fingerprint(pack_path)
         reference_key = _reference_key(reference_paths or [])
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                select analysis_json, characters_json
-                from pack_open_cache
-                where input_path = ?
-                  and mtime_ns = ?
-                  and size_bytes = ?
-                  and include_vanilla = ?
-                  and reference_key = ?
-                  and cache_version = ?
-                """,
-                (
-                    str(pack_path.resolve()),
-                    fingerprint["mtime_ns"],
-                    fingerprint["size_bytes"],
-                    int(include_vanilla),
-                    reference_key,
-                    SCHEMA_VERSION,
-                ),
-            ).fetchone()
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    select analysis_json, characters_json
+                    from pack_open_cache
+                    where input_path = ?
+                      and mtime_ns = ?
+                      and size_bytes = ?
+                      and include_vanilla = ?
+                      and reference_key = ?
+                      and cache_version = ?
+                    """,
+                    (
+                        str(pack_path.resolve()),
+                        fingerprint["mtime_ns"],
+                        fingerprint["size_bytes"],
+                        int(include_vanilla),
+                        reference_key,
+                        SCHEMA_VERSION,
+                    ),
+                ).fetchone()
+        except sqlite3.OperationalError as error:
+            if "no such table" not in str(error).lower():
+                raise
+            self._ensure_schema()
+            return None
         if row is None:
             return None
         return {
@@ -67,6 +74,7 @@ class PackCache:
     ) -> None:
         fingerprint = _fingerprint(pack_path)
         reference_key = _reference_key(reference_paths or [])
+        self._ensure_schema()
         with self._connect() as connection:
             connection.execute(
                 """
@@ -101,23 +109,29 @@ class PackCache:
         packed_path: str,
     ) -> tuple[str, bytes] | None:
         fingerprint = _fingerprint(pack_path)
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                select content_type, data
-                from pack_asset_cache
-                where input_path = ?
-                  and mtime_ns = ?
-                  and size_bytes = ?
-                  and packed_path = ?
-                """,
-                (
-                    str(pack_path.resolve()),
-                    fingerprint["mtime_ns"],
-                    fingerprint["size_bytes"],
-                    packed_path,
-                ),
-            ).fetchone()
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    select content_type, data
+                    from pack_asset_cache
+                    where input_path = ?
+                      and mtime_ns = ?
+                      and size_bytes = ?
+                      and packed_path = ?
+                    """,
+                    (
+                        str(pack_path.resolve()),
+                        fingerprint["mtime_ns"],
+                        fingerprint["size_bytes"],
+                        packed_path,
+                    ),
+                ).fetchone()
+        except sqlite3.OperationalError as error:
+            if "no such table" not in str(error).lower():
+                raise
+            self._ensure_schema()
+            return None
         if row is None:
             return None
         return row["content_type"], bytes(row["data"])
@@ -130,6 +144,7 @@ class PackCache:
         data: bytes,
     ) -> None:
         fingerprint = _fingerprint(pack_path)
+        self._ensure_schema()
         with self._connect() as connection:
             connection.execute(
                 """
@@ -196,10 +211,15 @@ class PackCache:
                 """
             )
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
 
 
 def _fingerprint(pack_path: Path) -> dict[str, int]:

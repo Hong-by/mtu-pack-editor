@@ -6,9 +6,33 @@ import unittest
 from pathlib import Path
 
 from tk_pack_builder.internal_materials import MaterialPackSession
+from tk_pack_builder.stat_tables import resolve_stat_target
 
 
 class MaterialPackSessionTest(unittest.TestCase):
+    def test_stat_target_reads_addon_equipment_variant_tables(self) -> None:
+        payload = {
+            "tables": {
+                "db/ceos_to_equipment_variants_tables/!!ironic_addon_korea": {
+                    "rows": [{"ceos_key": "addon_armour_ceo", "armour": "addon_armour_row"}],
+                },
+                "db/unit_armour_types_tables/!!ironic_addon_korea": {
+                    "rows": [{"key": "addon_armour_row", "armour_value": 40}],
+                },
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+
+        target = resolve_stat_target(session, "addon_armour_ceo", "armour", "armour_value", 88, None)
+
+        self.assertEqual(target.table_name, "db/unit_armour_types_tables/!!ironic_addon_korea")
+        self.assertEqual(target.row_key, "addon_armour_row")
+
     def test_reads_tables_locs_and_metadata(self) -> None:
         payload = {
             "baseline": "v0.1.5",

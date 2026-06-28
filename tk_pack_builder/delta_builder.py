@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import struct
 from pathlib import Path
 from typing import Any
 import zlib
@@ -10,7 +11,7 @@ import zlib
 from .adapters import RpfmPackSession, _decode_rpfm_cell, _encode_rpfm_cell
 from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_name
 from .land_units import validate_land_unit_clone
-from .recipe import AgeRangeClone, ArmourTypeClone, AttributeSetClone, CharacterClone, CharacterPatch, Recipe, SkillSetClone
+from .recipe import AgeRangeClone, ArmourTypeClone, AttributeSetClone, CharacterClone, CharacterPatch, Recipe, SkillSetClone, recipe_from_dict
 from .stat_tables import TABLE_ALIASES, StatTarget, resolve_stat_target, resolve_table_name
 
 
@@ -18,6 +19,20 @@ LEGACY_TEMPLATE_PACK = Path("work/legacy_template/8King_4P_1.7_up.pack")
 ROOT = Path(os.environ.get("TK_PACK_EDITOR_ROOT", Path(__file__).resolve().parents[1])).resolve()
 EXTRACTED_ASSET_ROOT = ROOT / "work" / "assets"
 CORE_ASSET_SOURCE_ID = "17309a40b912"
+IMAGE_ONLY_ASSET_PREFIX = "__image_only_reference__"
+TEMP_IMAGE_ASSET_ROOT = ROOT / "work" / "tmp_delta_image_assets"
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_COMMENT_KEY = "Comment"
+PANEL_COMMENT_FALLBACKS = {
+    ("large_panel", "angry"): "[type:angry;x:-80;y:121;z-order:0;pivot_x:0.5001;pivot_y:0.5000;]",
+    ("large_panel", "happy"): "[type:happy;x:-33;y:122;z-order:0;pivot_x:0.4995;pivot_y:0.4997;]",
+    ("large_panel", "norm"): "[type:norm;x:-10;y:122;z-order:0;pivot_x:0.4999;pivot_y:0.4998;]",
+    ("small_panel", "angry"): "[type:angry;x:-55;y:84;z-order:0;pivot_x:0.5008;pivot_y:0.5006;]",
+    ("small_panel", "happy"): "[type:happy;x:-23;y:84;z-order:0;pivot_x:0.4993;pivot_y:0.4995;]",
+    ("small_panel", "norm"): "[type:norm;x:-7;y:84;z-order:0;pivot_x:0.4997;pivot_y:0.4996;]",
+    ("root", "norm"): "[type:norm;x:-10;y:122;z-order:0;pivot_x:0.4999;pivot_y:0.4998;]",
+}
 
 
 def build_delta_pack(
@@ -34,88 +49,109 @@ def build_delta_pack(
     rows_by_table: dict[str, list[dict[str, Any]]] = {}
     loc_rows: dict[str, str] = {}
     opened_pack_keys = {str(session.pack_path.resolve()): session.pack_key}
-    patched_skill_set_keys = {clone.new_set_key for clone in recipe.skill_set_clones}
+    patched_skill_set_keys: set[str] = set()
 
-    changed_stats = _collect_stat_patch_rows(
-        session,
-        recipe,
-        source_dbs,
-        rows_by_table,
-        reference_paths or [],
-        opened_pack_keys,
-    )
-    cloned_armour_types = _collect_armour_type_clone_rows(
-        session,
-        recipe.armour_type_clones,
-        source_dbs,
-        rows_by_table,
-        reference_paths or [],
-        opened_pack_keys,
-    )
-    cloned_land_units = _collect_land_unit_clone_rows(
-        session,
-        recipe,
-        source_dbs,
-        rows_by_table,
-        reference_paths or [],
-        opened_pack_keys,
-    )
-    attribute_sets = _collect_attribute_set_clone_rows(
-        session,
-        recipe.attribute_set_clones,
-        source_dbs,
-        rows_by_table,
-        reference_paths or [],
-        opened_pack_keys,
-    )
-    skill_sets = _collect_skill_set_clone_rows(
-        session,
-        recipe.skill_set_clones,
-        source_dbs,
-        rows_by_table,
-        reference_paths or [],
-        opened_pack_keys,
-    )
-    age_ranges = _collect_age_range_clone_rows(
-        session,
-        recipe.age_range_clones,
-        source_dbs,
-        rows_by_table,
-        reference_paths or [],
-        opened_pack_keys,
-    )
-    changed_character_fields = _collect_character_patch_rows(
-        session,
-        recipe.character_patches,
-        source_dbs,
-        rows_by_table,
-        loc_rows,
-        patched_skill_set_keys,
-        reference_paths or [],
-        opened_pack_keys,
-    )
-    cloned_characters = _collect_character_clone_rows(
-        session,
-        recipe.character_clones,
-        source_dbs,
-        rows_by_table,
-        loc_rows,
-        reference_paths or [],
-        opened_pack_keys,
-    )
-    copied_dependency_rows = _collect_character_dependency_rows(
-        session,
-        recipe.character_clones,
-        source_dbs,
-        rows_by_table,
-        reference_paths or [],
-        opened_pack_keys,
-    )
-    campaign_script = _campaign_start_spawn_script(recipe.character_clones)
-    diagnostic_warnings = _clone_image_asset_target_warnings(recipe.character_clones)
+    changed_stats = 0
+    cloned_armour_types = 0
+    cloned_land_units = 0
+    attribute_sets = 0
+    skill_sets = 0
+    age_ranges = 0
+    changed_character_fields = 0
+    cloned_characters = 0
+    copied_dependency_rows = 0
+    processed_clones: list[CharacterClone] = []
+    processed_patches: list[CharacterPatch] = []
+
+    for work_recipe in _processing_recipes(recipe):
+        patched_skill_set_keys.update(clone.new_set_key for clone in work_recipe.skill_set_clones)
+        changed_stats += _collect_stat_patch_rows(
+            session,
+            work_recipe,
+            source_dbs,
+            rows_by_table,
+            reference_paths or [],
+            opened_pack_keys,
+        )
+        cloned_armour_types += _collect_armour_type_clone_rows(
+            session,
+            work_recipe.armour_type_clones,
+            source_dbs,
+            rows_by_table,
+            reference_paths or [],
+            opened_pack_keys,
+        )
+        cloned_land_units += _collect_land_unit_clone_rows(
+            session,
+            work_recipe,
+            source_dbs,
+            rows_by_table,
+            reference_paths or [],
+            opened_pack_keys,
+        )
+        attribute_sets += _collect_attribute_set_clone_rows(
+            session,
+            work_recipe.attribute_set_clones,
+            source_dbs,
+            rows_by_table,
+            reference_paths or [],
+            opened_pack_keys,
+        )
+        skill_sets += _collect_skill_set_clone_rows(
+            session,
+            work_recipe.skill_set_clones,
+            source_dbs,
+            rows_by_table,
+            reference_paths or [],
+            opened_pack_keys,
+        )
+        age_ranges += _collect_age_range_clone_rows(
+            session,
+            work_recipe.age_range_clones,
+            source_dbs,
+            rows_by_table,
+            reference_paths or [],
+            opened_pack_keys,
+        )
+        changed_character_fields += _collect_character_patch_rows(
+            session,
+            work_recipe.character_patches,
+            source_dbs,
+            rows_by_table,
+            loc_rows,
+            patched_skill_set_keys,
+            reference_paths or [],
+            opened_pack_keys,
+        )
+        cloned_characters += _collect_character_clone_rows(
+            session,
+            work_recipe.character_clones,
+            source_dbs,
+            rows_by_table,
+            loc_rows,
+            reference_paths or [],
+            opened_pack_keys,
+        )
+        copied_dependency_rows += _collect_character_dependency_rows(
+            session,
+            work_recipe.character_clones,
+            source_dbs,
+            rows_by_table,
+            reference_paths or [],
+            opened_pack_keys,
+        )
+        processed_clones.extend(work_recipe.character_clones)
+        processed_patches.extend(work_recipe.character_patches)
+
+    campaign_script = _campaign_start_spawn_script(processed_clones)
+    diagnostic_warnings = [
+        *_clone_image_asset_target_warnings(processed_clones),
+        *_image_asset_path_warnings([*processed_clones, *processed_patches]),
+    ]
+    processed_recipe = _recipe_with_processed_characters(recipe, processed_clones, processed_patches)
     _write_delta_diagnostics(
         output_path,
-        recipe,
+        processed_recipe,
         rows_by_table,
         loc_rows,
         campaign_script,
@@ -144,11 +180,11 @@ def build_delta_pack(
                 loc_rows,
             )
 
-        incident_tables = _write_spawn_incident_tables(session, target_key, recipe.character_clones)
+        incident_tables = _write_spawn_incident_tables(session, target_key, processed_clones)
         copied_assets = _copy_image_assets(
             session,
             target_key,
-            [*recipe.character_clones, *recipe.character_patches],
+            [*processed_clones, *processed_patches],
             opened_pack_keys,
         )
 
@@ -222,6 +258,37 @@ def build_delta_pack_from_materials(
     )
 
 
+def _processing_recipes(recipe: Recipe) -> list[Recipe]:
+    if not recipe.work_items:
+        return [recipe]
+    recipes: list[Recipe] = []
+    for work in recipe.work_items:
+        work_recipe = dict(work.get("recipe") or {})
+        work_recipe["modName"] = recipe.mod_name
+        recipes.append(recipe_from_dict(work_recipe))
+    return recipes
+
+
+def _recipe_with_processed_characters(
+    recipe: Recipe,
+    clones: list[CharacterClone],
+    patches: list[CharacterPatch],
+) -> Recipe:
+    return Recipe(
+        mod_name=recipe.mod_name,
+        equipment_stat_patches=recipe.equipment_stat_patches,
+        armour_type_clones=recipe.armour_type_clones,
+        land_unit_clones=recipe.land_unit_clones,
+        skill_set_clones=recipe.skill_set_clones,
+        attribute_set_clones=recipe.attribute_set_clones,
+        age_range_clones=recipe.age_range_clones,
+        character_clones=clones,
+        character_patches=patches,
+        work_items=recipe.work_items,
+        raw=recipe.raw,
+    )
+
+
 def _collect_stat_patch_rows(
     session: RpfmPackSession,
     recipe: Recipe,
@@ -238,15 +305,20 @@ def _collect_stat_patch_rows(
         opened_pack_keys,
     )
     for patch in recipe.equipment_stat_patches:
-        target = _resolve_reference_backed_stat_target(
-            tables,
-            table_names,
-            patch.equipment_key,
-            patch.stat_table,
-            patch.column,
-            patch.value,
-            patch.game_mode,
-        )
+        try:
+            target = _resolve_reference_backed_stat_target(
+                tables,
+                table_names,
+                patch.equipment_key,
+                patch.stat_table,
+                patch.column,
+                patch.value,
+                patch.game_mode,
+            )
+        except ValueError as error:
+            if str(error).startswith("Equipment stat mapping not found:"):
+                continue
+            raise
         rows = tables[target.stat_table]
         row = _find_required(rows, "key", target.row_key)
         patched = {**row, target.column: target.value}
@@ -610,6 +682,12 @@ def _clone_main_unit_for_land_unit(
     cloned = {**source, key_field: clone.new_key}
     if "land_unit" in cloned:
         cloned["land_unit"] = clone.new_key
+    if "unique_index" in cloned:
+        cloned["unique_index"] = _unique_numeric_delta_value(
+            f"main_units:{clone.new_key}",
+            [*rows, *[row for table_rows in rows_by_table.values() for row in table_rows]],
+            "unique_index",
+        )
     table_path = source.get("_sourceTablePath") or table_names.get("main_units")
     if not table_path:
         return None
@@ -799,7 +877,11 @@ def _collect_character_patch_rows(
 
     changed = 0
     for patch in patches:
-        template = dict(_find_required(templates, "key", patch.template_key))
+        source_template = _find_required(templates, "key", patch.template_key)
+        source_art_set_id = str(source_template.get("art_set_override") or "")
+        template_table = source_template.get("_sourceTablePath") or table_names["character_generation_templates"]
+        existing_template = _find_delta_row(rows_by_table, "key", patch.template_key, template_table)
+        template = dict(existing_template or source_template)
         for column, value in patch.template_overrides.items():
             if template.get(column) != value:
                 template[column] = value
@@ -808,12 +890,22 @@ def _collect_character_patch_rows(
             changed += 1
         _upsert_delta_row(
             rows_by_table,
-            template.get("_sourceTablePath") or table_names["character_generation_templates"],
+            template_table,
             "key",
             _clean_source_row(template),
         )
         art_set_id = str(template.get("art_set_override") or "")
         if art_set_id:
+            if source_art_set_id and art_set_id != source_art_set_id:
+                _clone_art_set_patch_delta(
+                    tables,
+                    table_names,
+                    rows_by_table,
+                    source_art_set_id,
+                    art_set_id,
+                    patch.art_set_overrides,
+                    patch.art_overrides,
+                )
             _copy_matching_rows(
                 tables,
                 table_names,
@@ -822,6 +914,14 @@ def _collect_character_patch_rows(
                 lambda row, key=art_set_id: row.get("art_set_id") == key,
                 "art_set_id",
             )
+            if patch.art_set_overrides:
+                _patch_art_set_row(
+                    tables,
+                    table_names,
+                    rows_by_table,
+                    art_set_id,
+                    patch.art_set_overrides,
+                )
             _copy_matching_rows(
                 tables,
                 table_names,
@@ -837,6 +937,14 @@ def _collect_character_patch_rows(
                     rows_by_table,
                     art_set_id,
                     patch.art_overrides,
+                )
+            if patch.art_set_overrides and "is_male" in patch.art_set_overrides:
+                _patch_child_art_rows_for_gender(
+                    tables,
+                    table_names,
+                    rows_by_table,
+                    art_set_id,
+                    _coerce_bool(patch.art_set_overrides["is_male"]),
                 )
         age_range = str(template.get("spawn_age_range") or "")
         if age_range:
@@ -854,14 +962,16 @@ def _collect_character_patch_rows(
             if row.get("character_generation_template") == patch.template_key
         ]:
             overrides = patch.detail_overrides.get(detail.get("game_mode", ""), {})
-            patched = dict(detail)
+            detail_table = detail.get("_sourceTablePath") or table_names["character_generation_template_game_mode_details"]
+            existing_detail = _find_delta_row(rows_by_table, _detail_key, _detail_key(detail), detail_table)
+            patched = dict(existing_detail or detail)
             for column, value in overrides.items():
                 if patched.get(column) != value:
                     patched[column] = value
                     changed += 1
             _upsert_delta_row(
                 rows_by_table,
-                detail.get("_sourceTablePath") or table_names["character_generation_template_game_mode_details"],
+                detail_table,
                 _detail_key,
                 _clean_source_row(patched),
             )
@@ -936,6 +1046,70 @@ def _patch_art_rows(
             _art_key,
             _clean_source_row({**row, **clean_overrides}),
         )
+
+
+def _patch_child_art_rows_for_gender(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    art_set_id: str,
+    is_male: bool,
+) -> None:
+    child_overrides = _child_art_overrides_for_gender(is_male)
+    for row in tables.get("campaign_character_arts", []):
+        if row.get("art_set_id") != art_set_id or _is_adult_art_row(row):
+            continue
+        portrait = str(row.get("portrait") or "")
+        card = str(row.get("card") or "")
+        if "child" not in portrait and "child" not in card:
+            continue
+        table_path = row.get("_sourceTablePath") or table_names.get("campaign_character_arts")
+        if not table_path:
+            continue
+        _upsert_delta_row(
+            rows_by_table,
+            table_path,
+            _art_key,
+            _clean_source_row({**row, **child_overrides}),
+        )
+
+
+def _child_art_overrides_for_gender(is_male: bool) -> dict[str, str]:
+    if is_male:
+        return {
+            "portrait": "child_03_male/",
+            "card": "child_03_male",
+            "uniform": "3k_main_child_male",
+        }
+    return {
+        "portrait": "child_01_female/",
+        "card": "child_01_female",
+        "uniform": "3k_main_child_female",
+    }
+
+
+def _patch_art_set_row(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    art_set_id: str,
+    overrides: dict[str, Any],
+) -> None:
+    clean_overrides = {key: value for key, value in overrides.items() if value not in (None, "")}
+    if not clean_overrides:
+        return
+    row = _find_row(tables.get("campaign_character_art_sets", []), "art_set_id", art_set_id)
+    if not row:
+        return
+    table_path = row.get("_sourceTablePath") or table_names.get("campaign_character_art_sets")
+    if not table_path:
+        return
+    _upsert_delta_row(
+        rows_by_table,
+        table_path,
+        "art_set_id",
+        _clean_source_row({**row, **clean_overrides}),
+    )
 
 
 def _collect_age_range_clone_rows(
@@ -1171,6 +1345,46 @@ def _clone_art_set_delta(
             _art_key,
             new_row,
         )
+
+
+def _clone_art_set_patch_delta(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    source_art_set: str,
+    new_art_set: str,
+    art_set_overrides: dict[str, Any],
+    art_overrides: dict[str, Any],
+) -> None:
+    if _find_row(tables.get("campaign_character_art_sets", []), "art_set_id", new_art_set):
+        return
+    source_set = _find_required(tables["campaign_character_art_sets"], "art_set_id", source_art_set)
+    set_table = source_set.get("_sourceTablePath") or table_names["campaign_character_art_sets"]
+    new_set = _clean_source_row({
+        **source_set,
+        "art_set_id": new_art_set,
+        **{key: value for key, value in art_set_overrides.items() if value not in (None, "")},
+    })
+    _upsert_delta_row(rows_by_table, set_table, "art_set_id", new_set)
+    tables.setdefault("campaign_character_art_sets", []).append({**new_set, "_sourceTablePath": set_table})
+
+    source_rows = [
+        row for row in tables.get("campaign_character_arts", [])
+        if row.get("art_set_id") == source_art_set
+    ]
+    apply_all = not any(_is_adult_art_row(row) for row in source_rows)
+    art_table = table_names["campaign_character_arts"]
+    for source_row in source_rows:
+        overrides = art_overrides if apply_all or _is_adult_art_row(source_row) else {}
+        new_row = _clean_source_row({
+            **source_row,
+            "art_set_id": new_art_set,
+            **{key: value for key, value in overrides.items() if value not in (None, "")},
+        })
+        if "id" in new_row:
+            new_row["id"] = _art_id_for_clone(new_art_set, source_row)
+        _upsert_delta_row(rows_by_table, art_table, _art_key, new_row)
+        tables.setdefault("campaign_character_arts", []).append({**new_row, "_sourceTablePath": art_table})
 
 
 def _clone_keyed_delta(
@@ -1661,7 +1875,11 @@ def _matching_table_paths(table_list: list[str], alias: str, candidates: list[st
     for candidate in candidates:
         if candidate in tables:
             matches.append(candidate)
-    folder = f"/{alias}_tables/"
+    folder = (
+        "/ceos_to_equipment_variants_tables/"
+        if alias in {"equipment_variants_weapons", "equipment_variants_armours"}
+        else f"/{alias}_tables/"
+    )
     matches.extend(path for path in table_list if folder in path and path not in matches)
     return sorted(matches)
 
@@ -1925,18 +2143,6 @@ def _write_spawn_incident_tables(
 
     template_key = _open_pack_reusing_existing(session, template_path, {})
 
-    incident_key = _incident_key_for_clones(spawn_clones)
-    title = "신규 장수 합류"
-    joined_names = [
-        str(clone.display_name).strip()
-        for clone in spawn_clones
-        if str(clone.display_name or "").strip()
-    ]
-    if joined_names:
-        description = f"{', '.join(joined_names)} 장수가 플레이어 세력에 합류했습니다."
-    else:
-        description = "신규 장수가 플레이어 세력에 합류했습니다."
-
     source_paths = {
         "incidents": "db/incidents_tables/event",
         "payloads": "db/cdir_events_incident_payloads_tables/event",
@@ -1951,45 +2157,49 @@ def _write_spawn_incident_tables(
     payloads_source = _rows_from_db(source_dbs["payloads"])
     options_source = _rows_from_db(source_dbs["options"])
 
-    incident_row = {
-        **incidents_source[0],
-        "key": incident_key,
-        "generate": True,
-        "prioritised": True,
-    }
+    located_source = _find_row(payloads_source, "payload_key", "LOCATED") or payloads_source[0]
 
-    base_id = 1_820_000_000 + (zlib.crc32(incident_key.encode("utf-8")) % 100_000)
+    incident_rows = []
     options = []
-    for index, source_row in enumerate(options_source):
-        options.append({
-            **source_row,
-            "id": base_id + index,
-            "incident_key": incident_key,
+    payloads = []
+    loc = {}
+    for clone in spawn_clones:
+        incident_key = _incident_key_for_clone(clone)
+        name = str(clone.display_name or "").strip() or clone.new_template_key
+        incident_rows.append({
+            **incidents_source[0],
+            "key": incident_key,
+            "generate": False,
+            "prioritised": True,
         })
 
-    payloads = []
-    payload_id = base_id + 100
-    located_source = _find_row(payloads_source, "payload_key", "LOCATED") or payloads_source[0]
-    payloads.append({
-        **located_source,
-        "id": payload_id,
-        "incident_key": incident_key,
-        "payload_key": "LOCATED",
-        "value": "FACTION",
-        "target_key": "default",
-    })
+        base_id = 1_820_000_000 + (zlib.crc32(incident_key.encode("utf-8")) % 100_000)
+        for index, source_row in enumerate(options_source):
+            options.append({
+                **source_row,
+                "id": base_id + index,
+                "incident_key": incident_key,
+            })
 
-    _write_db_file(session, target_key, source_paths["incidents"], source_dbs["incidents"], [incident_row])
+        payloads.append({
+            **located_source,
+            "id": base_id + 100,
+            "incident_key": incident_key,
+            "payload_key": "LOCATED",
+            "value": "FACTION",
+            "target_key": "default",
+        })
+        loc[f"incidents_localised_title_{incident_key}"] = "신규 장수 합류"
+        loc[f"incidents_localised_description_{incident_key}"] = f"{name} 장수가 플레이어 세력에 합류했습니다."
+
+    _write_db_file(session, target_key, source_paths["incidents"], source_dbs["incidents"], incident_rows)
     _write_db_file(session, target_key, source_paths["options"], source_dbs["options"], options)
     _write_db_file(session, target_key, source_paths["payloads"], source_dbs["payloads"], payloads)
     _write_loc_file(
         session,
         target_key,
         "text/db/hby_mtu_pack_editor_event.loc",
-        {
-            f"incidents_localised_title_{incident_key}": title,
-            f"incidents_localised_description_{incident_key}": description,
-        },
+        loc,
     )
     return 3
 
@@ -2062,6 +2272,11 @@ def _incident_key_for_clones(clones: list[CharacterClone]) -> str:
     return f"hby_mtu_pack_editor_spawn_{zlib.crc32(seed.encode('utf-8')):08x}"
 
 
+def _incident_key_for_clone(clone: CharacterClone) -> str:
+    seed = f"{clone.new_template_key}:{clone.spawn_event or ''}"
+    return f"hby_mtu_pack_editor_spawn_{zlib.crc32(seed.encode('utf-8')):08x}"
+
+
 def _loc_db_with_rows(session: RpfmPackSession, rows: dict[str, str]) -> dict[str, Any]:
     loc_files = session.list_loc_files()
     if not loc_files:
@@ -2107,7 +2322,7 @@ def _copy_image_assets(
     opened_sources: dict[str, str] | None = None,
 ) -> int:
     assets_by_source: dict[str, set[str]] = {}
-    retargeted_assets: list[tuple[str, str]] = []
+    retargeted_assets: list[tuple[str, str, str]] = []
     for item in items:
         for asset in item.image_assets or []:
             packed_path = _normalize_pack_path(asset.get("path", ""))
@@ -2118,13 +2333,13 @@ def _copy_image_assets(
             target_path = _normalize_pack_path(asset.get("targetPath", ""))
             if target_path and _is_duplicate_character_folder_path(target_path):
                 continue
-            if target_path and target_path != packed_path:
-                retargeted_assets.append((packed_path, target_path))
-                continue
             source_path = str(asset.get("sourcePath") or session.pack_path)
+            if target_path and target_path != packed_path:
+                retargeted_assets.append((source_path, packed_path, target_path))
+                continue
             assets_by_source.setdefault(source_path, set()).add(packed_path)
 
-    copied = _copy_extracted_image_asset_pairs(session, target_key, retargeted_assets)
+    copied = _copy_retargeted_image_assets(session, target_key, retargeted_assets)
     opened_sources = dict(opened_sources or {})
     opened_sources.setdefault(str(session.pack_path), session.pack_key)
     opened_sources.setdefault(str(session.pack_path.resolve()), session.pack_key)
@@ -2185,7 +2400,40 @@ def _copy_extracted_image_asset_pairs(
         if extracted is None:
             missing.append(source_packed_path)
             continue
-        source_paths.append(str(extracted))
+        source_paths.append(str(_prepare_image_asset_for_pack(session, extracted, target_packed_path)))
+        dest_paths.append({"File": target_packed_path})
+    if missing:
+        raise ValueError(
+            "Extracted image asset(s) not found. Refresh/extract reference assets first: "
+            + ", ".join(missing[:5])
+        )
+    if not source_paths:
+        return 0
+    response = session.client.send({
+        "AddPackedFiles": [target_key, source_paths, dest_paths, None]
+    })
+    _raise_rpfm_error(response)
+    data = response.get("data", {})
+    added = data.get("VecContainerPathOptionString", [dest_paths, None])[0]
+    return len(added)
+
+
+def _copy_retargeted_image_assets(
+    session: RpfmPackSession,
+    target_key: str,
+    path_triples: list[tuple[str, str, str]],
+) -> int:
+    source_paths: list[str] = []
+    dest_paths: list[dict[str, str]] = []
+    missing: list[str] = []
+    for source_path, source_packed_path, target_packed_path in path_triples:
+        source_packed_path = _normalize_pack_path(source_packed_path)
+        target_packed_path = _normalize_pack_path(target_packed_path)
+        extracted = _find_extracted_asset(source_packed_path, source_path)
+        if extracted is None:
+            missing.append(source_packed_path)
+            continue
+        source_paths.append(str(_prepare_image_asset_for_pack(session, extracted, target_packed_path)))
         dest_paths.append({"File": target_packed_path})
     if missing:
         raise ValueError(
@@ -2218,7 +2466,7 @@ def _copy_available_extracted_image_assets(
         if extracted is None:
             missing.append(source_packed_path)
             continue
-        source_paths.append(str(extracted))
+        source_paths.append(str(_prepare_image_asset_for_pack(session, extracted, target_packed_path)))
         dest_paths.append({"File": target_packed_path})
     if not source_paths:
         return 0, missing
@@ -2231,23 +2479,162 @@ def _copy_available_extracted_image_assets(
     return len(added), missing
 
 
-def _find_extracted_asset(packed_path: str) -> Path | None:
+def _prepare_image_asset_for_pack(
+    session: RpfmPackSession,
+    extracted: Path,
+    target_packed_path: str,
+) -> Path:
+    comment = _panel_comment_for_pack_path(target_packed_path)
+    if comment is None or extracted.suffix.lower() != ".png":
+        return extracted
+    data = extracted.read_bytes()
+    if not data.startswith(PNG_SIGNATURE):
+        return extracted
+
+    target_comment = _target_pack_png_comment(session, target_packed_path)
+    source_comment = _png_text_chunk(data, PNG_COMMENT_KEY)
+    final_comment = target_comment or source_comment or comment
+    if source_comment == final_comment:
+        return extracted
+
+    patched = _png_with_text_comment(data, final_comment)
+    TEMP_IMAGE_ASSET_ROOT.mkdir(parents=True, exist_ok=True)
+    digest = zlib.crc32((str(extracted) + "|" + target_packed_path + "|" + final_comment).encode("utf-8")) & 0xFFFFFFFF
+    patched_path = TEMP_IMAGE_ASSET_ROOT / f"{digest:08x}.png"
+    patched_path.write_bytes(patched)
+    return patched_path
+
+
+def _target_pack_png_comment(session: RpfmPackSession, target_packed_path: str) -> str | None:
+    try:
+        data = session.read_file_bytes(target_packed_path)
+    except Exception:
+        return None
+    return _png_text_chunk(data, PNG_COMMENT_KEY)
+
+
+def _panel_comment_for_pack_path(packed_path: str) -> str | None:
+    parts = [part for part in _normalize_pack_path(packed_path).split("/") if part]
+    lower = [part.lower() for part in parts]
+    try:
+        composite_index = lower.index("composites")
+    except ValueError:
+        return None
+    if composite_index + 1 >= len(lower):
+        return None
+    panel = lower[composite_index + 1]
+    if panel in {"noanim.png", "norm.png", "normal.png"}:
+        return PANEL_COMMENT_FALLBACKS[("root", "norm")]
+    if panel not in {"large_panel", "small_panel"} or composite_index + 2 >= len(lower):
+        return None
+    mood = lower[composite_index + 2]
+    if mood not in {"angry", "happy", "norm"}:
+        return None
+    return PANEL_COMMENT_FALLBACKS.get((panel, mood))
+
+
+def _png_text_chunk(data: bytes, key: str) -> str | None:
+    if not data.startswith(PNG_SIGNATURE):
+        return None
+    position = len(PNG_SIGNATURE)
+    key_prefix = key.encode("latin1") + b"\x00"
+    while position + 12 <= len(data):
+        length = int.from_bytes(data[position:position + 4], "big")
+        chunk_type = data[position + 4:position + 8]
+        payload_start = position + 8
+        payload_end = payload_start + length
+        if payload_end + 4 > len(data):
+            return None
+        payload = data[payload_start:payload_end]
+        if chunk_type == b"tEXt" and payload.startswith(key_prefix):
+            return payload[len(key_prefix):].decode("latin1", errors="replace")
+        position = payload_end + 4
+    return None
+
+
+def _png_with_text_comment(data: bytes, comment: str) -> bytes:
+    if not data.startswith(PNG_SIGNATURE):
+        return data
+    text_payload = PNG_COMMENT_KEY.encode("latin1") + b"\x00" + comment.encode("latin1", errors="replace")
+    text_chunk = _png_chunk(b"tEXt", text_payload)
+    output = bytearray(PNG_SIGNATURE)
+    position = len(PNG_SIGNATURE)
+    inserted = False
+    while position + 12 <= len(data):
+        length = int.from_bytes(data[position:position + 4], "big")
+        chunk_type = data[position + 4:position + 8]
+        chunk_end = position + 12 + length
+        if chunk_end > len(data):
+            return data
+        payload = data[position + 8:position + 8 + length]
+        is_comment = chunk_type == b"tEXt" and payload.startswith(PNG_COMMENT_KEY.encode("latin1") + b"\x00")
+        if chunk_type == b"IDAT" and not inserted:
+            output.extend(text_chunk)
+            inserted = True
+        if not is_comment:
+            output.extend(data[position:chunk_end])
+        position = chunk_end
+        if chunk_type == b"IEND":
+            break
+    if not inserted:
+        iend_index = output.rfind(b"IEND")
+        if iend_index >= 4:
+            insert_at = iend_index - 4
+            output[insert_at:insert_at] = text_chunk
+    return bytes(output)
+
+
+def _png_chunk(chunk_type: bytes, payload: bytes) -> bytes:
+    crc = zlib.crc32(chunk_type + payload) & 0xFFFFFFFF
+    return struct.pack(">I", len(payload)) + chunk_type + payload + struct.pack(">I", crc)
+
+
+def _find_extracted_asset(packed_path: str, source_path: str | None = None) -> Path | None:
     normalized = _normalize_pack_path(packed_path)
     parts = [part for part in normalized.split("/") if part]
     if not parts or not EXTRACTED_ASSET_ROOT.is_dir():
         return None
+    if source_path:
+        source_root = Path(source_path)
+        if source_root.is_dir():
+            for candidate_parts in _image_asset_candidate_parts(parts):
+                candidate = source_root.joinpath(*candidate_parts)
+                if candidate.is_file():
+                    return candidate
     core_candidate = EXTRACTED_ASSET_ROOT / CORE_ASSET_SOURCE_ID
     if core_candidate.is_dir():
-        candidate = core_candidate.joinpath(*parts)
-        if candidate.is_file():
-            return candidate
+        for candidate_parts in _image_asset_candidate_parts(parts):
+            candidate = core_candidate.joinpath(*candidate_parts)
+            if candidate.is_file():
+                return candidate
     for pack_dir in EXTRACTED_ASSET_ROOT.iterdir():
         if pack_dir.name == CORE_ASSET_SOURCE_ID:
             continue
-        candidate = pack_dir.joinpath(*parts)
-        if candidate.is_file():
-            return candidate
+        for candidate_parts in _image_asset_candidate_parts(parts):
+            candidate = pack_dir.joinpath(*candidate_parts)
+            if candidate.is_file():
+                return candidate
     return None
+
+
+def _image_asset_candidate_parts(parts: list[str]) -> list[list[str]]:
+    candidates = [parts]
+    lower_parts = [part.lower() for part in parts]
+    try:
+        characters_index = next(
+            i for i, part in enumerate(lower_parts)
+            if part == "characters" and i > 0 and lower_parts[i - 1] == "ui"
+        )
+    except StopIteration:
+        return candidates
+    panel_index = characters_index + 2
+    if (
+        panel_index < len(parts)
+        and lower_parts[panel_index] in {"large_panel", "small_panel"}
+        and "composites" not in lower_parts[characters_index + 2:panel_index + 1]
+    ):
+        candidates.append(parts[:panel_index] + ["composites"] + parts[panel_index:])
+    return candidates
 
 
 def _normalize_pack_path(path: str) -> str:
@@ -2298,6 +2685,24 @@ def _clone_image_asset_target_warnings(clones: list[CharacterClone]) -> list[str
     return warnings
 
 
+def _image_asset_path_warnings(items: list[Any]) -> list[str]:
+    warnings: list[str] = []
+    for item in items:
+        owner = getattr(item, "new_template_key", None) or getattr(item, "template_key", None) or ""
+        for asset in item.image_assets or []:
+            source_path = _normalize_pack_path(asset.get("path") or "")
+            target_path = _normalize_pack_path(asset.get("targetPath") or asset.get("path") or "")
+            if source_path.startswith(f"{IMAGE_ONLY_ASSET_PREFIX}/"):
+                warnings.append(
+                    f"Image-only reference path leaked into output source for {owner}: {source_path}"
+                )
+            if target_path.startswith(f"{IMAGE_ONLY_ASSET_PREFIX}/"):
+                warnings.append(
+                    f"Image-only reference path leaked into output target for {owner}: {target_path}"
+                )
+    return warnings
+
+
 def _art_image_token(value: str) -> str:
     clean = _normalize_pack_path(value).strip("/")
     return clean.split("/")[0] if clean else ""
@@ -2323,9 +2728,20 @@ def _write_delta_diagnostics(
     diagnostics = {
         "outputPack": str(output_path),
         "warnings": warnings or [],
+        "workItems": [
+            {
+                "kind": work.get("kind"),
+                "title": work.get("title"),
+                "workNumber": work.get("workNumber"),
+                "workSlug": work.get("workSlug"),
+            }
+            for work in recipe.work_items
+        ],
         "tables": rows_by_table,
         "loc": loc_rows,
         "campaignScriptPath": "script/campaign/mod/hby_mtu_pack_editor_player_spawn.lua" if campaign_script else "",
+        "campaignScript": campaign_script or "",
+        "spawnEntries": _spawn_entries_for_clones(recipe.character_clones),
         "imageAssets": [
             {
                 "owner": getattr(item, "new_template_key", None) or getattr(item, "template_key", None),
@@ -2344,17 +2760,13 @@ def _write_delta_diagnostics(
     )
 
 
-def _campaign_start_spawn_script(clones: list[CharacterClone]) -> str | None:
+def _spawn_entries_for_clones(clones: list[CharacterClone]) -> list[dict[str, Any]]:
     spawn_clones = [
         clone
         for clone in clones
         if clone.spawn_event in {"campaign_start", "delayed_join"}
     ]
-    if not spawn_clones:
-        return None
-
     entries = []
-    incident_key = _incident_key_for_clones(spawn_clones)
     for clone in spawn_clones:
         subtype = clone.template_overrides.get("subtype")
         if not subtype:
@@ -2366,8 +2778,19 @@ def _campaign_start_spawn_script(clones: list[CharacterClone]) -> str | None:
             except (TypeError, ValueError):
                 min_turn = 0
         save_seed = f"{clone.new_template_key}:{clone.spawn_event}".encode("utf-8")
-        save_key = f"hby_mtu_pack_editor_player_spawn_{zlib.crc32(save_seed) & 0xffffffff:08x}"
-        entries.append((clone.new_template_key, str(subtype), min_turn, save_key, incident_key))
+        entries.append({
+            "template": clone.new_template_key,
+            "subtype": str(subtype),
+            "event": clone.spawn_event,
+            "turn": min_turn,
+            "saveKey": f"hby_mtu_pack_editor_player_spawn_{zlib.crc32(save_seed) & 0xffffffff:08x}",
+            "incident": _incident_key_for_clone(clone),
+        })
+    return entries
+
+
+def _campaign_start_spawn_script(clones: list[CharacterClone]) -> str | None:
+    entries = _spawn_entries_for_clones(clones)
 
     if not entries:
         return None
@@ -2377,9 +2800,9 @@ def _campaign_start_spawn_script(clones: list[CharacterClone]) -> str | None:
         "-- Gives selected generated characters to the local player's faction.",
         "local hby_mtu_player_spawn_characters = {",
     ]
-    for template_key, subtype, min_turn, save_key, incident_key in entries:
+    for entry in entries:
         lines.append(
-            f'    {{ template = "{_lua_escape(template_key)}", subtype = "{_lua_escape(subtype)}", turn = {min_turn}, save_key = "{_lua_escape(save_key)}", incident = "{_lua_escape(incident_key)}" }},'
+            f'    {{ template = "{_lua_escape(entry["template"])}", subtype = "{_lua_escape(entry["subtype"])}", event = "{_lua_escape(entry["event"] or "")}", turn = {entry["turn"]}, save_key = "{_lua_escape(entry["saveKey"])}", incident = "{_lua_escape(entry["incident"])}" }},'
         )
     lines.extend([
         "}",
@@ -2412,7 +2835,8 @@ def _campaign_start_spawn_script(clones: list[CharacterClone]) -> str | None:
         "    local turn_number = cm:turn_number() or 0",
         "    for i = 1, #hby_mtu_player_spawn_characters do",
         "        local item = hby_mtu_player_spawn_characters[i]",
-        "        if not cm:get_saved_value(item.save_key) and turn_number >= item.turn then",
+        '        local can_spawn = item.event == "campaign_start" or turn_number >= item.turn',
+        "        if not cm:get_saved_value(item.save_key) and can_spawn then",
         "            cdir_events_manager:spawn_character_subtype_template_in_faction(faction_key, item.subtype, item.template)",
         "            if item.incident and cm.trigger_incident then",
         "                pcall(function() cm:trigger_incident(faction_key, item.incident, true) end)",
@@ -2475,6 +2899,37 @@ def _upsert_delta_row(
             rows[index] = row
             return
     rows.append(row)
+
+
+def _find_delta_row(
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    key_field: str | Any,
+    key: Any,
+    table_name: str | None = None,
+) -> dict[str, Any] | None:
+    row_groups = [rows_by_table.get(table_name, [])] if table_name else rows_by_table.values()
+    for rows in row_groups:
+        for row in rows:
+            row_key = key_field(row) if callable(key_field) else row.get(key_field)
+            if row_key == key:
+                return row
+    return None
+
+
+def _unique_numeric_delta_value(
+    seed: str,
+    rows: list[dict[str, Any]],
+    field: str,
+    minimum: int = 1_700_000_000,
+    span: int = 300_000_000,
+) -> int:
+    used = {str(row.get(field)) for row in rows if row.get(field) not in (None, "")}
+    value = minimum + (zlib.crc32(seed.encode("utf-8")) % span)
+    while str(value) in used:
+        value += 1
+        if value >= minimum + span:
+            value = minimum
+    return value
 
 
 def _clean_source_row(row: dict[str, Any]) -> dict[str, Any]:

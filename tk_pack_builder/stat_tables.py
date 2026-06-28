@@ -124,7 +124,11 @@ def _matching_table_names(session: PackSession, alias: str) -> list[str]:
     for candidate in TABLE_ALIASES[alias]:
         if candidate in tables and candidate not in matches:
             matches.append(candidate)
-    folder = f"/{alias}_tables/"
+    folder = (
+        "/ceos_to_equipment_variants_tables/"
+        if alias in {"equipment_variants_weapons", "equipment_variants_armours"}
+        else f"/{alias}_tables/"
+    )
     for path in table_list:
         if folder in path and path not in matches:
             matches.append(path)

@@ -10,6 +10,7 @@ import subprocess
 import time
 import hashlib
 import traceback
+from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,9 +23,10 @@ from .builder import build_pack
 from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_name
 from . import delta_builder as delta_builder_module
 from .internal_materials import MaterialPackSession
+from .korea_addon import korea_character_metadata
 from .korean_names import korean_character_name
 from .pack_cache import PackCache
-from .recipe import recipe_from_dict
+from .recipe import Recipe, recipe_from_dict
 from .rpfm_runtime import resolve_rpfm_server
 from .stat_tables import TABLE_ALIASES
 from .validation import allow_reference_backed_clone_sources, has_errors, messages_to_dicts, validate
@@ -41,6 +43,11 @@ RPFM_SERVER_CANDIDATES = [
 DEFAULT_RPFM_SERVER = next((path for path in RPFM_SERVER_CANDIDATES if path.is_file()), RPFM_SERVER_CANDIDATES[0])
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
 REFERENCE_SNAPSHOT = ROOT / "work" / "reference_snapshot.json"
+REFERENCE_SNAPSHOT_VERSION = 2
+INTERNAL_CHARACTER_CATALOG = ROOT / "work" / "internal_dbs" / "character_catalog.json"
+INTERNAL_MATERIALS_PATH = ROOT / "work" / "internal_materials" / "materials.v015.json"
+INTERNAL_ASSET_MANIFEST = ROOT / "work" / "internal_materials" / "asset_manifest.v015.json"
+INTERNAL_MATERIAL_SUMMARY = ROOT / "work" / "internal_materials" / "materials.v015.summary.json"
 EXTRACTED_ASSET_ROOT = ROOT / "work" / "assets"
 IMAGE_ONLY_ASSET_PREFIX = "__image_only_reference__"
 RPFM_PROCESS: subprocess.Popen[bytes] | None = None
@@ -68,6 +75,8 @@ SKILL_TABLE_ALIASES = {
         "db/effects_tables/_mtu_characters_skills_effects",
     ],
 }
+
+_SKILL_PHRASE_LABELS: dict[str, str] = {}
 
 
 def _elapsed(started_at: float) -> float:
@@ -299,15 +308,16 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
         cached = PACK_CACHE.get_open_payload(pack_path, include_vanilla, reference_paths) if pack_path.exists() else None
         timings["cacheLookup"] = _elapsed(cache_started)
         if cached is not None:
+            _enrich_korea_addon_character_data(cached.get("characters", {}))
             cached["timings"] = {**timings, "total": _elapsed(started_at)}
             return cached
         snapshot_started = time.perf_counter()
         snapshot = _load_reference_snapshot()
         timings["snapshotLookup"] = _elapsed(snapshot_started)
         if snapshot is not None:
+            _enrich_korea_addon_character_data(snapshot.get("characters", {}))
             snapshot["timings"] = {**timings, "total": _elapsed(started_at)}
             return snapshot
-        raise ValueError("DB 스냅샷이 없습니다. pack 원본 조회가 필요하면 상단의 DB 갱신을 눌러주세요.")
 
     open_started = time.perf_counter()
     session = _open_session(payload)
@@ -348,6 +358,8 @@ def _load_reference_snapshot() -> dict[str, Any] | None:
         return None
     with REFERENCE_SNAPSHOT.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
+    if payload.get("schemaVersion") != REFERENCE_SNAPSHOT_VERSION:
+        return None
     return {
         "ok": True,
         "analysis": payload.get("analysis", {}),
@@ -360,10 +372,251 @@ def _load_reference_snapshot() -> dict[str, Any] | None:
     }
 
 
+def _enrich_korea_addon_character_data(character_data: dict[str, Any]) -> None:
+    _merge_internal_material_character_summary(character_data)
+    _merge_auxiliary_catalog_characters(character_data)
+    for summary in _iter_character_summaries(character_data):
+        for character in summary.get("characters", []):
+            if not isinstance(character, dict):
+                continue
+            metadata = korea_character_metadata(str(character.get("key", ""))) or {}
+            if not metadata:
+                continue
+            character.update(metadata)
+            if metadata.get("koreaDisplayNameHint"):
+                display_name = str(metadata["koreaDisplayNameHint"])
+                character["displayName"] = display_name
+                character["label"] = display_name
+
+
+def _merge_internal_material_character_summary(character_data: dict[str, Any]) -> None:
+    target_summary = character_data.get("pack")
+    if not isinstance(target_summary, dict) or not INTERNAL_MATERIALS_PATH.is_file():
+        return
+    try:
+        internal_summary = _load_internal_material_summary()
+    except Exception:
+        return
+
+    target_characters = target_summary.setdefault("characters", [])
+    if not isinstance(target_characters, list):
+        return
+    target_by_key = {
+        str(character.get("key", "")).lower(): character
+        for character in target_characters
+        if isinstance(character, dict)
+    }
+    for character in internal_summary.get("characters", []):
+        if not isinstance(character, dict):
+            continue
+        key = str(character.get("key", "")).lower()
+        if not key:
+            continue
+        if key in target_by_key:
+            target_by_key[key].update(character)
+        else:
+            target_characters.append(character)
+            target_by_key[key] = character
+    target_summary["characters"] = _dedupe_characters_by_key(target_characters)
+    _merge_summary_supporting_rows(target_summary, internal_summary)
+
+
+@lru_cache(maxsize=1)
+def _load_internal_material_summary() -> dict[str, Any]:
+    cached = _read_internal_material_summary_cache()
+    if cached is not None:
+        return cached
+
+    session = MaterialPackSession.open(INTERNAL_MATERIALS_PATH)
+    tables = _read_internal_material_reference_tables(session)
+    asset_files = session.list_files()
+    asset_sources: dict[str, str] = {}
+    known_assets = set(asset_files)
+    _merge_internal_asset_manifest(asset_files, asset_sources, known_assets)
+    _merge_extracted_asset_inventory(asset_files, asset_sources, known_assets)
+    summary = summarize_character_tables(tables, _read_all_loc_text(session), asset_files, asset_sources)
+    _write_internal_material_summary_cache(summary)
+    return summary
+
+
+def _internal_material_cache_token() -> dict[str, Any]:
+    paths = [INTERNAL_MATERIALS_PATH, INTERNAL_ASSET_MANIFEST]
+    return {
+        "version": 6,
+        "sources": {
+            str(path): path.stat().st_mtime
+            for path in paths
+            if path.is_file()
+        },
+    }
+
+
+def _read_internal_material_summary_cache() -> dict[str, Any] | None:
+    if not INTERNAL_MATERIAL_SUMMARY.is_file():
+        return None
+    try:
+        with INTERNAL_MATERIAL_SUMMARY.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if payload.get("cache") != _internal_material_cache_token():
+        return None
+    summary = payload.get("summary")
+    return summary if isinstance(summary, dict) else None
+
+
+def _write_internal_material_summary_cache(summary: dict[str, Any]) -> None:
+    try:
+        INTERNAL_MATERIAL_SUMMARY.parent.mkdir(parents=True, exist_ok=True)
+        with INTERNAL_MATERIAL_SUMMARY.open("w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "cache": _internal_material_cache_token(),
+                    "summary": summary,
+                },
+                handle,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+    except OSError:
+        return
+
+
+def _iter_character_summaries(character_data: dict[str, Any]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    pack_summary = character_data.get("pack")
+    if isinstance(pack_summary, dict):
+        summaries.append(pack_summary)
+    vanilla = character_data.get("vanilla", {})
+    vanilla_summary = vanilla.get("summary") if isinstance(vanilla, dict) else None
+    if isinstance(vanilla_summary, dict):
+        summaries.append(vanilla_summary)
+    for report in character_data.get("referencePacks", []):
+        if isinstance(report, dict) and isinstance(report.get("summary"), dict):
+            summaries.append(report["summary"])
+    return summaries
+
+
+def _merge_auxiliary_catalog_characters(character_data: dict[str, Any]) -> None:
+    # AW image-only packs do not contain the full in-game composite portrait set,
+    # so keep them out of the editor catalog instead of offering broken choices.
+    return
+
+
+@lru_cache(maxsize=1)
+def _load_internal_character_catalog_pack() -> dict[str, Any] | None:
+    if not INTERNAL_CHARACTER_CATALOG.is_file():
+        return None
+    try:
+        with INTERNAL_CHARACTER_CATALOG.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    summary = payload.get("characters", {}).get("pack")
+    return summary if isinstance(summary, dict) else None
+
+
+def _is_aw_image_only_character(character: dict[str, Any]) -> bool:
+    if not (character.get("virtualImageOnly") or character.get("imageOnly")):
+        return False
+    text = " ".join(
+        str(character.get(field, ""))
+        for field in [
+            "sourceTag",
+            "referenceSourcePath",
+            "portraitImageSourcePath",
+            "cardImageSourcePath",
+            "portraitImagePath",
+            "cardImagePath",
+            "sourcePackName",
+            "sourceIdentity",
+            "key",
+        ]
+    ).lower()
+    return any(token in text for token in ["aw-design", "aw addon", "aw_", "aw-"])
+
+
+def _dedupe_characters_by_key(characters: list[Any]) -> list[Any]:
+    by_key: dict[str, dict[str, Any]] = {}
+    key_order: list[str] = []
+    passthrough: list[Any] = []
+    for character in characters:
+        if not isinstance(character, dict):
+            passthrough.append(character)
+            continue
+        key = str(character.get("key", "")).lower()
+        if not key:
+            passthrough.append(character)
+            continue
+        if key not in by_key:
+            key_order.append(key)
+        by_key[key] = character
+    return passthrough + [by_key[key] for key in key_order]
+
+
+def _merge_summary_supporting_rows(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for field in [
+        "artSets",
+        "ageRanges",
+        "initialCeos",
+        "retinues",
+        "attributeSets",
+        "skillSets",
+        "subtypes",
+        "landUnits",
+        "mainUnits",
+        "retinueSlotInitialUnits",
+    ]:
+        _merge_list_by_key(target, source, field)
+    for field in ["artRowsBySet", "attributeStatsBySet", "skillTrees", "locKeys"]:
+        target_dict = target.setdefault(field, {})
+        source_dict = source.get(field, {})
+        if isinstance(target_dict, dict) and isinstance(source_dict, dict):
+            for key, value in source_dict.items():
+                target_dict.setdefault(key, value)
+
+
+def _merge_list_by_key(target: dict[str, Any], source: dict[str, Any], field: str) -> None:
+    target_rows = target.setdefault(field, [])
+    source_rows = source.get(field, [])
+    if not isinstance(target_rows, list) or not isinstance(source_rows, list):
+        return
+    existing = {_row_identity(row) for row in target_rows if isinstance(row, dict)}
+    for row in source_rows:
+        if not isinstance(row, dict):
+            continue
+        identity = _row_identity(row)
+        if not identity or identity in existing:
+            continue
+        target_rows.append(row)
+        existing.add(identity)
+
+
+def _row_identity(row: dict[str, Any]) -> str:
+    for field in [
+        "key",
+        "artSet",
+        "art_set_id",
+        "ageRange",
+        "initialCeo",
+        "ceoNodeKey",
+        "retinue",
+        "attributeSet",
+        "skillSet",
+        "subtype",
+        "landUnitKey",
+        "mainUnitKey",
+    ]:
+        value = row.get(field)
+        if value:
+            return str(value)
+    return ""
+
+
 def _write_reference_snapshot(analysis: dict[str, Any], characters: dict[str, Any]) -> None:
     REFERENCE_SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "schemaVersion": 1,
+        "schemaVersion": REFERENCE_SNAPSHOT_VERSION,
         "createdAt": time.time(),
         "analysis": analysis,
         "characters": characters,
@@ -393,6 +646,17 @@ def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         _close_session(session)
 
 
+def _build_response(messages: list[dict[str, Any]], output_path: Path | None = None) -> dict[str, Any]:
+    has_error = any(message.get("level") == "error" for message in messages)
+    if not has_error:
+        detail = f"경로: {output_path}" if output_path is not None else ""
+        messages = [{"level": "success", "code": "pack_written", "message": "팩 생성 완료", "detail": detail}]
+    return {
+        "ok": not has_error,
+        "messages": messages or [{"level": "success", "code": "pack_written", "message": "팩 생성 완료"}],
+    }
+
+
 def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("useInternalMaterials"):
         if not payload.get("delta"):
@@ -409,7 +673,7 @@ def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("coreAssetSourceId"):
             delta_builder_module.CORE_ASSET_SOURCE_ID = str(payload["coreAssetSourceId"])
         try:
-            delta_builder_module.build_delta_pack_from_materials(
+            build_messages = delta_builder_module.build_delta_pack_from_materials(
                 source_session,
                 writer_session,
                 recipe,
@@ -420,6 +684,8 @@ def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
             delta_builder_module.CORE_ASSET_SOURCE_ID = previous_core
             _close_session(writer_session)
             _close_session(source_session)
+        verify_messages = _verify_saved_pack_image_chain(output_path, recipe) if payload.get("verifyAfterSave") else []
+        return _build_response([*build_messages, *verify_messages], output_path)
         return {
             "ok": True,
             "messages": [{"level": "success", "code": "pack_written", "message": "팩 생성 완료"}],
@@ -430,7 +696,7 @@ def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
         output_path = _resolve_user_path(payload["outputPath"]) if payload.get("outputPath") else None
         if output_path is not None:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-        build_pack(
+        build_messages = build_pack(
             session,
             recipe,
             output_path,
@@ -438,12 +704,155 @@ def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
             delta=bool(payload.get("delta")),
             reference_paths=_reference_pack_paths(payload),
         )
+        target_path = Path(payload["inputPath"]) if payload.get("inPlace") else output_path
+        verify_messages = _verify_saved_pack_image_chain(target_path, recipe) if target_path and payload.get("verifyAfterSave") else []
+        return _build_response([*build_messages, *verify_messages], target_path)
         return {
             "ok": True,
             "messages": [{"level": "success", "code": "pack_written", "message": "팩 생성 완료"}],
         }
     finally:
         _close_session(session)
+
+
+def _verify_saved_pack_image_chain(pack_path: Path | None, recipe: Recipe) -> list[dict[str, Any]]:
+    if pack_path is None or not pack_path.exists():
+        return []
+    expectations = _image_chain_expectations(recipe)
+    if not expectations:
+        return []
+
+    session = adapter_for("rpfm").open_pack(pack_path)
+    try:
+        files = {path.replace("\\", "/") for path in session.list_files()}
+        table_paths = set(session.list_tables())
+    finally:
+        _close_session(session)
+
+    messages: list[dict[str, Any]] = []
+    for expected in expectations:
+        label = expected["label"]
+        owner = expected["owner"]
+        for table_kind, table_prefix in (
+            ("장수 템플릿", "db/character_generation_templates_tables/"),
+            ("아트셋", "db/campaign_character_art_sets_tables/"),
+            ("이미지 연결", "db/campaign_character_arts_tables/"),
+        ):
+            if not any(path.startswith(table_prefix) for path in table_paths):
+                messages.append({
+                    "level": "error",
+                    "code": "missing_image_chain_table",
+                    "message": f"{label} 이미지의 {table_kind} DB가 누락되었습니다.",
+                    "detail": f"owner={owner}, table={table_prefix}",
+                })
+                break
+        for path in sorted(expected["paths"]):
+            if path not in files:
+                slot = _image_slot_label(path)
+                messages.append({
+                    "level": "error",
+                    "code": "missing_image_asset",
+                    "message": f"{label} 이미지의 {slot}가 누락되었습니다.",
+                    "detail": path,
+                })
+    if messages:
+        return messages
+    return [{
+        "level": "success",
+        "code": "image_chain_verified",
+        "message": f"이미지 체인 검증 완료: {len(expectations)}명",
+    }]
+
+
+def _image_chain_expectations(recipe: Recipe) -> list[dict[str, Any]]:
+    title_by_owner = _recipe_work_title_by_owner(recipe)
+    items: list[dict[str, Any]] = []
+    for patch in recipe.character_patches:
+        paths = _expected_image_paths(patch.art_overrides or {}, patch.image_assets or [])
+        if paths:
+            owner = patch.template_key
+            items.append({
+                "owner": owner,
+                "label": _display_label(title_by_owner.get(owner) or patch.display_name or owner),
+                "paths": paths,
+            })
+    for clone in recipe.character_clones:
+        paths = _expected_image_paths(clone.art_overrides or {}, clone.image_assets or [])
+        if paths:
+            owner = clone.new_template_key
+            items.append({
+                "owner": owner,
+                "label": _display_label(title_by_owner.get(owner) or clone.display_name or owner),
+                "paths": paths,
+            })
+    return items
+
+
+def _expected_image_paths(art_overrides: dict[str, Any], image_assets: list[dict[str, str]]) -> set[str]:
+    paths = {
+        _normalize_pack_asset_path(asset.get("targetPath") or asset.get("path") or "")
+        for asset in image_assets
+    }
+    paths.discard("")
+    portrait = str(art_overrides.get("portrait") or "").replace("\\", "/").strip("/")
+    card = str(art_overrides.get("card") or "").replace("\\", "/").strip("/")
+    token = portrait or card
+    if token:
+        card = card or token
+        paths.update({
+            f"ui/characters/{token}/composites/noanim.png",
+            f"ui/characters/{token}/composites/large_panel/norm/noanim.png",
+            f"ui/characters/{token}/composites/small_panel/norm/noanim.png",
+            f"ui/characters/{token}/stills/halfbody_large/{card}.png",
+            f"ui/characters/{token}/stills/halfbody_small/{card}.png",
+            f"ui/characters/{token}/stills/bobbleheads/{card}.png",
+            f"ui/characters/{token}/stills/unitcards/{card}.png",
+        })
+    return paths
+
+
+def _normalize_pack_asset_path(path: str) -> str:
+    return str(path or "").replace("\\", "/").strip("/")
+
+
+def _image_slot_label(path: str) -> str:
+    lower = path.lower()
+    if "/stills/unitcards/" in lower:
+        return "unitcard"
+    if "/stills/halfbody_large/" in lower:
+        return "halfbody_large"
+    if "/stills/halfbody_small/" in lower:
+        return "halfbody_small"
+    if "/composites/large_panel/" in lower:
+        return "large_panel"
+    if "/composites/small_panel/" in lower:
+        return "small_panel"
+    if "/composites/" in lower:
+        return "composite"
+    return "이미지 파일"
+
+
+def _recipe_work_title_by_owner(recipe: Recipe) -> dict[str, str]:
+    titles: dict[str, str] = {}
+    for work in recipe.work_items or []:
+        title = str(work.get("title") or "").strip()
+        if not title:
+            continue
+        work_recipe = work.get("recipe") or {}
+        for patch in work_recipe.get("characterPatches", []) or []:
+            key = patch.get("templateKey")
+            if key:
+                titles[str(key)] = title
+        for clone in work_recipe.get("characterCloneRecipes", []) or []:
+            key = clone.get("newTemplateKey")
+            if key:
+                titles[str(key)] = title
+    return titles
+
+
+def _display_label(value: str) -> str:
+    text = str(value or "").strip()
+    return re.sub(r"\s+(수정|생성)$", "", text) or "선택한 장수"
 
 
 def read_character_data(
@@ -474,6 +883,9 @@ def read_character_data(
         adapter_name,
         session.pack_path,
     )
+    internal_report = _merge_internal_materials(tables, loc_text, asset_files, asset_sources)
+    if internal_report:
+        reference_report.append(internal_report)
     timings["mergeReferences"] = _elapsed(step)
     step = time.perf_counter()
     pack_summary = summarize_character_tables(tables, loc_text, asset_files, asset_sources)
@@ -643,8 +1055,11 @@ def summarize_character_tables(
     characters = []
     for template in tables["character_generation_templates"]:
         key = str(template.get("key", ""))
+        korea_metadata = korea_character_metadata(key) or {}
         reference_source = template.get("_referenceSourcePath")
         display_name = _character_display_name(template, loc_text)
+        if korea_metadata.get("koreaDisplayNameHint"):
+            display_name = str(korea_metadata["koreaDisplayNameHint"])
         details = sorted(
             [
                 {
@@ -697,6 +1112,7 @@ def summarize_character_tables(
                 "details": details,
                 "source": "reference" if reference_source else "pack",
                 "referenceSourcePath": reference_source,
+                **korea_metadata,
             }
         )
 
@@ -741,6 +1157,7 @@ def _append_image_only_characters(
             if "/stills/halfbody_large/" in path.lower()
             and path.lower().endswith(".png")
             and "/large/" not in path.lower()
+            and "/" not in path.lower().split("/stills/halfbody_large/", 1)[1]
         ],
         key=lambda path: (
             0 if Path(path).stem.lower() == path.lower().split("/stills/halfbody_large/", 1)[0].rsplit("/", 1)[-1] else 1,
@@ -769,7 +1186,8 @@ def _append_image_only_characters(
             continue
         card_path = _find_character_image(asset_index, image_key, "unitcards")
         label = _friendly_image_character_label(_image_label_key(image_key, real_path))
-        art_key = f"image_only_{image_key}".replace("/", "_")
+        source_slug = _image_only_source_slug(source_path)
+        art_key = f"image_only_{source_slug}_{image_key}".replace("/", "_")
         image_assets = _character_image_assets(asset_index, asset_sources, image_key, image_key)
         if art_key not in existing_art_keys:
             art_sets.append({
@@ -779,7 +1197,7 @@ def _append_image_only_characters(
                 "portrait": image_key,
                 "card": image_key,
                 "uniform": "",
-                "uniformLabel": "모델 없음",
+                "uniformLabel": "紐⑤뜽 ?놁쓬",
                 "referenceSourcePath": source_path,
                 "virtual": True,
                 "imageOnly": True,
@@ -790,11 +1208,13 @@ def _append_image_only_characters(
                 "cardImageSourcePath": asset_sources.get(card_path or ""),
                 "imageAssets": image_assets,
                 "rows": [],
+                "sourcePackName": Path(source_path).name if source_path else "",
+                "sourceIdentity": _image_only_source_identity(source_path, image_key, card_path),
             })
             existing_art_keys.add(art_key)
-        character_key = f"image_only_{image_key}".replace("/", "_")
+        character_key = f"image_only_{source_slug}_{image_key}".replace("/", "_")
         if character_key in existing_character_keys:
-            character_key = f"{character_key}_{Path(path).stem}".replace("/", "_")
+            character_key = f"{character_key}_{hashlib.sha1(path.encode('utf-8')).hexdigest()[:8]}".replace("/", "_")
         characters.append({
             "key": character_key,
             "displayName": label,
@@ -812,7 +1232,7 @@ def _append_image_only_characters(
             "portrait": image_key,
             "card": image_key,
             "uniform": "",
-            "uniformLabel": "모델 없음",
+            "uniformLabel": "紐⑤뜽 ?놁쓬",
             "details": [],
             "combatStats": {},
             "attributeStats": {},
@@ -826,9 +1246,32 @@ def _append_image_only_characters(
             "cardImagePath": card_path,
             "cardImageSourcePath": asset_sources.get(card_path or ""),
             "imageAssets": image_assets,
+            "sourcePackName": Path(source_path).name if source_path else "",
+            "sourceIdentity": _image_only_source_identity(source_path, image_key, card_path),
         })
         existing_image_paths.add(lower)
         existing_character_keys.add(character_key)
+
+
+def _image_only_source_slug(source_path: str) -> str:
+    name = Path(source_path).stem if source_path else "unknown"
+    slug = re.sub(r"[^0-9A-Za-z]+", "_", name).strip("_").lower()
+    digest = hashlib.sha1(str(source_path).encode("utf-8")).hexdigest()[:8]
+    return f"{slug or 'unknown'}_{digest}"
+
+
+def _image_only_source_identity(source_path: str, portrait_key: str, card_path: str | None) -> str:
+    source_name = Path(source_path).name if source_path else "unknown"
+    card_key = ""
+    if card_path:
+        normalized = card_path.replace("\\", "/")
+        marker = "/unitcards/"
+        if marker in normalized:
+            card_key = normalized.split(marker, 1)[1].rsplit("/", 1)[0]
+    parts = [source_name, portrait_key]
+    if card_key and card_key != portrait_key:
+        parts.append(card_key)
+    return " 쨌 ".join(part for part in parts if part)
 
 
 def _non_image_only_reference_assets(assets: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -882,8 +1325,8 @@ def _is_non_character_image_path(path: str) -> bool:
 def _friendly_image_character_label(image_key: str) -> str:
     lower = image_key.lower()
     known = {
-        "diao_chan": "초선",
-        "lu_bu": "여포",
+        "diao_chan": "珥덉꽑",
+        "lu_bu": "?ы룷",
     }
     for token, label in known.items():
         if token in lower:
@@ -1075,6 +1518,14 @@ def _skill_element(skill_key: str) -> str:
     return ""
 
 
+def _contains_hangul(value: str) -> bool:
+    return any("\uac00" <= char <= "\ud7a3" for char in str(value or ""))
+
+
+def _translate_skill_name_text(value: str) -> str:
+    return _friendly_key(str(value or ""))
+
+
 def _friendly_skill_key(skill_key: str) -> str:
     value = str(skill_key or "")
     replacements = {
@@ -1184,412 +1635,39 @@ def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> st
 def _friendly_effect_key(key: str) -> str:
     value = str(key or "")
     lower = value.lower()
-    attributes = {
-        "expertise": "전문성",
-        "resolve": "결의",
-        "cunning": "책략",
-        "instinct": "본능",
-        "authority": "권위",
-    }
-    for english, korean in attributes.items():
-        if f"attribute_{english}" in lower:
-            return korean
-    if "satisfaction" in lower:
-        return "만족도"
-    if "morale" in lower:
-        return "사기"
-    if "movement" in lower:
-        return "이동거리"
-    if "replenishment" in lower:
-        return "충원률"
-    if "ability" in lower:
-        return "능력"
-    if "gdp" in lower or "income" in lower:
-        return "수입"
-    return _friendly_key(value)
-
-
-def _effect_summary(effects: list[dict[str, Any]]) -> str:
-    if not effects:
-        return "효과 정보 미확인"
-    pieces = []
-    for effect in effects[:4]:
-        value = effect.get("value")
-        suffix = f" {value:+g}" if isinstance(value, (int, float)) else f" {value}" if value not in {None, ""} else ""
-        scope = f" ({effect.get('scope')})" if effect.get("scope") else ""
-        pieces.append(f"{effect.get('name')}{suffix}{scope}")
-    if len(effects) > 4:
-        pieces.append(f"외 {len(effects) - 4}개")
-    return " · ".join(pieces)
-
-
-_SKILL_PHRASE_LABELS = {
-    "ability_fire_blade_breaker": "검 파괴자",
-    "ability_fire_blazing_roar": "불타는 포효",
-    "ability_fire_blazing_saddles": "불타는 안장",
-    "ability_fire_devastating_roar": "파괴적인 포효",
-    "ability_fire_final_rush": "최후의 돌격",
-    "ability_fire_fire_bomb": "화염탄",
-    "ability_fire_internal_blaze": "내면의 불꽃",
-    "ability_fire_mighty_thrust": "강력한 찌르기",
-    "ability_fire_natures_ally": "자연의 벗",
-    "ability_fire_scattering_blows": "흩뿌리는 일격",
-    "ability_fire_sundering_strike": "분쇄의 일격",
-    "ability_fire_targeted_strike": "정밀 타격",
-    "ability_fire_undying_vow": "불굴의 맹세",
-    "ability_fire_wildfire_raider": "들불 약탈자",
-    "ability_water_inspiring_surge": "고무적인 격류",
-    "ability_water_stifling_deluge": "숨막히는 폭우",
-    "ability_water_two_zhangs": "두 장씨",
-    "blade_breaker": "검 파괴자",
-    "blazing_roar": "불타는 포효",
-    "blazing_saddles": "불타는 안장",
-    "blossoming_beauty": "꽃피는 미인",
-    "devastating_roar": "파괴적인 포효",
-    "final_rush": "최후의 돌격",
-    "fire_bomb": "화염탄",
-    "internal_blaze": "내면의 불꽃",
-    "mighty_thrust": "강력한 찌르기",
-    "natures_ally": "자연의 벗",
-    "scattering_blows": "흩뿌리는 일격",
-    "sundering_strike": "분쇄의 일격",
-    "targeted_strike": "정밀 타격",
-    "undying_vow": "불굴의 맹세",
-    "wildfire_raider": "들불 약탈자",
-    "charge_forward": "전진 돌격",
-    "exemplary_strike": "모범적인 일격",
-    "fire_hail_of_arrows": "화살 세례",
-    "fire_reign_of_terror": "공포의 지배",
-    "fire_the_dragons_gaze": "용의 응시",
-    "spearhead": "선봉",
-    "blood_soaked_wrath": "피로 물든 분노",
-    "breakthrough_in_concentration": "집중 돌파",
-    "camp_crushing": "진영 파괴",
-    "fervent_cheer": "열렬한 함성",
-    "hail_of_arrows": "화살 세례",
-    "inspiring_surge": "고무적인 격류",
-    "sight_of_the_dragon": "용의 통찰",
-    "skill_special_ability_water": "수계 특수 능력",
-    "stifling_deluge": "숨막히는 폭우",
-    "the_dragons_gaze": "용의 응시",
-    "two_zhangs": "두 장씨",
-    "xianchenying": "선진영",
-    "unbreakable": "불굴",
-    "obfuscation": "기만",
-    "patience": "인내",
-    "ruthlessness": "무자비",
-    "evasiveness": "회피",
-    "mutability": "변화",
-    "trust": "신뢰",
-    "villainy": "간악",
-    "wisdom": "지혜",
-    "consideration": "배려",
-    "craft": "기교",
-    "dilligence": "근면",
-    "diligence": "근면",
-    "restlessness": "분주",
-    "scholarship": "학식",
-    "stealth": "은신",
-    "ability_fire_heart_seeker": "화염 추적자",
-    "flames_of_the_phoenix": "봉황의 불꽃",
-    "unpredictability": "예측불가",
-    "resourcefulness": "수완",
-    "humanity": "인애",
-    "rapacity": "탐욕",
-    "shamelessness": "파렴치",
-    "bodyguard": "호위",
-    "fire_heart_seeker": "화염 추적자",
-    "bravery": "용기",
-    "vengeance": "복수",
-    "endurance": "인내",
-    "fury": "격노",
-    "guile": "기만",
-    "reach": "사거리",
-    "passion": "열정",
-    "humility": "겸손",
-    "precision": "정밀",
-    "projectile_fire_arrows": "화염 화살",
-    "fire_arrows": "화염 화살",
-    "abundance": "풍요",
-    "gluttony": "탐욕",
-    "intuition": "직감",
-    "judgement": "판단",
-    "judgment": "판단",
-    "mobility": "기동",
-    "clarity": "명료",
-    "intensity": "집중",
-    "flexibility": "유연",
-    "dignity": "위엄",
-    "meditation": "명상",
-    "nobility": "고귀",
-    "zeal": "열의",
-    "composure": "침착",
-    "understanding": "이해",
-    "perception": "통찰",
-    "stability": "안정",
-}
-
-_SKILL_TERM_LABELS = {
-    **_SKILL_PHRASE_LABELS,
-    "expertise": "전문성",
-    "resolve": "결의",
-    "cunning": "책략",
-    "instinct": "본능",
-    "authority": "권위",
-    "ranged": "원거리",
-    "damage": "피해",
-    "armour": "갑옷",
-    "armor": "갑옷",
-}
-
-
-def _contains_hangul(text: str) -> bool:
-    return any("\uac00" <= ch <= "\ud7a3" for ch in text)
-
-
-def _translate_skill_name_text(text: str) -> str:
-    if not text or _contains_hangul(text):
-        return text
-    normalized = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
-    return (
-        _SKILL_PHRASE_LABELS.get(normalized)
-        or _SKILL_TERM_LABELS.get(normalized)
-        or _friendly_skill_key(normalized)
-    )
-
-
-def _skill_name_for_key(skill_key: str, loc_text: dict[str, str]) -> str:
-    for loc_key in (
-        f"character_skills_localised_name_{skill_key}",
-        f"character_skills_name_{skill_key}",
-        f"character_skill_names_{skill_key}",
-    ):
-        if loc_text.get(loc_key):
-            return _translate_skill_name_text(loc_text[loc_key])
-    return _friendly_skill_key(skill_key)
-
-
-def _friendly_skill_key(skill_key: str) -> str:
-    value = str(skill_key or "")
-    lower = value.lower()
-    level_match = re.search(r"(?:^|_)mlvl_?(\d+)|(?:^|_)level_?(\d+)", lower)
-    level = f" Lv{level_match.group(1) or level_match.group(2)}" if level_match else ""
-    normalized_full = re.sub(r"[^a-z0-9]+", "_", lower).strip("_")
-    if normalized_full in _SKILL_PHRASE_LABELS:
-        return f"{_SKILL_PHRASE_LABELS[normalized_full]}{level}"
-    for phrase_key, label in _SKILL_PHRASE_LABELS.items():
-        if phrase_key in normalized_full:
-            return f"{label}{level}"
-    cleaned = lower
-    cleaned = re.sub(r"^3k_(?:main|dlc\d+|mtu)_", "", cleaned)
-    previous = ""
-    while previous != cleaned:
-        previous = cleaned
-        cleaned = re.sub(r"^(?:skill|special|mastery|ability|enable|unlock)_", "", cleaned)
-    cleaned = re.sub(r"_mlvl_?\d+|_level_?\d+", "", cleaned)
-    if cleaned in _SKILL_PHRASE_LABELS:
-        return f"{_SKILL_PHRASE_LABELS[cleaned]}{level}"
-    for phrase_key, label in _SKILL_PHRASE_LABELS.items():
-        if phrase_key in cleaned:
-            return f"{label}{level}"
-    cleaned = re.sub(r"_(?:earth|fire|wood|water|metal)(?:_|$)", "_", cleaned)
-    cleaned = re.sub(r"(^|_)\d+($|_)", "_", cleaned)
-    cleaned = cleaned.strip("_")
-    if cleaned in _SKILL_PHRASE_LABELS:
-        return f"{_SKILL_PHRASE_LABELS[cleaned]}{level}"
-    for phrase_key, label in _SKILL_PHRASE_LABELS.items():
-        if phrase_key in cleaned:
-            return f"{label}{level}"
-    for part in re.split(r"_+", cleaned):
-        if part in _SKILL_TERM_LABELS:
-            return f"{_SKILL_TERM_LABELS[part]}{level}"
-    return _friendly_key(value)
-
-
-def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> str:
-    for loc_key in (
-        f"effects_description_{key}",
-        f"effects_localised_description_{key}",
-        f"effects_localised_title_{key}",
-        f"effects_name_{key}",
-    ):
-        if loc_text.get(loc_key):
-            return loc_text[loc_key]
-    for field in ("description", "onscreen_name", "name", "icon"):
-        value = row.get(field)
-        if value and loc_text.get(str(value)):
-            return loc_text[str(value)]
-        if value and field != "icon":
-            label = _friendly_effect_key(str(value))
-            if label and _contains_hangul(label):
-                return label
-    return _friendly_effect_key(key)
-
-
-def _friendly_effect_key(key: str) -> str:
-    lower = str(key or "").lower()
     normalized = re.sub(r"[^a-z0-9]+", "_", lower).strip("_")
     normalized = re.sub(r"^(?:3k_(?:main|dlc\d+|mtu)_)?(?:effect|effects|enable|unlock|skill|ability)_", "", normalized)
     if normalized in _SKILL_PHRASE_LABELS:
         return _SKILL_PHRASE_LABELS[normalized]
     for phrase_key, label in _SKILL_PHRASE_LABELS.items():
-        if phrase_key in normalized:
+        if phrase_key in normalized or phrase_key in lower:
             return label
-    attributes = {
-        "expertise": "전문성",
-        "resolve": "결의",
-        "cunning": "책략",
-        "instinct": "본능",
-        "authority": "권위",
+    replacements = {
+        "expertise": "???",
+        "resolve": "??",
+        "cunning": "??",
+        "instinct": "??",
+        "authority": "??",
+        "satisfaction": "???",
+        "morale": "??",
+        "movement": "????",
+        "replenishment": "???",
+        "charge": "??",
+        "fatigue": "??",
+        "ambush": "??",
+        "armour": "??",
+        "armor": "??",
+        "ammo": "??",
+        "income": "??",
+        "gdp": "??",
+        "food": "??",
+        "diplomacy": "??",
+        "ability": "??",
     }
-    for english, korean in attributes.items():
-        if english in lower:
-            return korean
-    for phrase_key, label in _SKILL_PHRASE_LABELS.items():
-        if phrase_key in lower:
+    for needle, label in replacements.items():
+        if needle in lower:
             return label
-    if "projectile_fire_arrows" in lower or "fire_arrows" in lower:
-        return "화염 화살"
-    if "ai_hint" in lower or "ai hint" in lower:
-        return ""
-    if "run_speed" in lower or "campaign_run_speed" in lower:
-        return "속도"
-    if "line_of_sight" in lower:
-        return "시야"
-    if "attack_rate" in lower:
-        return "공격 속도"
-    if "province_building_upkeep" in lower or "building_upkeep" in lower:
-        return "건물 유지비"
-    if "ap_damage_melee" in lower:
-        return "관통 근접 피해"
-    if "mod_melee_defence" in lower or "melee_defence" in lower:
-        return "근접 방어"
-    if "mod_missile_damage" in lower or "missile_damage" in lower:
-        return "원거리 피해"
-    if "projectile_poison_arrows" in lower:
-        return "독화살"
-    if "projectile_fire_artillery" in lower:
-        return "화염 포병"
-    if "unit_rank_new_recruits" in lower or "new_recruits" in lower:
-        return "신규 모집 등급"
-    if "industrial_exploitation" in lower:
-        return "산업 개발"
-    if "points_per_turn" in lower:
-        return "책략 점수"
-    if "attribute_encourages" in lower:
-        return "격려"
-    if "politics_assignment_limit" in lower:
-        return "파견 임무 한도"
-    if "block_mod_earth_units" in lower:
-        return "토 부대 방어"
-    if "defence_mod_metal_units" in lower:
-        return "금 부대 방어"
-    if "captives_capture_chance" in lower:
-        return "포로 생포 확률"
-    if "captives_escape_chance" in lower:
-        return "포로 탈출 확률"
-    if "unit_unlock_archer" in lower:
-        return "궁병 모집 해금"
-    if "characters_experience_bonus" in lower:
-        return "인물 경험치"
-    if "reinforcement_range" in lower:
-        return "지원군 범위"
-    if "deployables_caltrops" in lower:
-        return "마름쇠 배치"
-    if "deployables_wooden_stakes" in lower:
-        return "말뚝 배치"
-    if "find_villainous_and_corrupt" in lower:
-        return "간악/부패 인물 탐색"
-    if "find_filial_and_incorrupt" in lower:
-        return "효성/청렴 인물 탐색"
-    if "abs_increase_from_characters" in lower:
-        return "인물 만족도"
-    if "public_order_from_characters" in lower:
-        return "인물 공공질서"
-    if "province_public_order_base" in lower or "public_order" in lower:
-        return "공공질서"
-    if "root_out_corruption" in lower:
-        return "부패 척결"
-    if "night_battles" in lower:
-        return "야간 전투"
-    if "unit_experience" in lower:
-        return "부대 경험치"
-    if "ancillary_aura" in lower or "aura_mod" in lower:
-        return "오라 범위"
-    if "immune_to_psychology" in lower:
-        return "심리 면역"
-    if "ap_damage_missile" in lower:
-        return "관통 원거리 피해"
-    if "force_army_reload" in lower or "army_reload" in lower:
-        return "재장전 속도"
-    if "satisfaction" in lower:
-        return "만족도"
-    if "morale" in lower:
-        return "사기"
-    if "movement" in lower:
-        return "이동거리"
-    if "replenishment" in lower:
-        return "충원률"
-    if "charge" in lower:
-        return "돌격 보너스"
-    if "ranged_damage" in lower or "ranged damage" in lower:
-        return "원거리 피해"
-    if "progression_limit_army" in lower:
-        return "군단 한도"
-    if "fatigue" in lower:
-        return "피로 저항"
-    if "attrition" in lower:
-        return "소모 피해"
-    if "ambush" in lower:
-        return "매복 확률"
-    if "guerrilla" in lower:
-        return "유격 배치"
-    if "redeployment" in lower:
-        return "재배치 비용"
-    if "faction_support" in lower or "faction support" in lower:
-        return "세력 지지도"
-    if "mighty_knockback" in lower or "knockback" in lower:
-        return "강한 밀쳐내기"
-    if "charge_speed" in lower:
-        return "돌격 속도"
-    if "fire_charge_bonus" in lower:
-        return "화염 돌격 보너스"
-    if "fire_units" in lower:
-        return "화염 부대 피해"
-    if "siege_escalation" in lower:
-        return "공성 우위"
-    if "enemy_territory" in lower:
-        return "적 영토 이동"
-    if "unlock_fire_conscription" in lower or "fire conscription" in lower:
-        return "화염 부대 모집 해금"
-    if "disciplined" in lower:
-        return "규율"
-    if "melee_damage" in lower or "melee damage" in lower:
-        return "근접 피해"
-    if "melee_evasion" in lower:
-        return "근접 회피"
-    if "armour" in lower or "armor" in lower:
-        return "갑옷"
-    if "ammo" in lower or "ammunition" in lower:
-        return "탄약"
-    if "income" in lower or "gdp" in lower:
-        return "수입"
-    if "food" in lower:
-        return "식량"
-    if "diplomacy" in lower:
-        return "외교"
-    if "resilience" in lower:
-        return "회복력"
-    if "fear" in lower:
-        return "공포 유발"
-    if "stalk" in lower:
-        return "은밀한 이동"
-    if "vanguard" in lower:
-        return "유격 배치"
-    if "ability" in lower:
-        return "능력"
-    return _friendly_key(str(key or ""))
-
+    return _friendly_key(value)
 
 def _visible_effect_label(effect: dict[str, Any]) -> str:
     key = str(effect.get("effectKey") or "")
@@ -1606,7 +1684,7 @@ def _visible_effect_label(effect: dict[str, Any]) -> str:
 def _effect_summary(effects: list[dict[str, Any]]) -> str:
     useful_effects = [effect for effect in effects if _visible_effect_label(effect)]
     if not useful_effects:
-        return "효과 정보 없음"
+        return "?? ?? ??"
     pieces = []
     for effect in useful_effects[:4]:
         label = _visible_effect_label(effect)
@@ -1614,8 +1692,8 @@ def _effect_summary(effects: list[dict[str, Any]]) -> str:
         suffix = f" {value:+g}" if isinstance(value, (int, float)) else f" {value}" if value not in {None, ""} else ""
         pieces.append(f"{label}{suffix}")
     if len(useful_effects) > 4:
-        pieces.append(f"외 {len(useful_effects) - 4}개")
-    return " · ".join(pieces)
+        pieces.append(f"? {len(useful_effects) - 4}?")
+    return " ? ".join(pieces)
 
 
 def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
@@ -1668,8 +1746,8 @@ def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dic
                 "projectileDamage": _number_or_none((projectile_row or {}).get("damage")),
                 "projectileApDamage": _number_or_none((projectile_row or {}).get("ap_damage")),
                 "projectileRange": _number_or_none((projectile_row or {}).get("effective_range")),
-                "armourCeo": (armour or {}).get("ceos_key"),
-                "armourStatKey": (armour or {}).get("armour"),
+                "armourCeo": (armour or {}).get("ceos_key") if armour_row else None,
+                "armourStatKey": (armour or {}).get("armour") if armour_row else None,
                 "armourAudioType": (armour_row or {}).get("audio_type"),
                 "armourFromReference": bool(
                     (armour or {}).get("_referenceSourcePath")
@@ -1729,7 +1807,7 @@ def _title_info_for_character(
         "locTitleKey": f"ceo_nodes_title_{matched}" if matched else "",
         "descriptionKey": f"ceo_nodes_description_{matched}" if matched else "",
         "source": "campaigns/ceo_data.ccd",
-        "note": "set_title/career CEO는 CCD/startpos 계층이라 쓰기는 별도 검증 후 지원",
+        "note": "set_title/career CEO? CCD/startpos ???? ??? ?? ?????.",
     }
 
 
@@ -1767,7 +1845,7 @@ def _loc_title_for_ceo_node(ceo_node_key: str, loc_text: dict[str, str]) -> str 
 
 def _friendly_title_label(ceo_node_key: str) -> str:
     if not ceo_node_key:
-        return "칭호 미확인"
+        return "?? ?? ??"
     value = ceo_node_key
     for marker in ("_ceo_node_career_historical_", "_ceo_node_career_generated_"):
         if marker in value:
@@ -1864,6 +1942,14 @@ def _merge_reference_packs(
     for reference_path in reference_paths:
         reference_started = time.perf_counter()
         resolved = reference_path.expanduser()
+        if _is_aw_reference(resolved):
+            report.append({
+                "path": str(resolved),
+                "ok": False,
+                "error": "skipped_aw_image_pack",
+                "seconds": _elapsed(reference_started),
+            })
+            continue
         if _skip_bfg_resource_pack_for_fast_open(resolved):
             report.append({
                 "path": str(resolved),
@@ -1986,6 +2072,223 @@ def _merge_reference_packs(
     return report
 
 
+def _merge_internal_materials(
+    tables: dict[str, list[dict[str, Any]]],
+    loc_text: dict[str, str],
+    asset_files: list[str],
+    asset_sources: dict[str, str],
+) -> dict[str, Any] | None:
+    if not INTERNAL_MATERIALS_PATH.is_file():
+        return None
+    started = time.perf_counter()
+    known_assets = set(asset_files)
+    before_counts = {alias: len(rows) for alias, rows in tables.items()}
+    try:
+        session = MaterialPackSession.open(INTERNAL_MATERIALS_PATH)
+        reference_tables = _read_internal_material_reference_tables(session)
+        for alias, rows in reference_tables.items():
+            if alias == "campaign_character_arts":
+                _append_missing_rows_by_fields(
+                    tables.setdefault(alias, []),
+                    rows,
+                    ("art_set_id", "age", "portrait", "card", "uniform"),
+                    str(INTERNAL_MATERIALS_PATH),
+                )
+            elif alias == "character_generation_template_game_mode_details":
+                _append_missing_rows_by_fields(
+                    tables.setdefault(alias, []),
+                    rows,
+                    ("character_generation_template", "game_mode"),
+                    str(INTERNAL_MATERIALS_PATH),
+                )
+            elif alias == "character_skill_node_links":
+                _append_missing_rows_by_fields(
+                    tables.setdefault(alias, []),
+                    rows,
+                    ("parent_key", "child_key", "link_type"),
+                    str(INTERNAL_MATERIALS_PATH),
+                )
+            elif alias == "character_skill_level_to_effects_junctions":
+                _append_missing_rows_by_fields(
+                    tables.setdefault(alias, []),
+                    rows,
+                    ("character_skill_key", "effect_key", "effect_scope", "level"),
+                    str(INTERNAL_MATERIALS_PATH),
+                )
+            elif alias == "character_attribute_sets":
+                _append_missing_rows_by_key(
+                    tables.setdefault(alias, []),
+                    rows,
+                    _attribute_set_key,
+                    str(INTERNAL_MATERIALS_PATH),
+                )
+            elif alias == "character_attributes":
+                _append_missing_rows_by_key(
+                    tables.setdefault(alias, []),
+                    rows,
+                    lambda row: (_attribute_set_key(row), _attribute_stat_key(row) or ""),
+                    str(INTERNAL_MATERIALS_PATH),
+                )
+            else:
+                _append_missing_rows(
+                    tables.setdefault(alias, []),
+                    rows,
+                    _key_field_for_alias(alias),
+                    str(INTERNAL_MATERIALS_PATH),
+                )
+        for key, text in _read_all_loc_text(session).items():
+            loc_text.setdefault(key, text)
+        added_assets = _merge_internal_asset_manifest(asset_files, asset_sources, known_assets)
+        added_assets += _merge_extracted_asset_inventory(asset_files, asset_sources, known_assets)
+        added = {
+            alias: len(tables.get(alias, [])) - before_counts.get(alias, 0)
+            for alias in reference_tables
+        }
+        return {
+            "path": str(INTERNAL_MATERIALS_PATH),
+            "ok": True,
+            "internalMaterials": True,
+            "tables": sorted(reference_tables),
+            "rowCounts": {alias: len(rows) for alias, rows in reference_tables.items()},
+            "addedRows": {key: value for key, value in added.items() if value},
+            "addedAssets": added_assets,
+            "seconds": _elapsed(started),
+        }
+    except Exception as error:
+        return {
+            "path": str(INTERNAL_MATERIALS_PATH),
+            "ok": False,
+            "internalMaterials": True,
+            "error": str(error),
+            "seconds": _elapsed(started),
+        }
+
+
+def _merge_internal_asset_manifest(
+    asset_files: list[str],
+    asset_sources: dict[str, str],
+    known_assets: set[str],
+) -> int:
+    if not INTERNAL_ASSET_MANIFEST.is_file():
+        return 0
+    try:
+        with INTERNAL_ASSET_MANIFEST.open("r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return 0
+    assets = manifest.get("assets", {})
+    if not isinstance(assets, dict):
+        return 0
+    added = 0
+    for packed_path, info in assets.items():
+        if not packed_path or packed_path in known_assets:
+            continue
+        if _is_aw_asset_path(str(packed_path)):
+            continue
+        asset_files.append(str(packed_path))
+        known_assets.add(str(packed_path))
+        source = ""
+        if isinstance(info, dict):
+            source = str(info.get("sourcePack") or info.get("sourcePath") or "")
+        asset_sources[str(packed_path)] = source or str(INTERNAL_ASSET_MANIFEST)
+        added += 1
+    return added
+
+
+def _merge_extracted_asset_inventory(
+    asset_files: list[str],
+    asset_sources: dict[str, str],
+    known_assets: set[str],
+) -> int:
+    if not EXTRACTED_ASSET_ROOT.is_dir():
+        return 0
+    added = 0
+    pack_dirs = sorted(
+        (path for path in EXTRACTED_ASSET_ROOT.iterdir() if path.is_dir()),
+        key=lambda path: (0 if path.name == "hby_generated_character_sets" else 1, path.name.lower()),
+    )
+    for pack_dir in pack_dirs:
+        for path in pack_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            suffix = path.relative_to(pack_dir).as_posix()
+            if not suffix.lower().startswith("ui/characters/"):
+                continue
+            if not suffix.lower().endswith((".png", ".jpg", ".jpeg", ".dds")):
+                continue
+            if _is_aw_asset_path(suffix):
+                continue
+            if suffix in known_assets:
+                continue
+            asset_files.append(suffix)
+            known_assets.add(suffix)
+            asset_sources[suffix] = str(pack_dir)
+            added += 1
+    return added
+
+
+def _read_internal_material_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
+    tables: dict[str, list[dict[str, Any]]] = {}
+    table_list = session.list_tables()
+    aliases: dict[str, list[str]] = {
+        **CHARACTER_TABLE_ALIASES,
+        **{alias: TABLE_ALIASES.get(alias, [alias]) for alias in TABLE_ALIASES},
+        **SKILL_TABLE_ALIASES,
+        "character_attribute_sets": [
+            "db/character_attribute_sets_tables/data__",
+            "db/character_attribute_sets_tables/data",
+        ],
+        "character_attributes": [
+            "db/character_attributes_tables/data__",
+            "db/character_attributes_tables/data",
+        ],
+    }
+    wanted_aliases = {
+        *CHARACTER_TABLE_ALIASES,
+        "campaign_character_art_sets",
+        "campaign_character_arts",
+        "character_attribute_sets",
+        "character_attributes",
+        "equipment_variants_weapons",
+        "equipment_variants_armours",
+        "melee_weapons",
+        "missile_weapons",
+        "projectiles",
+        "unit_armour_types",
+        "land_units",
+        *SKILL_TABLE_ALIASES,
+    }
+    for alias in wanted_aliases:
+        rows: list[dict[str, Any]] = []
+        for table_path in _all_reference_table_paths(table_list, alias, aliases.get(alias, [alias])):
+            try:
+                rows.extend(session.read_table(table_path))
+            except ValueError:
+                continue
+        if rows:
+            tables[alias] = rows
+    return tables
+
+
+def _all_reference_table_paths(table_list: list[str], alias: str, candidates: list[str]) -> list[str]:
+    seen: set[str] = set()
+    paths: list[str] = []
+    for candidate in candidates:
+        if candidate in table_list and candidate not in seen:
+            paths.append(candidate)
+            seen.add(candidate)
+    folder = (
+        "/ceos_to_equipment_variants_tables/"
+        if alias in {"equipment_variants_weapons", "equipment_variants_armours"}
+        else f"/{alias}_tables/"
+    )
+    for path in sorted(table_list):
+        if folder in path and path not in seen:
+            paths.append(path)
+            seen.add(path)
+    return paths
+
+
 def _skip_reference_pack_for_fast_open(path: Path) -> bool:
     return False
 
@@ -1997,7 +2300,12 @@ def _is_data_pack(path: Path) -> bool:
 def _is_aw_reference(path: Path | str) -> bool:
     if not path:
         return False
-    return Path(path).name.lower().startswith(("aw-", "aw "))
+    return Path(path).name.lower().startswith(("aw-", "aw ", "aw_"))
+
+
+def _is_aw_asset_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").lower()
+    return "/aw_" in normalized or normalized.startswith("aw_") or "/characters/aw_" in normalized
 
 
 def _is_lshz_reference(path: Path | str) -> bool:
@@ -2491,9 +2799,9 @@ def _friendly_model_set_label(value: Any, fallback_name: str) -> str:
         return fallback_name
     model_name = _korean_name_from_art_or_model_key(model_key, {})
     if model_name:
-        return f"{model_name} 모델"
+        return f"{model_name} 紐⑤뜽"
     if fallback_name:
-        return f"{fallback_name} 모델"
+        return f"{fallback_name} 紐⑤뜽"
     return _friendly_key(model_key)
 
 
@@ -2620,7 +2928,15 @@ def _find_character_image(asset_index: dict[str, Any], image_key: str, image_kin
             return found
     still_matches = asset_index["stills_by_name"].get((image_name.lower(), image_kind.lower()), [])
     if still_matches:
-        return sorted(still_matches, key=lambda path: asset_index["priority"].get(path.lower(), 10**9))[0]
+        return sorted(still_matches, key=lambda path: (
+            _character_still_priority(path, image_kind),
+            asset_index["priority"].get(path.lower(), 10**9),
+        ))[0]
+    folder_candidates = _image_folder_candidates(normalized)
+    for folder in folder_candidates:
+        found = _find_character_image_in_folder(asset_index, folder, image_kind)
+        if found:
+            return found
     composite_prefixes = _character_composite_prefixes(normalized)
     for prefix in composite_prefixes:
         candidates = [
@@ -2633,9 +2949,36 @@ def _find_character_image(asset_index: dict[str, Any], image_key: str, image_kin
             return sorted(candidates, key=lambda path: (*_character_preview_priority(path), asset_index["priority"].get(path.lower(), 10**9)))[0]
     if "/" in normalized:
         return None
+    return _find_character_image_in_folder(asset_index, normalized, image_kind)
+
+
+def _image_folder_candidates(value: str) -> list[str]:
+    normalized = str(value or "").replace("\\", "/").strip("/")
+    parts = [part for part in normalized.split("/") if part]
+    candidates: list[str] = []
+    if not parts:
+        return candidates
+    lower_parts = [part.lower() for part in parts]
+    if "characters" in lower_parts:
+        index = lower_parts.index("characters")
+        if len(parts) > index + 1:
+            candidates.append(parts[index + 1])
+    if "stills" in lower_parts:
+        index = lower_parts.index("stills")
+        if index > 0:
+            candidates.append(parts[index - 1])
+    if len(parts) == 1:
+        candidates.append(parts[0])
+    return list(dict.fromkeys(candidate.strip("/") for candidate in candidates if candidate))
+
+
+def _find_character_image_in_folder(asset_index: dict[str, Any], folder: str, image_kind: str) -> str | None:
+    normalized = str(folder or "").strip("/").lower()
+    if not normalized:
+        return None
     matches = [
-        path for path in _asset_files_for_prefix(asset_index, f"ui/characters/{normalized.lower()}/")
-        if path.lower().startswith(f"ui/characters/{normalized.lower()}/")
+        path for path in _asset_files_for_prefix(asset_index, f"ui/characters/{normalized}/")
+        if path.lower().startswith(f"ui/characters/{normalized}/")
         and (
             f"/stills/{image_kind.lower()}/" in path.lower()
             or "/composites/large_panel/norm/" in path.lower()
@@ -2643,7 +2986,27 @@ def _find_character_image(asset_index: dict[str, Any], image_key: str, image_kin
         )
         and path.lower().endswith(".png")
     ]
-    return sorted(matches, key=lambda path: asset_index["priority"].get(path.lower(), 10**9))[0] if matches else None
+    return sorted(matches, key=lambda path: (
+        _character_still_priority(path, image_kind),
+        asset_index["priority"].get(path.lower(), 10**9),
+    ))[0] if matches else None
+
+
+def _character_still_priority(path: str, image_kind: str) -> int:
+    lower = path.lower().replace("\\", "/")
+    marker = f"/stills/{image_kind.lower()}/"
+    if marker in lower:
+        tail = lower.split(marker, 1)[1]
+        if "/" not in tail:
+            return 0
+        if tail.startswith("large/"):
+            return 1
+        return 5
+    if "/composites/large_panel/norm/" in lower:
+        return 2
+    if "/composites/large_panel/happy/" in lower:
+        return 3
+    return 4
 
 
 def _asset_files_for_prefix(asset_index: dict[str, Any], prefix: str) -> list[str]:
@@ -2701,12 +3064,9 @@ def _character_image_assets(
 
     folders = []
     for key in (portrait_key, card_key):
-        normalized = str(key or "").strip("/")
-        if not normalized:
-            continue
-        folder = normalized.split("/", 1)[0]
-        if folder and folder not in folders:
-            folders.append(folder)
+        for folder in _image_folder_candidates(str(key or "")):
+            if folder and folder not in folders:
+                folders.append(folder)
 
     assets = []
     seen = set()

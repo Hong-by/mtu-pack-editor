@@ -14,6 +14,7 @@ from tk_pack_builder.delta_builder import (
     _copy_skill_dependency,
     _loc_db_with_rows,
     _read_rows,
+    _spawn_entries_for_clones,
 )
 from tk_pack_builder.internal_materials import MaterialPackSession
 from tk_pack_builder.recipe import CharacterClone, CharacterPatch, LandUnitClone, Recipe, StatPatch, recipe_from_dict
@@ -184,6 +185,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         script = _campaign_start_spawn_script([clone])
         self.assertIsNotNone(script)
         self.assertIn("hby_template_test", script or "")
+        self.assertIn('turn_number >= item.turn', script or "")
         self.assertIn("function hby_mtu_pack_editor_player_spawn", script or "")
         self.assertIn("hby_mtu_player_spawn_listener_registered", script or "")
 
@@ -209,6 +211,48 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         script = _campaign_start_spawn_script([clone])
         self.assertIsNotNone(script)
         self.assertIn("hby_template_test", script or "")
+
+    def test_spawn_entries_use_separate_incidents_per_character(self) -> None:
+        immediate = CharacterClone(
+            new_template_key="hby_template_now",
+            source_template_key="source",
+            detail_source_template_key="source",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={"subtype": "3k_general_fire"},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            spawn_event="campaign_start",
+        )
+        delayed = CharacterClone(
+            new_template_key="hby_template_later",
+            source_template_key="source",
+            detail_source_template_key="source",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={"subtype": "3k_general_water", "min_spawn_round": 5},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            spawn_event="delayed_join",
+        )
+
+        entries = _spawn_entries_for_clones([immediate, delayed])
+
+        self.assertEqual(len(entries), 2)
+        self.assertNotEqual(entries[0]["incident"], entries[1]["incident"])
+        self.assertEqual(entries[1]["turn"], 5)
 
     def test_material_land_unit_clone_uses_source_table_path(self) -> None:
         payload = {
@@ -560,6 +604,90 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         row = rows_by_table["db/unit_armour_types_tables/data__"][0]
         self.assertEqual(row["key"], "armour_row")
         self.assertEqual(row["armour_value"], 77)
+
+    def test_material_stat_patch_reads_addon_equipment_variant_tables(self) -> None:
+        payload = {
+            "tables": {
+                "db/ceos_to_equipment_variants_tables/!!ironic_addon_korea": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"ceos_key": "addon_armour_ceo", "armour": "addon_armour_row"}],
+                },
+                "db/unit_armour_types_tables/!!ironic_addon_korea": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"key": "addon_armour_row", "armour_value": 40}],
+                },
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+
+        rows_by_table = {}
+        changed = _collect_stat_patch_rows(
+            session,
+            Recipe(
+                mod_name="test",
+                equipment_stat_patches=[StatPatch("addon_armour_ceo", "armour", "armour_value", 88)],
+                land_unit_clones=[],
+                skill_set_clones=[],
+                attribute_set_clones=[],
+                age_range_clones=[],
+                character_clones=[],
+                character_patches=[],
+                raw={},
+            ),
+            {},
+            rows_by_table,
+        )
+
+        self.assertEqual(changed, 1)
+        row = rows_by_table["db/unit_armour_types_tables/!!ironic_addon_korea"][0]
+        self.assertEqual(row["key"], "addon_armour_row")
+        self.assertEqual(row["armour_value"], 88)
+
+    def test_material_stat_patch_skips_missing_equipment_mapping(self) -> None:
+        payload = {
+            "tables": {
+                "db/ceos_to_equipment_variants_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [],
+                },
+                "db/unit_armour_types_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"key": "armour_row", "armour_value": 40}],
+                },
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+
+        rows_by_table = {}
+        changed = _collect_stat_patch_rows(
+            session,
+            Recipe(
+                mod_name="test",
+                equipment_stat_patches=[StatPatch("missing_armour_ceo", "armour", "armour_value", 77)],
+                land_unit_clones=[],
+                skill_set_clones=[],
+                attribute_set_clones=[],
+                age_range_clones=[],
+                character_clones=[],
+                character_patches=[],
+                raw={},
+            ),
+            {},
+            rows_by_table,
+        )
+
+        self.assertEqual(changed, 0)
+        self.assertEqual(rows_by_table, {})
 
     def test_material_armour_audio_type_patch_uses_source_table_path(self) -> None:
         payload = {
