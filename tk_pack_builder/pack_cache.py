@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
-SCHEMA_VERSION = 37
+SCHEMA_VERSION = 42
+MAX_OPEN_CACHE_ROWS = 4
 
 
 class PackCache:
@@ -22,9 +23,10 @@ class PackCache:
         pack_path: Path,
         include_vanilla: bool,
         reference_paths: list[Path] | None = None,
+        cache_token: str = "",
     ) -> dict[str, Any] | None:
         fingerprint = _fingerprint(pack_path)
-        reference_key = _reference_key(reference_paths or [])
+        reference_key = _reference_key(reference_paths or [], cache_token)
         try:
             with self._connect() as connection:
                 row = connection.execute(
@@ -71,9 +73,10 @@ class PackCache:
         analysis: dict[str, Any],
         characters: dict[str, Any],
         reference_paths: list[Path] | None = None,
+        cache_token: str = "",
     ) -> None:
         fingerprint = _fingerprint(pack_path)
-        reference_key = _reference_key(reference_paths or [])
+        reference_key = _reference_key(reference_paths or [], cache_token)
         self._ensure_schema()
         with self._connect() as connection:
             connection.execute(
@@ -102,6 +105,20 @@ class PackCache:
                     time.time(),
                 ),
             )
+            _prune_open_cache_rows(connection, MAX_OPEN_CACHE_ROWS)
+
+    def prune(self, max_open_rows: int = MAX_OPEN_CACHE_ROWS) -> None:
+        self._ensure_schema()
+        with self._connect() as connection:
+            _prune_open_cache_rows(connection, max_open_rows)
+
+    def vacuum(self) -> None:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute("vacuum")
+        finally:
+            connection.close()
 
     def get_asset(
         self,
@@ -230,7 +247,7 @@ def _fingerprint(pack_path: Path) -> dict[str, int]:
     }
 
 
-def _reference_key(reference_paths: list[Path]) -> str:
+def _reference_key(reference_paths: list[Path], cache_token: str = "") -> str:
     parts = []
     for path in reference_paths:
         if not path.exists():
@@ -242,7 +259,25 @@ def _reference_key(reference_paths: list[Path]) -> str:
             "mtime_ns": stat.st_mtime_ns,
             "size_bytes": stat.st_size,
         })
+    if cache_token:
+        parts.append({"cache_token": cache_token})
     return json.dumps(parts, ensure_ascii=False, sort_keys=True)
+
+
+def _prune_open_cache_rows(connection: sqlite3.Connection, max_rows: int) -> None:
+    keep_rows = max(1, int(max_rows))
+    connection.execute(
+        """
+        delete from pack_open_cache
+        where rowid not in (
+            select rowid
+            from pack_open_cache
+            order by updated_at desc
+            limit ?
+        )
+        """,
+        (keep_rows,),
+    )
 
 
 def _ensure_column(

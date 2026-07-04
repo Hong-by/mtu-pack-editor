@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import shutil
 import sys
 import time
@@ -12,15 +13,46 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.build_internal_materials_v015 import REQUIRED_TABLE_FOLDERS, table_folder  # noqa: E402
+from scripts.build_internal_materials_v015 import (  # noqa: E402
+    REQUIRED_TABLE_FOLDERS,
+    add_loc_source,
+    finalize_loc_materials,
+    table_folder,
+)
 from tk_pack_builder.adapters import adapter_for  # noqa: E402
 from tk_pack_builder.web import _ensure_rpfm_server  # noqa: E402
+
+
+def _workshop_roots() -> list[Path]:
+    roots = [
+        Path(os.environ["TK_PACK_EDITOR_WORKSHOP_DIR"])
+        for _ in [0]
+        if os.environ.get("TK_PACK_EDITOR_WORKSHOP_DIR")
+    ]
+    roots.extend([
+        Path("E:/SteamLibrary/steamapps/workshop/content/779340"),
+        Path("C:/Program Files (x86)/Steam/steamapps/workshop/content/779340"),
+    ])
+    return roots
+
+
+def _workshop_pack_candidates(content_id: str, file_name: str) -> list[Path]:
+    return [root / content_id / file_name for root in _workshop_roots()]
 
 
 DEFAULT_SOURCES = [
     ROOT / "work" / "packs" / "my_hero.pack",
     ROOT / "work" / "packs" / "refs" / "database.pack",
-]
+] + [
+    ROOT / "work" / "packs" / "refs" / "!!190_expanded_with_characters.pack",
+    ROOT / "work" / "packs" / "refs" / "!!190expande_korea_addon.pack",
+] + _workshop_pack_candidates(
+    "2875547086",
+    "!!190_expanded_with_characters.pack",
+) + _workshop_pack_candidates(
+    "3415534775",
+    "!!190expande_korea_addon.pack",
+)
 
 
 def main() -> None:
@@ -33,6 +65,11 @@ def main() -> None:
     material_path = args.materials.resolve()
     materials = json.loads(material_path.read_text(encoding="utf-8"))
     sources = [path.resolve() for path in (args.sources or DEFAULT_SOURCES) if path.is_file()]
+    material_sources = materials.setdefault("sources", [])
+    for source in sources:
+        source_text = str(source)
+        if source_text not in material_sources:
+            material_sources.append(source_text)
 
     report: dict[str, Any] = {
         "createdAt": time.time(),
@@ -52,6 +89,8 @@ def main() -> None:
         report["addedRows"] += source_report["addedRows"]
         report["mergedTables"] += source_report["mergedTables"]
         report["addedLocRows"] += source_report["addedLocRows"]
+
+    finalize_loc_materials(materials)
 
     backup_path = material_path.with_suffix(f".backup-{time.strftime('%Y%m%d%H%M%S')}.json")
     shutil.copy2(material_path, backup_path)
@@ -102,14 +141,20 @@ def merge_source(materials: dict[str, Any], source: Path) -> dict[str, Any]:
                 loc_rows = session.read_loc(loc_path)
             except Exception:
                 continue
-            entry = materials.setdefault("loc", {}).setdefault(loc_path, {"sourcePath": str(source), "rows": {}})
-            before = len(entry.setdefault("rows", {}))
-            for key, value in loc_rows.items():
-                entry["rows"].setdefault(key, value)
-            source_report["addedLocRows"] += len(entry["rows"]) - before
+            before = _loc_key_count(materials)
+            add_loc_source(materials, loc_path, source, loc_rows)
+            source_report["addedLocRows"] += max(0, _loc_key_count(materials) - before)
     finally:
         session.close()
     return source_report
+
+
+def _loc_key_count(materials: dict[str, Any]) -> int:
+    keys: set[str] = set()
+    for entry in materials.get("loc", {}).values():
+        if isinstance(entry, dict) and isinstance(entry.get("rows"), dict):
+            keys.update(str(key) for key in entry["rows"])
+    return len(keys)
 
 
 def merge_rows(target_rows: list[dict[str, Any]], source_rows: list[dict[str, Any]], table_path: str) -> int:

@@ -376,7 +376,12 @@ class CliFlowTest(unittest.TestCase):
             if row["character_generation_template"] == "hby_template_clone_chen_jiu_body_dong_min_art"
         ]
         self.assertEqual(len(detail_rows), 2)
-        self.assertTrue(all(row["initial_ceos"] == "hby_ceo_initial_data_clone_chen_jiu" for row in detail_rows))
+        self.assertTrue(
+            all(
+                row["initial_ceos"] == "3k_mtu_ceo_initial_data_character_historical_chen_jiu"
+                for row in detail_rows
+            )
+        )
 
         art_sets = {row["art_set_id"]: row for row in data["tables"]["campaign_character_art_sets"]}
         self.assertIn("hby_art_set_clone_dong_min_general", art_sets)
@@ -391,7 +396,7 @@ class CliFlowTest(unittest.TestCase):
         self.assertEqual(ages["hby_age_clone_chen_jiu"]["birth_year"], 172)
 
         ceos = {row["key"]: row for row in data["tables"]["ceo_initial_datas"]}
-        self.assertIn("hby_ceo_initial_data_clone_chen_jiu", ceos)
+        self.assertIn("3k_mtu_ceo_initial_data_character_historical_chen_jiu", ceos)
 
     def test_build_clones_land_unit_and_remaps_new_character_retinue(self) -> None:
         tmp_path = ROOT / "work" / "test-output"
@@ -418,7 +423,6 @@ class CliFlowTest(unittest.TestCase):
                             "newTemplateKey": "hby_template_land_unit_test",
                             "sourceTemplateKey": "3k_mtu_template_historical_chen_jiu_hero_wood",
                             "detailSourceTemplateKey": "3k_mtu_template_historical_chen_jiu_hero_wood",
-                            "newInitialCeoKey": "hby_ceo_initial_data_land_unit_test",
                             "initialCeoSourceKey": "3k_mtu_ceo_initial_data_character_historical_chen_jiu",
                             "detailOverrides": {
                                 "historical": {
@@ -468,6 +472,12 @@ class CliFlowTest(unittest.TestCase):
         ]
         self.assertEqual(len(detail_rows), 2)
         self.assertTrue(all(row["retinue"] == "hby_land_unit_test_general" for row in detail_rows))
+        self.assertTrue(
+            all(
+                row["initial_ceos"] == "3k_mtu_ceo_initial_data_character_historical_chen_jiu"
+                for row in detail_rows
+            )
+        )
 
 
 if __name__ == "__main__":

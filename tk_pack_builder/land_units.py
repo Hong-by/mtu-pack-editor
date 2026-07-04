@@ -9,6 +9,10 @@ from .stat_tables import resolve_table_name
 
 ALLOWED_LAND_UNIT_OVERRIDES = {
     "charge_bonus",
+    "dismounted_charge_bonus",
+    "dismounted_melee_attack",
+    "melee_attack",
+    "melee_defence",
     "morale",
     "primary_ammo",
     "armour",

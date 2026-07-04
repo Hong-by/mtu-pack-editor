@@ -25,6 +25,31 @@ MATERIAL_TABLE_ALIASES = {
         "db/character_attributes_tables/data__",
         "db/character_attributes_tables/data",
     ],
+    "frontend_character_ceos": [
+        "db/frontend_character_ceos_tables/_mtu_characters_ceo",
+        "db/frontend_character_ceos_tables/data__",
+        "db/frontend_character_ceos_tables/data",
+    ],
+    "ceo_initial_data_stages": [
+        "db/ceo_initial_data_stages_tables/_mtu_characters_ceo",
+        "db/ceo_initial_data_stages_tables/data__",
+        "db/ceo_initial_data_stages_tables/data",
+    ],
+    "ceo_initial_data_to_stages": [
+        "db/ceo_initial_data_to_stages_tables/_mtu_characters_ceo",
+        "db/ceo_initial_data_to_stages_tables/data__",
+        "db/ceo_initial_data_to_stages_tables/data",
+    ],
+    "ceo_initial_data_active_ceos": [
+        "db/ceo_initial_data_active_ceos_tables/_mtu_characters_ceo",
+        "db/ceo_initial_data_active_ceos_tables/data__",
+        "db/ceo_initial_data_active_ceos_tables/data",
+    ],
+    "ceo_initial_data_equipments": [
+        "db/ceo_initial_data_equipments_tables/_mtu_characters_ceo",
+        "db/ceo_initial_data_equipments_tables/data__",
+        "db/ceo_initial_data_equipments_tables/data",
+    ],
     "incidents": [
         "db/incidents_tables/event",
         "db/incidents_tables/data__",

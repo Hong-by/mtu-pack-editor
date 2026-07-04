@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections import Counter
@@ -12,7 +13,26 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tk_pack_builder.adapters import adapter_for  # noqa: E402
-from tk_pack_builder.web import _ensure_rpfm_server  # noqa: E402
+from tk_pack_builder.web import _ensure_rpfm_server, default_game_local_pack_paths  # noqa: E402
+
+MERGED_KOREAN_LOC_PATH = "text/mtu_pack_editor/merged_korean.loc"
+
+
+def _workshop_roots() -> list[Path]:
+    roots = [
+        Path(os.environ["TK_PACK_EDITOR_WORKSHOP_DIR"])
+        for _ in [0]
+        if os.environ.get("TK_PACK_EDITOR_WORKSHOP_DIR")
+    ]
+    roots.extend([
+        Path("E:/SteamLibrary/steamapps/workshop/content/779340"),
+        Path("C:/Program Files (x86)/Steam/steamapps/workshop/content/779340"),
+    ])
+    return roots
+
+
+def _workshop_pack_candidates(content_id: str, file_name: str) -> list[Path]:
+    return [root / content_id / file_name for root in _workshop_roots()]
 
 
 DEFAULT_SOURCES = [
@@ -29,7 +49,37 @@ DEFAULT_SOURCES = [
     ROOT / "work" / "packs" / "refs" / "BFG_Nanman2.pack",
     ROOT / "work" / "packs" / "refs" / "BFG_Yellow_Turban.pack",
     ROOT / "work" / "legacy_template" / "8King_4P_1.7_up.pack",
-]
+] + [
+    ROOT / "work" / "packs" / "refs" / "!!190_expanded_with_characters.pack",
+    ROOT / "work" / "packs" / "refs" / "!!190expande_korea_addon.pack",
+] + _workshop_pack_candidates(
+    "2875547086",
+    "!!190_expanded_with_characters.pack",
+) + _workshop_pack_candidates(
+    "3415534775",
+    "!!190expande_korea_addon.pack",
+) + _workshop_pack_candidates(
+    "3010906135",
+    "!!190_expanded_overhauladdition.pack",
+) + _workshop_pack_candidates(
+    "3240150507",
+    "!!190_expanded_region.pack",
+) + _workshop_pack_candidates(
+    "3242244024",
+    "!!190_expanded_kr.pack",
+) + _workshop_pack_candidates(
+    "3578173989",
+    "!!190expande_korea_addon_mod.pack",
+) + _workshop_pack_candidates(
+    "1813995786",
+    "[mod]MTU_original_v_0_0_2_korean.pack",
+) + _workshop_pack_candidates(
+    "2229399407",
+    "TheGathering_localised_kr.pack",
+) + _workshop_pack_candidates(
+    "2851094625",
+    "cao_wife(KOR).pack",
+) + default_game_local_pack_paths()
 
 REQUIRED_TABLE_FOLDERS = {
     "campaign_character_art_sets_tables",
@@ -37,10 +87,15 @@ REQUIRED_TABLE_FOLDERS = {
     "cai_retinues_to_aspects_tables",
     "cdir_events_incident_option_junctions_tables",
     "cdir_events_incident_payloads_tables",
+    "ceo_initial_data_active_ceos_tables",
+    "ceo_initial_data_equipments_tables",
+    "ceo_initial_data_stages_tables",
+    "ceo_initial_data_to_stages_tables",
     "ceo_initial_datas_tables",
     "ceos_to_equipment_variants_tables",
     "character_attribute_sets_tables",
     "character_attributes_tables",
+    "frontend_character_ceos_tables",
     "character_generation_spawn_age_ranges_tables",
     "character_generation_template_game_mode_details_tables",
     "character_generation_templates_tables",
@@ -100,6 +155,8 @@ def main() -> None:
         source_report = inspect_source(source, materials, args.include_large_assets)
         report["sources"].append(source_report)
 
+    finalize_loc_materials(materials)
+
     material_path = args.output_dir / "materials.v015.json"
     report_path = args.output_dir / "internalization_report.v015.json"
     material_path.write_text(json.dumps(materials, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -149,10 +206,7 @@ def inspect_source(source: Path, materials: dict[str, Any], include_large_assets
                 loc_rows = session.read_loc(loc_path)
             except Exception:
                 continue
-            materials["loc"].setdefault(loc_path, {
-                "sourcePath": str(source),
-                "rows": loc_rows,
-            })
+            add_loc_source(materials, loc_path, source, loc_rows)
             decoded_locs += 1
 
         asset_candidates = [
@@ -183,6 +237,73 @@ def inspect_source(source: Path, materials: dict[str, Any], include_large_assets
 def table_folder(path: str) -> str:
     parts = path.replace("\\", "/").split("/")
     return parts[1] if len(parts) > 2 and parts[0] in {"db", "ceo_db"} else ""
+
+
+def add_loc_source(materials: dict[str, Any], loc_path: str, source: Path, loc_rows: dict[str, str]) -> None:
+    loc = materials.setdefault("loc", {})
+    source_text = str(source)
+    storage_path = loc_path
+    if storage_path in loc and loc[storage_path].get("sourcePath") != source_text:
+        storage_path = f"{loc_path}#source={source.stem}"
+        index = 2
+        while storage_path in loc:
+            storage_path = f"{loc_path}#source={source.stem}_{index}"
+            index += 1
+    loc[storage_path] = {
+        "sourcePath": source_text,
+        "locPath": loc_path,
+        "rows": {str(key): str(value) for key, value in loc_rows.items()},
+    }
+
+
+def finalize_loc_materials(materials: dict[str, Any]) -> None:
+    merged: dict[str, str] = {}
+    priorities: dict[str, tuple[int, str, str]] = {}
+    source_paths: list[str] = []
+    for storage_path, entry in sorted(materials.get("loc", {}).items()):
+        if not isinstance(entry, dict):
+            continue
+        rows = entry.get("rows")
+        if not isinstance(rows, dict):
+            continue
+        loc_path = str(entry.get("locPath") or storage_path).split("#source=", 1)[0]
+        source_path = str(entry.get("sourcePath") or "")
+        if source_path and source_path not in source_paths:
+            source_paths.append(source_path)
+        priority = _loc_source_priority(source_path, loc_path)
+        for key, value in rows.items():
+            key_text = str(key)
+            rank = (priority, source_path, loc_path)
+            if key_text not in merged or rank >= priorities[key_text]:
+                merged[key_text] = str(value)
+                priorities[key_text] = rank
+    materials["loc"] = {
+        MERGED_KOREAN_LOC_PATH: {
+            "sourcePath": ";".join(source_paths),
+            "locPath": MERGED_KOREAN_LOC_PATH,
+            "rows": dict(sorted(merged.items())),
+        }
+    }
+
+
+def _loc_source_priority(source_path: str, loc_path: str) -> int:
+    source = source_path.replace("\\", "/").lower()
+    loc = loc_path.replace("\\", "/").lower()
+    if "hby" in source or "hby" in loc:
+        return 100
+    if "korea_addon" in source or "korea_addon" in loc or "190expande_korea" in source:
+        return 95
+    if "190_expanded_kr" in source or "localised_kr" in source or "korean" in source or "(kor)" in source:
+        return 90
+    if "local_kr.pack" in source or loc.startswith("text/localisation"):
+        return 80
+    if "mtu" in source or "mtu" in loc:
+        return 70
+    if "local_en.pack" in source:
+        return 10
+    if "local_" in source:
+        return 5
+    return 50
 
 
 if __name__ == "__main__":

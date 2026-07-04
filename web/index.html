@@ -3,8 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Cache-Control" content="no-store">
     <title>MTU 장수 제작소</title>
-    <link rel="stylesheet" href="./app.css">
+    <link rel="stylesheet" href="./app.css?v=20260704-roster52">
   </head>
   <body>
     <header class="app-header">
@@ -18,25 +19,14 @@
       <div class="header-actions">
         <input id="inputPackPath" class="path-input" value="work\packs\my_hero.pack" aria-label="입력 pack 경로">
         <input id="outputPackPath" class="path-input" value="output\my_hero_patch.pack" aria-label="출력 pack 경로">
-        <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">work\packs\refs\database.pack
-work\packs\refs\data_mh.pack
-work\packs\refs\data_ep.pack
-work\packs\refs\data_dlc07.pack
-work\packs\refs\data_dlc06.pack
-work\packs\refs\data_bl.pack
-work\packs\refs\data_yt_bl.pack
-work\packs\refs\data.pack
-work\packs\refs\BFG_Originals.pack
-work\packs\refs\BFG_for_MTU.pack
-work\packs\refs\BFG_Nanman2.pack
-work\packs\refs\BFG_Yellow_Turban.pack</textarea>
+        <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">work\packs\refs\mtu_reference_core.pack</textarea>
         <select id="saveModeSelect" class="save-mode" aria-label="저장 방식">
           <option value="patch_pack" selected>패치 pack</option>
           <option value="save_as">Save As 원본 복사</option>
           <option value="in_place">원본 수정</option>
         </select>
         <button id="loadPackButton" class="ghost-btn" type="button">팩 읽기</button>
-        <button id="refreshPackButton" class="ghost-btn" type="button">DB 갱신</button>
+        <button id="refreshPackButton" class="ghost-btn" type="button">DB/팩 다시 읽기</button>
         <button id="validateButton" class="ghost-btn" type="button" hidden>검증</button>
         <button id="buildButton" class="primary-btn" type="button">저장</button>
         <button id="previewRecipeButton" class="ghost-btn" type="button">레시피 미리보기</button>
@@ -47,9 +37,13 @@ work\packs\refs\BFG_Yellow_Turban.pack</textarea>
     <main class="app-shell">
       <aside class="roster-panel">
         <div class="panel-toolbar">
-          <div>
+          <div class="roster-heading">
             <h2>장수</h2>
             <span id="rosterCount">0명</span>
+            <div class="gender-row roster-gender-row" role="group" aria-label="성별 필터">
+              <button id="workflowGenderMale" class="gender-btn active" data-workflow-gender="male" type="button">남성</button>
+              <button id="workflowGenderFemale" class="gender-btn" data-workflow-gender="female" type="button">여성</button>
+            </div>
           </div>
           <input id="searchInput" placeholder="이름, 오행, key 검색">
         </div>
@@ -66,159 +60,127 @@ work\packs\refs\BFG_Yellow_Turban.pack</textarea>
           <button class="filter" data-filter="korea:baekje" type="button">백제</button>
           <button class="filter" data-filter="korea:silla" type="button">신라</button>
           <button class="filter" data-filter="korea:tamna" type="button">탐라</button>
+          <button class="filter" data-filter="favorites" type="button">즐겨찾기</button>
         </div>
         <div id="characterList" class="character-list"></div>
       </aside>
 
       <section class="detail-panel">
-        <div class="hero-preview">
-          <div id="portraitFrame" class="portrait-frame">
-            <span id="portraitGlyph">將</span>
+        <section class="hero-preview">
+          <div id="portraitFrame" class="portrait-frame element-wood">
+            <div id="portraitGlyph" class="portrait-glyph">將</div>
           </div>
           <div class="hero-summary">
+            <span id="previewModeLabel">작업 목록 확인</span>
             <div class="summary-top">
-              <div>
-                <h2 id="selectedName">장수를 선택하세요</h2>
-                <p id="selectedKey">MTU pack 기준 샘플 UI</p>
-              </div>
-              <span id="elementBadge" class="element-badge">-</span>
+              <h2 id="selectedName">-</h2>
+              <span id="elementBadge" class="element-badge element-wood">木</span>
             </div>
+            <p id="selectedKey">-</p>
             <div id="selectedChips" class="chip-row"></div>
             <dl class="stat-grid">
               <div><dt>이미지 세트</dt><dd id="currentImageSet">-</dd></div>
               <div><dt>모델 세트</dt><dd id="currentModelSet">-</dd></div>
               <div><dt>능력치 세트</dt><dd id="currentAttributeSet">-</dd></div>
-              <div><dt>전투 기본값</dt><dd id="currentCombatProfile">-</dd></div>
-              <div><dt>병종</dt><dd id="currentUnitProfile">-</dd></div>
-              <div><dt>역사 스킬셋</dt><dd id="currentHistSkill">-</dd></div>
-              <div><dt>낭만 스킬셋</dt><dd id="currentRomanceSkill">-</dd></div>
-              <div><dt>등장 조건</dt><dd id="currentSpawn">-</dd></div>
-              <div><dt>등장 이벤트</dt><dd id="currentSpawnEvent">-</dd></div>
+              <div><dt>장비 기준</dt><dd id="currentCombatProfile">-</dd></div>
+              <div><dt>부대 기준</dt><dd id="currentUnitProfile">-</dd></div>
+              <div><dt>정사 스킬</dt><dd id="currentHistSkill">-</dd></div>
+              <div><dt>연의 스킬</dt><dd id="currentRomanceSkill">-</dd></div>
+              <div><dt>등장</dt><dd id="currentSpawn">-</dd></div>
+              <div><dt>이벤트</dt><dd id="currentSpawnEvent">-</dd></div>
             </dl>
           </div>
-        </div>
+        </section>
 
-        <div class="section-block">
+        <section class="section-block">
           <div class="section-head">
-            <h3>코어 이미지 소스</h3>
-            <span>선택한 작업에 사용할 초상화/카드 이미지 세트를 고릅니다.</span>
+            <h3>이미지 세트</h3>
           </div>
           <input id="appearanceSearchInput" class="gallery-search" type="search" placeholder="이미지 이름, 폴더, key 검색">
           <div id="appearanceGallery" class="appearance-gallery"></div>
-        </div>
+        </section>
       </section>
 
-      <aside class="work-panel">
+      <aside class="work-panel queue-mode">
         <div class="mode-switch">
-          <button id="editModeButton" class="mode-btn active" data-mode="edit" type="button">기존 장수 수정</button>
+          <button id="editModeButton" class="mode-btn" data-mode="edit" type="button">기존 장수 수정</button>
           <button id="createModeButton" class="mode-btn" data-mode="create" type="button">신규 장수 생성</button>
+          <button id="queueModeButton" class="mode-btn active" data-mode="queue" type="button">작업 목록</button>
         </div>
 
-        <section id="editPanel" class="work-mode active">
-          <div class="work-title">
-            <h2>기존 장수 수정</h2>
-            <p>선택한 장수 자체의 표시 이름, 이미지, 모델, 스킬셋, 등장 조건을 바꿉니다.</p>
+        <section id="startPanel" class="work-start">
+          <h2>선택 장수</h2>
+          <div id="workflowBaseCard" class="base-lock-card"></div>
+          <div class="workflow-actions">
+            <button id="startEditButton" class="primary-btn" type="button">기존 장수 수정</button>
+            <button id="startCreateButton" class="primary-btn" type="button">신규 장수 생성</button>
+            <button id="startQueueButton" class="ghost-btn" type="button">작업 목록 보기</button>
           </div>
+        </section>
 
+        <section id="editPanel" class="work-mode">
+          <h2>기존 장수 수정</h2>
+          <div class="editor-flow" data-flow-for="edit">
+            <button class="flow-step active" data-flow-tab="edit-basic" type="button"><b>1</b><strong>성별/기본</strong><span id="editFlowTarget">-</span></button>
+            <button class="flow-step" data-flow-tab="edit-appearance" type="button"><b>2</b><strong>이미지</strong><span id="editFlowImage">-</span></button>
+            <button class="flow-step" data-flow-tab="edit-combat" type="button"><b>3</b><strong>장비</strong><span id="editFlowGear">-</span></button>
+            <button class="flow-step" data-flow-tab="edit-spawn" type="button"><b>4</b><strong>등장</strong><span id="editFlowSpawn">-</span></button>
+            <button class="flow-step" data-flow-tab="edit-advanced" type="button"><b>5</b><strong>스킬</strong><span id="editFlowSkill">-</span></button>
+          </div>
           <div class="tab-bar" data-tabs-for="edit">
             <button class="tab-btn active" data-tab-target="edit-basic" type="button">기본</button>
             <button class="tab-btn" data-tab-target="edit-appearance" type="button">외형</button>
-            <button class="tab-btn" data-tab-target="edit-combat" type="button">전투</button>
+            <button class="tab-btn" data-tab-target="edit-combat" type="button">장비/능력</button>
             <button class="tab-btn" data-tab-target="edit-spawn" type="button">등장</button>
-            <button class="tab-btn" data-tab-target="edit-advanced" type="button">고급</button>
+            <button class="tab-btn" data-tab-target="edit-advanced" type="button">스킬</button>
           </div>
 
           <div class="tab-section active" data-tab-section="edit-basic">
-            <label>
-              <span>표시 이름</span>
-              <input id="editName" placeholder="예: 공손금정">
-            </label>
+            <label><span>성별</span><select id="editGender"><option value="male">남성</option><option value="female">여성</option></select></label>
+            <label><span>표시 이름</span><input id="editName" type="text"></label>
+            <label><span>칭호</span><select id="editTitle"></select></label>
+            <div class="title-filter-row" data-title-filter-for="edit" role="group" aria-label="칭호 주요 스탯 필터">
+              <button class="title-filter-btn active" data-title-filter-prefix="edit" data-title-filter="all" type="button">전체</button>
+              <button class="title-filter-btn" data-title-filter-prefix="edit" data-title-filter="authority" type="button">권위</button>
+              <button class="title-filter-btn" data-title-filter-prefix="edit" data-title-filter="instinct" type="button">본능</button>
+              <button class="title-filter-btn" data-title-filter-prefix="edit" data-title-filter="cunning" type="button">책략</button>
+              <button class="title-filter-btn" data-title-filter-prefix="edit" data-title-filter="expertise" type="button">전문성</button>
+              <button class="title-filter-btn" data-title-filter-prefix="edit" data-title-filter="resolve" type="button">결의</button>
+            </div>
             <div id="editTitleSummary" class="equipment-summary"></div>
-            <label>
-              <span>능력치 세트</span>
-              <select id="editAttributeSet"></select>
-            </label>
+            <label><span>트레잇 세트</span><select id="editTraitSet"></select></label>
+            <div id="editTraitSetSummary" class="equipment-summary"></div>
+            <label><span>능력치 세트</span><select id="editAttributeSet"></select></label>
             <div id="editAttributeSummary" class="equipment-summary"></div>
-            <label>
-              <span>오행/타입</span>
-              <select id="editSubtype"></select>
-            </label>
+            <label><span>오행/타입</span><select id="editSubtype"></select></label>
           </div>
 
           <div class="tab-section" data-tab-section="edit-appearance">
             <div id="editImagePreview" class="image-set-preview"></div>
-            <label>
-              <span>이미지 세트</span>
-              <select id="editImageSet"></select>
-            </label>
-            <label>
-              <span>모델 세트</span>
-              <select id="editModelSet"></select>
-            </label>
-            <label>
-              <span>Voice</span>
-              <select id="editVoiceoverActor"></select>
-            </label>
+            <label><span>이미지 세트</span><select id="editImageSet"></select></label>
+            <div id="editModelLockSummary" class="equipment-summary"></div>
           </div>
 
           <div class="tab-section" data-tab-section="edit-combat">
-            <div class="form-group">
-            <div class="group-title">
-              <strong>장비/부대 수치 패치</strong>
-              <span>장비 key는 유지하고 방어구 값만, 부대는 land unit 복제 row만 저장합니다.</span>
-            </div>
-            <label>
-              <span>장비 key 참조</span>
-              <select id="editCombatProfile"></select>
-            </label>
+            <label><span>장비 기준</span><select id="editCombatProfile"></select></label>
+            <label><span>장비 세트</span><select id="editEquipmentSet"></select></label>
+            <div id="editEquipmentSetSummary" class="equipment-summary"></div>
             <div id="editEquipmentSummary" class="equipment-summary"></div>
-            <label>
-              <span>참고 부대 프로필</span>
-              <select id="editUnitProfile"></select>
-            </label>
+            <label><span>기존 부대 프로필</span><select id="editUnitProfile"></select></label>
             <div id="editUnitSummary" class="equipment-summary"></div>
-            </div>
           </div>
 
           <div class="tab-section" data-tab-section="edit-spawn">
-            <div id="editSpawnHelp" class="spawn-help"></div>
-            <div class="two-col">
-              <label>
-                <span>등장 가중치</span>
-                <input id="editWeight" type="number" step="0.1">
-              </label>
-              <label>
-                <span>등장 이벤트</span>
-                <select id="editSpawnEvent"></select>
-              </label>
-            </div>
-            <label>
-              <span>출생년도</span>
-              <input id="editAgeRange" type="number" min="0" max="999" step="1" placeholder="출생년도">
-            </label>
-            <div class="two-col">
-              <label>
-                <span id="editMinRoundLabel">최소 라운드</span>
-                <input id="editMinRound" type="number">
-                <small id="editMinRoundNote"></small>
-              </label>
-              <label>
-                <span id="editMaxRoundLabel">최대 라운드</span>
-                <input id="editMaxRound" type="number">
-                <small id="editMaxRoundNote"></small>
-              </label>
-            </div>
+            <p id="editSpawnHelp" class="spawn-help"></p>
+            <label><span>가중치</span><input id="editWeight" type="number"></label>
+            <label><span>등장 이벤트</span><select id="editSpawnEvent"></select></label>
+            <label><span>출생년도</span><input id="editAgeRange" type="number"></label>
+            <label><span id="editMinRoundLabel">최소 라운드</span><input id="editMinRound" type="number"><small id="editMinRoundNote"></small></label>
+            <label><span id="editMaxRoundLabel">최대 라운드</span><input id="editMaxRound" type="number"><small id="editMaxRoundNote"></small></label>
           </div>
 
           <div class="tab-section" data-tab-section="edit-advanced">
-            <label>
-              <span>역사 스킬셋</span>
-              <select id="editHistoricalSkill"></select>
-            </label>
-            <label>
-              <span>낭만 스킬셋</span>
-              <select id="editRomanceSkill"></select>
-            </label>
+            <label><span>스킬셋</span><select id="editSkill"></select></label>
             <div id="editSkillTreeEditor" class="skill-tree-editor"></div>
           </div>
 
@@ -226,110 +188,71 @@ work\packs\refs\BFG_Yellow_Turban.pack</textarea>
         </section>
 
         <section id="createPanel" class="work-mode">
-          <div class="work-title">
-            <h2>신규 장수 생성</h2>
-            <p>여러 장수의 이름, 이미지, 모델, 스킬셋, 등장 조건을 조합합니다.</p>
+          <h2>신규 장수 생성</h2>
+          <div class="editor-flow" data-flow-for="create">
+            <button class="flow-step active" data-flow-tab="create-basic" type="button"><b>1</b><strong>성별/기준</strong><span id="createFlowTarget">-</span></button>
+            <button class="flow-step" data-flow-tab="create-appearance" type="button"><b>2</b><strong>이미지</strong><span id="createFlowImage">-</span></button>
+            <button class="flow-step" data-flow-tab="create-combat" type="button"><b>3</b><strong>장비</strong><span id="createFlowGear">-</span></button>
+            <button class="flow-step" data-flow-tab="create-spawn" type="button"><b>4</b><strong>등장</strong><span id="createFlowSpawn">-</span></button>
+            <button class="flow-step" data-flow-tab="create-advanced" type="button"><b>5</b><strong>스킬</strong><span id="createFlowSkill">-</span></button>
           </div>
-
           <div class="tab-bar" data-tabs-for="create">
             <button class="tab-btn active" data-tab-target="create-basic" type="button">기본</button>
             <button class="tab-btn" data-tab-target="create-appearance" type="button">외형</button>
-            <button class="tab-btn" data-tab-target="create-combat" type="button">전투</button>
+            <button class="tab-btn" data-tab-target="create-combat" type="button">장비/능력</button>
             <button class="tab-btn" data-tab-target="create-spawn" type="button">등장</button>
-            <button class="tab-btn" data-tab-target="create-advanced" type="button">고급</button>
+            <button class="tab-btn" data-tab-target="create-advanced" type="button">스킬</button>
           </div>
 
           <div class="tab-section active" data-tab-section="create-basic">
-            <label>
-              <span>새 장수 이름</span>
-              <input id="createName" placeholder="예: 홍비">
-            </label>
-            <select id="sourceBase" hidden></select>
-            <label>
-              <span>능력치 세트</span>
-              <select id="sourceAttributeSet"></select>
-            </label>
+            <label><span>성별</span><select id="createGender"><option value="male">남성</option><option value="female">여성</option></select></label>
+            <label><span>기준 장수</span><select id="sourceBase"></select></label>
+            <div id="createBaseSummary" class="base-lock-card"></div>
+            <label><span>표시 이름</span><input id="createName" type="text"></label>
+            <label><span>능력치 세트</span><select id="sourceAttributeSet"></select></label>
             <div id="sourceAttributeSummary" class="equipment-summary"></div>
-            <label>
-              <span>칭호</span>
-              <select id="sourceTitle"></select>
-            </label>
-            <label>
-              <span>오행/타입</span>
-              <select id="createSubtype"></select>
-            </label>
+            <label><span>칭호</span><select id="sourceTitle"></select></label>
+            <div class="title-filter-row" data-title-filter-for="source" role="group" aria-label="칭호 주요 스탯 필터">
+              <button class="title-filter-btn active" data-title-filter-prefix="source" data-title-filter="all" type="button">전체</button>
+              <button class="title-filter-btn" data-title-filter-prefix="source" data-title-filter="authority" type="button">권위</button>
+              <button class="title-filter-btn" data-title-filter-prefix="source" data-title-filter="instinct" type="button">본능</button>
+              <button class="title-filter-btn" data-title-filter-prefix="source" data-title-filter="cunning" type="button">책략</button>
+              <button class="title-filter-btn" data-title-filter-prefix="source" data-title-filter="expertise" type="button">전문성</button>
+              <button class="title-filter-btn" data-title-filter-prefix="source" data-title-filter="resolve" type="button">결의</button>
+            </div>
+            <div id="sourceTitleSummary" class="equipment-summary"></div>
+            <label><span>트레잇 세트</span><select id="sourceTraitSet"></select></label>
+            <div id="sourceTraitSetSummary" class="equipment-summary"></div>
+            <label><span>오행/타입</span><select id="createSubtype"></select></label>
           </div>
 
           <div class="tab-section" data-tab-section="create-appearance">
             <div id="sourceImagePreview" class="image-set-preview"></div>
-            <label>
-              <span>이미지 세트</span>
-              <select id="sourceImageSet"></select>
-            </label>
-            <label>
-              <span>모델 세트</span>
-              <select id="sourceModelSet"></select>
-            </label>
-            <label>
-              <span>Voice</span>
-              <select id="sourceVoiceoverActor"></select>
-            </label>
+            <label><span>이미지 세트</span><select id="sourceImageSet"></select></label>
+            <div id="sourceModelLockSummary" class="equipment-summary"></div>
           </div>
 
           <div class="tab-section" data-tab-section="create-combat">
-            <div class="form-group">
-            <div class="group-title">
-              <strong>장비/부대 수치 패치</strong>
-              <span>장비 key는 유지하고 방어구 값만, 부대는 land unit 복제 row만 저장합니다.</span>
-            </div>
-            <label>
-              <span>장비 key 참조</span>
-              <select id="sourceCombatProfile"></select>
-            </label>
+            <label><span>장비 기준</span><select id="sourceCombatProfile"></select></label>
+            <label><span>장비 세트</span><select id="sourceEquipmentSet"></select></label>
+            <div id="sourceEquipmentSetSummary" class="equipment-summary"></div>
             <div id="sourceEquipmentSummary" class="equipment-summary"></div>
-            <label>
-              <span>참고 부대 프로필</span>
-              <select id="sourceUnitProfile"></select>
-            </label>
+            <label><span>기존 부대 프로필</span><select id="sourceUnitProfile"></select></label>
             <div id="sourceUnitSummary" class="equipment-summary"></div>
-            </div>
           </div>
 
           <div class="tab-section" data-tab-section="create-spawn">
-            <div id="createSpawnHelp" class="spawn-help"></div>
-            <label>
-              <span>등장 조건</span>
-              <select id="sourceSpawn"></select>
-            </label>
-            <label>
-              <span>출생년도</span>
-              <input id="createAgeRange" type="number" min="0" max="999" step="1" placeholder="출생년도">
-            </label>
-            <label>
-              <span>등장 이벤트</span>
-              <select id="sourceSpawnEvent"></select>
-            </label>
-            <label>
-              <span>등장 가중치</span>
-              <input id="createWeight" type="number" step="0.1" value="0">
-            </label>
-            <label>
-              <span id="createMinRoundLabel">최소 등장 턴</span>
-              <input id="createMinRound" type="number" step="1" value="0">
-              <small id="createMinRoundNote"></small>
-            </label>
-            <label>
-              <span id="createMaxRoundLabel">최대 등장 턴</span>
-              <input id="createMaxRound" type="number" step="1" value="999">
-              <small id="createMaxRoundNote"></small>
-            </label>
+            <p id="createSpawnHelp" class="spawn-help"></p>
+            <label><span>출생년도 기준</span><select id="sourceSpawn"></select></label>
+            <label><span>출생년도</span><input id="createAgeRange" type="number"></label>
+            <select id="sourceSpawnEvent" hidden aria-hidden="true"></select>
+            <label><span>가중치</span><input id="createWeight" type="number"></label>
+            <label><span id="createMinRoundLabel">등장 라운드</span><input id="createMinRound" type="number"><small id="createMinRoundNote"></small></label>
+            <label><span>최대 라운드</span><input id="createMaxRound" type="number" disabled></label>
           </div>
 
           <div class="tab-section" data-tab-section="create-advanced">
-            <label>
-              <span>스킬셋</span>
-              <select id="sourceSkill"></select>
-            </label>
+            <label><span>스킬셋</span><select id="sourceSkill"></select></label>
             <div id="sourceSkillTreeEditor" class="skill-tree-editor"></div>
           </div>
 
@@ -337,16 +260,16 @@ work\packs\refs\BFG_Yellow_Turban.pack</textarea>
         </section>
 
         <section class="validation-panel">
-          <div class="section-head compact">
-            <h3>저장 전 검증</h3>
+          <div class="section-head">
+            <h2>검증</h2>
             <span id="validationCount">0개</span>
           </div>
           <div id="validationList" class="validation-list"></div>
         </section>
 
         <section class="queue-panel">
-          <div class="section-head compact">
-            <h3>작업 목록</h3>
+          <div class="section-head">
+            <h2>작업 목록</h2>
             <span id="queueCount">0개</span>
           </div>
           <div id="workQueue" class="work-queue"></div>
@@ -357,12 +280,27 @@ work\packs\refs\BFG_Yellow_Turban.pack</textarea>
     <dialog id="recipeDialog">
       <div class="dialog-head">
         <h2>레시피 미리보기</h2>
-        <button id="closeRecipeButton" type="button">×</button>
+        <button id="closeRecipeButton" class="ghost-btn" type="button">닫기</button>
       </div>
       <textarea id="recipeText" spellcheck="false"></textarea>
     </dialog>
 
-    <script src="./reference_names.js"></script>
-    <script src="./app.js"></script>
+    <script src="./app-data.js?v=20260704-roster51"></script>
+    <script src="./reference_names.js?v=20260704-roster51"></script>
+    <script src="./app-labels.js?v=20260704-roster51"></script>
+    <script src="./app-catalog.js?v=20260704-roster51"></script>
+    <script src="./app-appearance.js?v=20260704-roster51"></script>
+    <script src="./app-state.js?v=20260704-roster51"></script>
+    <script src="./app-workflow.js?v=20260704-roster51"></script>
+    <script src="./app-title-effects.js?v=20260704-roster51"></script>
+    <script src="./app-normalize.js?v=20260704-roster51"></script>
+    <script src="./app-form-helpers.js?v=20260704-roster51"></script>
+    <script src="./app-render.js?v=20260704-roster51"></script>
+    <script src="./app-editor.js?v=20260704-roster51"></script>
+    <script src="./app-queue.js?v=20260704-roster51"></script>
+    <script src="./app-skills.js?v=20260704-roster51"></script>
+    <script src="./app-recipe.js?v=20260704-roster51"></script>
+    <script src="./app-server.js?v=20260704-roster51"></script>
+    <script src="./app.js?v=20260704-roster51"></script>
   </body>
 </html>

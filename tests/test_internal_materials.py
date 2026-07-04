@@ -116,6 +116,36 @@ class MaterialPackSessionTest(unittest.TestCase):
             [{"set_name": "3k_main_attribute_set_general_water_records", "attribute_type": "authority"}],
         )
 
+    def test_resolves_frontend_character_ceos_alias(self) -> None:
+        payload = {
+            "tables": {
+                "db/frontend_character_ceos_tables/data__": {
+                    "rows": [
+                        {
+                            "frontend_character": "3k_main_template_historical_guan_yu_hero_wood",
+                            "ceo": "3k_main_ceo_trait_personality_honourable",
+                        }
+                    ],
+                }
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+
+        self.assertEqual(
+            session.read_table("frontend_character_ceos"),
+            [
+                {
+                    "frontend_character": "3k_main_template_historical_guan_yu_hero_wood",
+                    "ceo": "3k_main_ceo_trait_personality_honourable",
+                }
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

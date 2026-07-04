@@ -107,6 +107,7 @@ SAFE_SPAWN_RE = re.compile(
     r'Spawn(?P<faction>Goguryeo|Baekje|Silla)CharacterSafely\(\s*"(?P<subtype>3k_general_[^"]+)"\s*,\s*"(?P<template>3k_mod_template_[^"]+)"',
     re.IGNORECASE,
 )
+KILL_CALL_RE = re.compile(r'kill_character\(\s*"(?P<template>3k_mod_template_[^"]+)"', re.IGNORECASE)
 SUBTYPE_VARS = {
     "earth": "3k_general_earth",
     "fire": "3k_general_fire",
@@ -152,6 +153,7 @@ def korea_character_index() -> dict[str, dict[str, Any]]:
         return {}
 
     index: dict[str, KoreaCharacterInfo] = {}
+    roster_hidden: set[str] = set()
     for path in sorted(script_root.rglob("*.lua")):
         try:
             text = path.read_text(encoding="utf-8-sig", errors="ignore")
@@ -160,11 +162,44 @@ def korea_character_index() -> dict[str, dict[str, Any]]:
         _collect_spawn_calls(index, path, text)
         _collect_safe_spawn_calls(index, path, text)
         _collect_create_calls(index, path, text)
-    return {key: value.to_dict() for key, value in index.items()}
+        _collect_kill_calls(roster_hidden, text, path)
+    result: dict[str, dict[str, Any]] = {}
+    for key, value in index.items():
+        metadata = value.to_dict()
+        if key in roster_hidden:
+            metadata.update(
+                {
+                    "rosterHidden": True,
+                    "koreaRosterHidden": True,
+                    "koreaHiddenReason": "script_spawn_then_kill",
+                }
+            )
+        result[key] = metadata
+    return result
 
 
 def korea_character_metadata(template_key: str) -> dict[str, Any] | None:
     return korea_character_index().get(_normalize_template_key(template_key))
+
+
+def korea_display_name_hint(template_key: str) -> str:
+    return _display_name_hint(_normalize_template_key(template_key))
+
+
+def korea_related_template_keys(template_key: str) -> list[str]:
+    normalized = _normalize_template_key(template_key)
+    if not normalized:
+        return []
+    keys = [normalized]
+    marker_pairs = (
+        ("3k_mod_template_historical_", "ironic_template_historical_"),
+        ("ironic_template_historical_", "3k_mod_template_historical_"),
+    )
+    for source_prefix, sibling_prefix in marker_pairs:
+        if normalized.startswith(source_prefix):
+            keys.append(sibling_prefix + normalized[len(source_prefix):])
+            break
+    return list(dict.fromkeys(keys))
 
 
 def _collect_spawn_calls(index: dict[str, KoreaCharacterInfo], path: Path, text: str) -> None:
@@ -221,6 +256,15 @@ def _collect_create_calls(index: dict[str, KoreaCharacterInfo], path: Path, text
         )
 
 
+def _collect_kill_calls(roster_hidden: set[str], text: str, path: Path | None = None) -> None:
+    if path is not None and path.name != "general_korean_born_main.lua":
+        return
+    for line in text.splitlines():
+        uncommented = line.split("--", 1)[0]
+        for match in KILL_CALL_RE.finditer(uncommented):
+            roster_hidden.add(_normalize_template_key(match.group("template")))
+
+
 def _nearby_faction_key(text: str, position: int) -> str:
     window = text[max(0, position - 600):position]
     matches = re.findall(r'"(ironic_faction_[a-z0-9_]+)"', window, flags=re.IGNORECASE)
@@ -259,7 +303,7 @@ def _normalize_template_key(value: str) -> str:
 
 def _display_name_hint(template_key: str) -> str:
     token = template_key
-    for prefix in ("3k_mod_template_historical_", "3k_mod_template_dummy_hero_"):
+    for prefix in ("3k_mod_template_historical_", "3k_mod_template_dummy_hero_", "ironic_template_historical_"):
         token = token.removeprefix(prefix)
     for suffix in ("_hero_earth", "_hero_fire", "_hero_metal", "_hero_water", "_hero_wood", "_earth", "_fire", "_metal", "_water", "_wood"):
         token = token.removesuffix(suffix)

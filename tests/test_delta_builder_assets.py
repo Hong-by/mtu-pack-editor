@@ -136,6 +136,44 @@ class DeltaBuilderAssetTest(unittest.TestCase):
             delta_builder.EXTRACTED_ASSET_ROOT = original_root
             delta_builder.CORE_ASSET_SOURCE_ID = original_core
 
+    def test_lua_text_file_is_added_as_real_packed_file(self) -> None:
+        original_root = delta_builder.TEMP_LUA_SCRIPT_ROOT
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.request = None
+
+            def send(self, request):
+                self.request = request
+                dest_paths = request["AddPackedFiles"][2]
+                return {"response": "Success", "data": {"VecContainerPathOptionString": [dest_paths, None]}}
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.client = FakeClient()
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                delta_builder.TEMP_LUA_SCRIPT_ROOT = Path(tmp)
+                session = FakeSession()
+                delta_builder._write_lua_text_file(
+                    session,
+                    "target.pack",
+                    "script/campaign/3k_main_campaign_map/hby_mtu_pack_editor_player_spawn.lua",
+                    'output("ok")\n',
+                )
+
+                request = session.client.request
+                self.assertIn("AddPackedFiles", request)
+                source_path = Path(request["AddPackedFiles"][1][0])
+                self.assertEqual(source_path.read_text(encoding="utf-8"), 'output("ok")\n')
+                self.assertEqual(
+                    request["AddPackedFiles"][2],
+                    [{"File": "script/campaign/3k_main_campaign_map/hby_mtu_pack_editor_player_spawn.lua"}],
+                )
+        finally:
+            delta_builder.TEMP_LUA_SCRIPT_ROOT = original_root
+
     def test_image_asset_target_must_match_art_override_token(self) -> None:
         class Clone:
             new_template_key = "hby_template_test"
@@ -148,7 +186,7 @@ class DeltaBuilderAssetTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match"):
             delta_builder._validate_clone_image_asset_targets([Clone()])
 
-    def test_prepare_image_asset_adds_panel_comment_when_missing(self) -> None:
+    def test_prepare_image_asset_keeps_source_without_panel_comment(self) -> None:
         class FakeSession:
             def read_file_bytes(self, packed_path: str) -> bytes:
                 raise ValueError("not found")
@@ -163,15 +201,12 @@ class DeltaBuilderAssetTest(unittest.TestCase):
                 "ui/characters/example/composites/small_panel/norm/norm.png",
             )
 
-            self.assertNotEqual(prepared, path)
-            comment = delta_builder._png_text_chunk(prepared.read_bytes(), "Comment")
-            self.assertEqual(
-                comment,
-                "[type:norm;x:-7;y:84;z-order:0;pivot_x:0.4997;pivot_y:0.4996;]",
-            )
+            self.assertEqual(prepared, path)
+            self.assertIsNone(delta_builder._png_text_chunk(prepared.read_bytes(), "Comment"))
 
-    def test_prepare_image_asset_prefers_existing_target_comment(self) -> None:
+    def test_prepare_image_asset_keeps_source_comment(self) -> None:
         target_comment = "[type:norm;x:-15;y:102;z-order:0;pivot_x:0.4997;pivot_y:0.5000;]"
+        source_comment = "[type:norm;x:-7;y:84;z-order:0;pivot_x:0.4997;pivot_y:0.4996;]"
 
         class FakeSession:
             def read_file_bytes(self, packed_path: str) -> bytes:
@@ -179,7 +214,7 @@ class DeltaBuilderAssetTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "source.png"
-            path.write_bytes(self.png_bytes("[type:norm;x:-7;y:84;z-order:0;pivot_x:0.4997;pivot_y:0.4996;]"))
+            path.write_bytes(self.png_bytes(source_comment))
 
             prepared = delta_builder._prepare_image_asset_for_pack(
                 FakeSession(),
@@ -187,7 +222,8 @@ class DeltaBuilderAssetTest(unittest.TestCase):
                 "ui/characters/example/composites/small_panel/norm/norm.png",
             )
 
-            self.assertEqual(delta_builder._png_text_chunk(prepared.read_bytes(), "Comment"), target_comment)
+            self.assertEqual(prepared, path)
+            self.assertEqual(delta_builder._png_text_chunk(prepared.read_bytes(), "Comment"), source_comment)
 
 
 if __name__ == "__main__":

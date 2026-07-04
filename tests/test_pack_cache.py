@@ -42,6 +42,26 @@ class PackCacheTest(unittest.TestCase):
 
             self.assertEqual(cached, ("image/png", b"png-data"))
 
+    def test_open_payload_cache_prunes_old_snapshots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack_path = root / "sample.pack"
+            cache = PackCache(root / "cache.sqlite3")
+
+            for index in range(6):
+                pack_path.write_bytes(f"pack-{index}".encode("utf-8"))
+                cache.put_open_payload(
+                    pack_path,
+                    include_vanilla=False,
+                    analysis={"packName": "sample.pack", "index": index},
+                    characters={"pack": {"characters": [{"key": str(index)}]}},
+                )
+
+            with cache._connect() as connection:
+                count = connection.execute("select count(*) from pack_open_cache").fetchone()[0]
+
+            self.assertEqual(count, 4)
+
 
 if __name__ == "__main__":
     unittest.main()

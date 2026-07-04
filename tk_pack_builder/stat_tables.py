@@ -81,6 +81,10 @@ NUMERIC_COLUMNS = {
     },
     "land_unit": {
         "charge_bonus",
+        "dismounted_charge_bonus",
+        "dismounted_melee_attack",
+        "melee_attack",
+        "melee_defence",
         "morale",
         "primary_ammo",
     },
@@ -192,6 +196,15 @@ def resolve_stat_target(
         return StatTarget(stat_table, target_table, row_key, column, value)
 
     if stat_table == "armour":
+        direct = _try_row_with_table(
+            _read_candidate_rows(session, "unit_armour_types"),
+            equipment_key,
+            column,
+            numeric=numeric,
+        )
+        if direct is not None:
+            target_table, _ = direct
+            return StatTarget(stat_table, target_table, equipment_key, column, value)
         variants = _rows_only(_read_candidate_rows(session, "equipment_variants_armours"))
         variant = _find_variant_any(variants, _equipment_key_spellings(equipment_key), game_mode, "armour")
         row_key = variant["armour"]
@@ -270,3 +283,20 @@ def _require_row(
                 raise ValueError(f"Column is not numeric on stat row: {row_key}/{column}")
             return row
     raise ValueError(f"Stat row is missing: {row_key}")
+
+
+def _try_row_with_table(
+    rows: list[tuple[str, dict[str, Any]]],
+    row_key: str,
+    column: str,
+    numeric: bool = True,
+) -> tuple[str, dict[str, Any]] | None:
+    for table_name, row in rows:
+        if row.get("key") != row_key:
+            continue
+        if column not in row:
+            raise ValueError(f"Column is missing on stat row: {row_key}/{column}")
+        if numeric and not isinstance(row[column], (int, float)):
+            raise ValueError(f"Column is not numeric on stat row: {row_key}/{column}")
+        return table_name, row
+    return None

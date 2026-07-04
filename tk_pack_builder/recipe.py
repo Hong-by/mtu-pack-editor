@@ -73,6 +73,14 @@ class CharacterClone:
     spawn_event: str | None = None
     display_name: str | None = None
     image_assets: list[dict[str, str]] | None = None
+    title_ceo_key: str | None = None
+    removable_title_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    trait_set_key: str | None = None
+    trait_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    removable_trait_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    equipment_set_key: str | None = None
+    equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    removable_equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -84,6 +92,14 @@ class CharacterPatch:
     image_assets: list[dict[str, str]] | None = None
     art_overrides: dict[str, Any] | None = None
     art_set_overrides: dict[str, Any] | None = None
+    title_ceo_key: str | None = None
+    removable_title_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    trait_set_key: str | None = None
+    trait_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    removable_trait_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    equipment_set_key: str | None = None
+    equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    removable_equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -187,6 +203,14 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             spawn_event=item.get("spawnEvent"),
             display_name=item.get("displayName") or item.get("newName"),
             image_assets=item.get("imageAssets") or [],
+            title_ceo_key=item.get("titleCeoKey"),
+            removable_title_ceo_keys=_string_tuple(item.get("removableTitleCeoKeys")),
+            trait_set_key=item.get("traitSetKey"),
+            trait_ceo_keys=_string_tuple(item.get("traitCeoKeys")),
+            removable_trait_ceo_keys=_string_tuple(item.get("removableTraitCeoKeys")),
+            equipment_set_key=item.get("equipmentSetKey"),
+            equipment_ceo_keys=_string_tuple(item.get("equipmentCeoKeys")),
+            removable_equipment_ceo_keys=_string_tuple(item.get("removableEquipmentCeoKeys")),
         )
         for item in data.get("characterCloneRecipes", [])
     ]
@@ -199,6 +223,14 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             image_assets=item.get("imageAssets") or [],
             art_overrides=item.get("artOverrides") or {},
             art_set_overrides=item.get("artSetOverrides") or {},
+            title_ceo_key=item.get("titleCeoKey"),
+            removable_title_ceo_keys=_string_tuple(item.get("removableTitleCeoKeys")),
+            trait_set_key=item.get("traitSetKey"),
+            trait_ceo_keys=_string_tuple(item.get("traitCeoKeys")),
+            removable_trait_ceo_keys=_string_tuple(item.get("removableTraitCeoKeys")),
+            equipment_set_key=item.get("equipmentSetKey"),
+            equipment_ceo_keys=_string_tuple(item.get("equipmentCeoKeys")),
+            removable_equipment_ceo_keys=_string_tuple(item.get("removableEquipmentCeoKeys")),
         )
         for item in data.get("characterPatches", [])
     ]
@@ -235,6 +267,12 @@ def _coalesce_stat_patches(patches: list[StatPatch]) -> list[StatPatch]:
 
 def _canonical_equipment_key(value: str) -> str:
     return str(value).replace("_ancilliary_", "_ancillary_")
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return tuple()
+    return tuple(str(item) for item in value if str(item or "").strip())
 
 
 def _normalize_age_range_clones(data: dict[str, Any]) -> dict[str, Any]:
