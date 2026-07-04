@@ -139,7 +139,6 @@ KOREAN_CHARACTER_NAMES = {
     "3k_mtu_template_historical_lady_trieu_hero_wood": "조구",
     "3k_mtu_template_historical_lady_zhang_xingcai_hero_fire": "장성채",
     "3k_mtu_template_historical_lady_ma_yunlu_hero_metal": "마운록",
-    "3k_mtu_template_historical_lady_buyeo_wol_hero_water": "부여월",
     "3k_mtu_template_historical_lady_yuan_anyang_hero_water": "원안양",
     "3k_mtu_template_historical_lady_zou_yuan_hero_water": "추원",
     "3k_ytr_template_historical_gong_du_hero_wood": "공도",

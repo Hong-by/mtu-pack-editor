@@ -15,7 +15,7 @@ class RpfmWsClient:
     host: str = "127.0.0.1"
     port: int = 45127
     path: str = "/ws"
-    timeout: int = 120
+    timeout: int = 600
 
     def __post_init__(self) -> None:
         self._next_id = 1

@@ -63,7 +63,7 @@ if "%RPFM_ARGS%"=="--no-rpfm" (
     exit /b 1
 )
 
-"%PYTHON_EXE%" scripts\dev_server.py %RPFM_ARGS% --open-browser
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%PYTHON_EXE%' 'scripts\dev_server.py' %RPFM_ARGS% --open-browser"
 
 echo.
 echo Server stopped.

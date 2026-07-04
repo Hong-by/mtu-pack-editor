@@ -1,0 +1,569 @@
+[
+  {
+    "owner": "기본 클론",
+    "title": "군관",
+    "key": "bg_3k_main_character_background_commander_officer",
+    "category": "기본 지휘관",
+    "effects": ["권위 +15, 본능 +15", "군대 지휘 시: 기병 돌격 부가 효과 +10, 근접 기병 근접 회피 +10%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "달변가",
+    "key": "bg_3k_main_character_background_commander_sophist",
+    "category": "기본 지휘관",
+    "effects": ["권위 +15, 지략 +15", "상국/지도자/후계자: 외교 관계 +4, 교역 영향력 +10%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "귀족",
+    "key": "bg_3k_main_character_background_commander_aristocrat",
+    "category": "기본 지휘관",
+    "effects": ["권위 +30", "상국/지도자/후계자: 모든 인물 만족도 +5"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "학자",
+    "key": "bg_3k_main_character_background_commander_scholar",
+    "category": "기본 지휘관",
+    "effects": ["권위 +15, 전문성 +15", "상국/지도자/후계자: 연구 속도 +10%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "지주",
+    "key": "bg_3k_main_character_background_commander_landowner",
+    "category": "기본 지휘관",
+    "effects": ["권위 +15, 결의 +15", "태수 임명 시: 농업 수입 +15%, 식량 생산 +25%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "중재자",
+    "key": "bg_3k_main_character_background_commander_arbitrator",
+    "category": "기본 지휘관",
+    "effects": ["권위 +15, 전문성 +15", "태수 임명 시: 부패 -15%, 공공질서 +4"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "서기",
+    "key": "bg_3k_main_character_background_sentinel_clerk",
+    "category": "기본 감시자",
+    "effects": ["전문성 +15, 권위 +15", "태수 임명 시: 정착지 건설 비용 -15%, 건설 시간 -1턴(최소 1턴)"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "간수",
+    "key": "bg_3k_main_character_background_sentinel_guard",
+    "category": "기본 감시자",
+    "effects": ["전문성 +15, 결의 +15", "군대 지휘 시: 아군 영지 전투 시 사기 +6, 근접 방진 돌격 저항 +10"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "파괴공작원",
+    "key": "bg_3k_main_character_background_sentinel_saboteur",
+    "category": "기본 감시자",
+    "effects": ["전문성 +15, 본능 +15", "첩보 활동 시: 최대 첩보망 +10, 턴당 첩보 점수 +2"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "세리",
+    "key": "bg_3k_main_character_background_sentinel_tax_collector",
+    "category": "기본 감시자",
+    "effects": ["전문성 +15, 본능 +15", "태수 임명 시: 산업 수입 +15%, 세력 전체 공공질서 -2"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "상인",
+    "key": "bg_3k_main_character_background_sentinel_trader",
+    "category": "기본 감시자",
+    "effects": ["전문성 +15, 지략 +15", "태수 임명 시: 상업 수입 +15%, 교역 영향력 +20%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "감시인",
+    "key": "bg_3k_main_character_background_sentinel_lookout",
+    "category": "기본 감시자",
+    "effects": ["전문성 +30", "파견 활동 시: 해당 영지의 적 첩보 비용 증가, 아군 포획 확률 +5%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "농부",
+    "key": "bg_3k_main_character_background_champion_farmer",
+    "category": "기본 용장",
+    "effects": ["결의 +15, 전문성 +15", "태수 임명 시: 농업 수입 +15%, 해당 영지 인구 성장 +2,000"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "의원",
+    "key": "bg_3k_main_character_background_champion_healer",
+    "category": "기본 용장",
+    "effects": ["결의 +15, 지략 +15", "군대 지휘 시: 충원율 +5%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "약탈자",
+    "key": "bg_3k_main_character_background_champion_marauder",
+    "category": "기본 용장",
+    "effects": ["결의 +15, 본능 +15", "군대 지휘 시: 적 영지 습격/약탈 수입 +25%, 습격 태세 시 사기 +4"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "은둔자",
+    "key": "bg_3k_main_character_background_champion_hermit",
+    "category": "기본 용장",
+    "effects": ["결의 +30", "장수 고유: 피로 저항 특성, 전장에서 사망할 확률 감소"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "사냥꾼",
+    "key": "bg_3k_main_character_background_champion_hunter",
+    "category": "기본 용장",
+    "effects": ["결의 +15, 지략 +15", "태수 임명 시: 식량 생산 +20%", "군대 지휘 시: 궁수 부대 탄약 +10%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "호위무사",
+    "key": "bg_3k_main_character_background_champion_bodyguard",
+    "category": "기본 용장",
+    "effects": ["결의 +15, 권위 +15", "장수 고유: 장갑 +10%", "군대 지휘 시: 창병 부대 근접 방어력 +10%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "비적",
+    "key": "bg_3k_main_character_background_vanguard_bandit",
+    "category": "기본 선봉장",
+    "effects": ["본능 +15, 결의 +15", "군대 지휘 시: 캠페인 이동 거리 +10%, 전리품 수입 +15%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "징집관",
+    "key": "bg_3k_main_character_background_vanguard_recruiter",
+    "category": "기본 선봉장",
+    "effects": ["본능 +15, 권위 +15", "군대 지휘 시: 해당 군대의 부대 모집 비용 -10%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "도편수",
+    "key": "bg_3k_main_character_background_vanguard_carpenter",
+    "category": "기본 선봉장",
+    "effects": ["본능 +15, 전문성 +15", "태수 임명 시: 군사 건물 건설 비용 -20%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "돌격대장",
+    "key": "bg_3k_main_character_background_vanguard_raider",
+    "category": "기본 선봉장",
+    "effects": ["본능 +30", "군대 지휘 시: 모든 부대 돌격 부가 효과 +15"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "방화범",
+    "key": "bg_3k_main_character_background_vanguard_arsonist",
+    "category": "기본 선봉장",
+    "effects": ["본능 +15, 지략 +15", "군대 지휘 시: 공성전 승리 후 약탈 수입 +20%, 원거리 부대 불화살 해금"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "투사",
+    "key": "bg_3k_main_character_background_vanguard_brawler",
+    "category": "기본 선봉장",
+    "effects": ["본능 +15, 결의 +15", "장수 고유: 근접 무기 피해 +15%, 일기토 시 공격력 추가 버프"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "점술가",
+    "key": "bg_3k_main_character_background_strategist_astrologer",
+    "category": "기본 모사",
+    "effects": ["지략 +15, 결의 +15", "군대 지휘 시: 캠페인 시야 +25%, 야간 전투 능력 해금"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "학자",
+    "key": "bg_3k_main_character_background_strategist_academic",
+    "category": "기본 모사",
+    "effects": ["지략 +15, 전문성 +15", "장수 고유: 매 턴 획득하는 인물 경험치 +10%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "수학자",
+    "key": "bg_3k_main_character_background_strategist_mathematician",
+    "category": "기본 모사",
+    "effects": ["지략 +15, 전문성 +15", "태수 임명 시: 상업 수입 +15%, 부패 -10%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "서생",
+    "key": "bg_3k_main_character_background_strategist_scribe",
+    "category": "기본 모사",
+    "effects": ["지략 +15, 권위 +15", "상국/지도자/후계자: 세력 전체 행정관 직위 한도 +1"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "유랑가",
+    "key": "bg_3k_main_character_background_strategist_wayfarer",
+    "category": "기본 모사",
+    "effects": ["지략 +30", "군대 지휘 시: 군대 보급품 +10, 군대 이동 속도 +5%"]
+  },
+  {
+    "owner": "기본 클론",
+    "title": "철학자",
+    "key": "bg_3k_main_character_background_strategist_philosopher",
+    "category": "기본 모사",
+    "effects": ["지략 +15, 권위 +15", "상국/지도자/후계자: 연구 속도 +10%, 인물 만족도 +4"]
+  },
+  {
+    "owner": "사신수",
+    "title": "황룡",
+    "key": "bg_3k_main_character_background_recruited_yellow_dragon",
+    "category": "사신수",
+    "effects": ["전문성 +15, 지략 +10", "군대 지휘 시: 모든 부대 근접 무기 피해 +10%, 근접 공속 +10%"]
+  },
+  {
+    "owner": "사신수",
+    "title": "와룡",
+    "key": "bg_3k_main_character_background_recruited_coil_dragon",
+    "category": "사신수",
+    "effects": ["결의 +15, 전문성 +10", "장수 고유: 최대 체력 +20%, 전장 생존 확률 증가"]
+  },
+  {
+    "owner": "사신수",
+    "title": "혈룡",
+    "key": "bg_3k_main_character_background_recruited_blood_dragon",
+    "category": "사신수",
+    "effects": ["본능 +15, 결의 +10", "군대 지휘 시: 군대 전체에 공포 유발 특성 부여"]
+  },
+  {
+    "owner": "사신수",
+    "title": "지룡",
+    "key": "bg_3k_main_character_background_recruited_earth_dragon",
+    "category": "사신수",
+    "effects": ["권위 +15, 본능 +10", "군대 지휘 시: 군대 전체에 섬뜩함/겁먹음 면역 특성 부여"]
+  },
+  {
+    "owner": "조조",
+    "title": "난세의 간웅",
+    "key": "bg_3k_main_character_background_cao_cao",
+    "category": "바닐라 전설 지휘관",
+    "effects": ["권위 +40, 본능 +20", "상국/지도자/후계자: 기병 유지비 -15%, 세력 보급품 +15", "군대 지휘 시: 공포 유발 특성 부여"]
+  },
+  {
+    "owner": "유비",
+    "title": "의덕의 귀감",
+    "key": "bg_3k_main_character_background_liu_bei",
+    "category": "바닐라 전설 지휘관",
+    "effects": ["권위 +40, 결의 +20", "상국/지도자/후계자: 민병대 부대 유지비 -50%, 공공질서 +4", "군대 지휘 시: 아군 영지 외 보급품 +10"]
+  },
+  {
+    "owner": "원소",
+    "title": "명문가의 수장",
+    "key": "bg_3k_main_character_background_yuan_shao",
+    "category": "바닐라 전설 지휘관",
+    "effects": ["권위 +40, 결의 +20", "상국/지도자/후계자: 대장 부대 모집 비용 -50%, 인물 만족도 +4", "군대 지휘 시: 수행원 사기 +6"]
+  },
+  {
+    "owner": "유표",
+    "title": "강하의 명사",
+    "key": "bg_3k_main_character_background_liu_biao",
+    "category": "바닐라 전설 지휘관",
+    "effects": ["권위 +40, 지략 +20", "상국/지도자/후계자: 모든 인물 경험치 획득 +10%, 상업 수입 +10%", "태수 임명 시: 공공질서 +4"]
+  },
+  {
+    "owner": "원술",
+    "title": "야심 찬 군주",
+    "key": "bg_3k_main_character_background_yuan_shu",
+    "category": "바닐라 전설 지휘관",
+    "effects": ["권위 +40, 본능 +20", "상국/지도자/후계자: 상업 및 산업 수입 +15%, 적 간첩 활동 비용 증가"]
+  },
+  {
+    "owner": "유안",
+    "title": "유약한 공자",
+    "key": "bg_mtu_character_background_liu_an",
+    "category": "MTU 전설 지휘관",
+    "effects": ["권위 +30, 지략 +30", "상국/지도자/후계자: 세력 전체 만족도 +4, 모든 수입 +5%"]
+  },
+  {
+    "owner": "고순",
+    "title": "함진영장",
+    "key": "bg_3k_main_character_background_gao_shun",
+    "category": "MTU 전설 지휘관",
+    "effects": ["권위 +30, 결의 +30", "군대 지휘 시: 도보 보병 부대 장갑 +15%, 근접 보병 돌격 부가 효과 +15"]
+  },
+  {
+    "owner": "유여의",
+    "title": "자애로운 황족",
+    "key": "bg_mtu_character_background_liu_yaoyi",
+    "category": "MTU 전설 지휘관",
+    "effects": ["권위 +40, 결의 +20", "상국/지도자/후계자: 인물 만족도 +6, 공공질서 +4"]
+  },
+  {
+    "owner": "장로",
+    "title": "오두미도 사조",
+    "key": "bg_3k_main_character_background_zhang_lu",
+    "category": "MTU 전설 지휘관",
+    "effects": ["권위 +40, 결의 +20", "상국/지도자/후계자: 농업 수입 +15%, 인구 성장 +3,000"]
+  },
+  {
+    "owner": "여포",
+    "title": "인중여포",
+    "key": "bg_3k_main_character_background_lu_bu",
+    "category": "바닐라 전설 선봉장",
+    "effects": ["본능 +50, 결의 +10", "상국/지도자/후계자: 충격 기병 피해 +15%, 적 세력 공공질서 감쇄", "군대 지휘 시: 캠페인 이동 거리 +15%, 섬뜩함 유발"]
+  },
+  {
+    "owner": "손책",
+    "title": "소패왕",
+    "key": "bg_3k_main_character_background_sun_ce",
+    "category": "바닐라 전설 선봉장",
+    "effects": ["본능 +40, 권위 +20", "상국/지도자/후계자: 충격 기병 돌격 부가 효과 +15, 인물 경험치 +10%", "군대 지휘 시: 가속 특성 부여"]
+  },
+  {
+    "owner": "마초",
+    "title": "서량의 야생마",
+    "key": "bg_3k_main_character_background_ma_chao",
+    "category": "바닐라 전설 선봉장",
+    "effects": ["본능 +40, 결의 +20", "상국/지도자/후계자: 충격 기병 돌격 부가 효과 +15", "군대 지휘 시: 적 영지 약탈 수입 +25%, 피로 저항 특성 부여"]
+  },
+  {
+    "owner": "장비",
+    "title": "불 같은 전사",
+    "key": "bg_3k_main_character_background_zhang_fei",
+    "category": "바닐라 전설 선봉장",
+    "effects": ["결의 +30, 본능 +30", "군대 지휘 시: 근접 기병 근접 관통 피해 +15%, 충원 속도 +5%", "장수 고유: 전장에서 공포 유발 특성 획득"]
+  },
+  {
+    "owner": "공손찬",
+    "title": "백마장군",
+    "key": "bg_3k_main_character_background_gongsun_zan",
+    "category": "바닐라 전설 선봉장",
+    "effects": ["본능 +40, 권위 +20", "상국/지도자/후계자: 모든 부대 장갑 +12%", "군대 지휘 시: 캠페인 지도 내 아군 영지 이동 거리 +25%"]
+  },
+  {
+    "owner": "조운",
+    "title": "상산의 조자룡",
+    "key": "bg_mtu_character_background_zhao_yun",
+    "category": "MTU 전설 선봉장",
+    "effects": ["본능 +40, 결의 +20", "군대 지휘 시: 기병 부대 속도 +15%, 피로 저항 특성 부여"]
+  },
+  {
+    "owner": "마운록",
+    "title": "서량의 매",
+    "key": "bg_mtu_character_background_ma_yunlu",
+    "category": "MTU 전설 선봉장",
+    "effects": ["본능 +40, 결의 +20", "군대 지휘 시: 충격 기병 돌격 보너스 +20, 캠페인 이동 거리 +10%"]
+  },
+  {
+    "owner": "여령기",
+    "title": "고독한 늑대",
+    "key": "bg_mtu_character_background_lu_lingqi",
+    "category": "MTU 전설 선봉장",
+    "effects": ["본능 +50, 전문성 +10", "군대 지휘 시: 아군 분노/광폭화 제어, 근접 피해 +15%, 공포 유발"]
+  },
+  {
+    "owner": "장위",
+    "title": "저돌적인 장수",
+    "key": "bg_mtu_character_background_zhang_wei",
+    "category": "MTU 전설 선봉장",
+    "effects": ["본능 +30, 결의 +30", "군대 지휘 시: 부대 돌격 부가 효과 +15, 근접전 시 사기 +6"]
+  },
+  {
+    "owner": "기령",
+    "title": "원술의 심복",
+    "key": "bg_3k_main_character_background_ji_ling",
+    "category": "MTU 전설 선봉장",
+    "effects": ["본능 +40, 권위 +20", "군대 지휘 시: 충격 기병 유지비 -10%, 돌격 보너스 +15"]
+  },
+  {
+    "owner": "관우",
+    "title": "만인적의 무장",
+    "key": "bg_3k_main_character_background_guan_yu",
+    "category": "바닐라 전설 용장",
+    "effects": ["결의 +40, 전문성 +20", "상국/지도자/후계자: 철기병 유지비 -15%", "군대 지휘 시: 전투 승리 후 전리품 +15%, 창병 근접 피해 +15%"]
+  },
+  {
+    "owner": "하후돈",
+    "title": "맹장",
+    "key": "bg_3k_main_character_background_xiahou_dun",
+    "category": "바닐라 전설 용장",
+    "effects": ["결의 +40, 본능 +20", "태수 임명 시: 농업 수입 +15%, 건설 비용 -20%", "군대 지휘 시: 적 영지 습격/약탈 수입 +25%"]
+  },
+  {
+    "owner": "정강",
+    "title": "도적 여왕",
+    "key": "bg_3k_main_character_background_zheng_jiang",
+    "category": "바닐라 전설 용장",
+    "effects": ["결의 +40, 본능 +20", "상국/지도자/후계자: 정착지 파괴/약탈 수입 +50%, 외교 조공 요구 효율 증가", "군대 지휘 시: 공성 시 고착 턴수 -2"]
+  },
+  {
+    "owner": "허저",
+    "title": "우직한 호위무사",
+    "key": "bg_3k_main_character_background_xu_chu",
+    "category": "바닐라 전설 용장",
+    "effects": ["결의 +50, 본능 +10", "상국/지도자/후계자: 모든 부대 유지비 -10%", "군대 지휘 시: 근접 보병 부대 적 투사체 피해 감소 +10%"]
+  },
+  {
+    "owner": "곽사",
+    "title": "탐욕스러운 도적",
+    "key": "bg_3k_main_character_background_guo_si",
+    "category": "MTU 전설 용장",
+    "effects": ["결의 +30, 본능 +30", "군대 지휘 시: 적 영지 약탈 수입 +30%, 전리품 수입 +15%"]
+  },
+  {
+    "owner": "이각",
+    "title": "광포한 군벌",
+    "key": "bg_3k_main_character_background_li_jue",
+    "category": "MTU 전설 용장",
+    "effects": ["결의 +40, 본능 +20", "군대 지휘 시: 군대 사기 +8, 적 사기 저하 오라, 충원율 +5%"]
+  },
+  {
+    "owner": "무안국",
+    "title": "북해의 맹장",
+    "key": "bg_mtu_character_background_wu_anguo",
+    "category": "MTU 전설 용장",
+    "effects": ["결의 +50, 전문성 +10", "장수 고유: 근접 무기 관통 피해 +20%, 일기토 시 공격 버프"]
+  },
+  {
+    "owner": "조앙",
+    "title": "가문의 희생양",
+    "key": "bg_mtu_character_background_cao_ang",
+    "category": "MTU 전설 용장",
+    "effects": ["결의 +30, 권위 +30", "상국/지도자/후계자: 인물 만족도 +5", "군대 지휘 시: 호위 창병 장갑 +10%"]
+  },
+  {
+    "owner": "유벽",
+    "title": "황천의 수호자",
+    "key": "bg_mtu_character_background_liu_pi",
+    "category": "MTU 전설 용장",
+    "effects": ["결의 +40, 본능 +20", "군대 지휘 시: 보병 부대 공격 속도 +10%, 사기 +6"]
+  },
+  {
+    "owner": "손견",
+    "title": "강동의 호랑이",
+    "key": "bg_3k_main_character_background_sun_jian",
+    "category": "바닐라 전설 감시자",
+    "effects": ["전문성 +40, 결의 +20", "상국/지도자/후계자: 용병 부대 모집 비용 -25%, 용병 부대 충원율 +10%", "군대 지휘 시: 적 영지 보급품 +15"]
+  },
+  {
+    "owner": "태사자",
+    "title": "명궁",
+    "key": "bg_3k_main_character_background_taishi_ci",
+    "category": "바닐라 전설 감시자",
+    "effects": ["전문성 +40, 지략 +20", "상국/지도자/후계자: 원거리 부대 탄약 +10%", "군대 지휘 시: 원거리 부대 사거리 +10%, 아군 포획 확률 +5%"]
+  },
+  {
+    "owner": "조운",
+    "title": "의로운 무장",
+    "key": "bg_3k_main_character_background_zhao_yun",
+    "category": "바닐라 전설 감시자",
+    "effects": ["전문성 +30, 결의 +30", "상국/지도자/후계자: 세력 내 인물들의 초기 만족도 +10", "군대 지휘 시: 아군 부대 근접 회피 +10%, 사기 +4"]
+  },
+  {
+    "owner": "장료",
+    "title": "청렴한 지휘관",
+    "key": "bg_3k_main_character_background_zhang_liao",
+    "category": "바닐라 전설 감시자",
+    "effects": ["전문성 +40, 본능 +20", "상국/지도자/후계자: 부대 징집 비용 -15%", "군대 지휘 시: 아군 부대 근접 회피 +10%, 공포 면역"]
+  },
+  {
+    "owner": "유부인",
+    "title": "투기 어린 안주인",
+    "key": "bg_mtu_character_background_lady_liu",
+    "category": "MTU 전설 감시자",
+    "effects": ["전문성 +30, 본능 +30", "상국/지도자/후계자: 정적 세력의 첩보 활동 자원 감소, 아군 포획 확률 +10%"]
+  },
+  {
+    "owner": "변부인",
+    "title": "위풍당당한 국모",
+    "key": "bg_mtu_character_background_lady_bian",
+    "category": "MTU 전설 감시자",
+    "effects": ["전문성 +40, 권위 +20", "상국/지도자/후계자: 세력 전체 인물 만족도 +8, 아군 조정 인물 녹봉 -10%"]
+  },
+  {
+    "owner": "진도",
+    "title": "백이병의 수장",
+    "key": "bg_mtu_character_background_chen_dao",
+    "category": "MTU 전설 감시자",
+    "effects": ["전문성 +40, 결의 +20", "군대 지휘 시: 보병 부대 근접 회피 +15%, 원거리 방어 확률 +10%"]
+  },
+  {
+    "owner": "조순",
+    "title": "호표기 사령관",
+    "key": "bg_mtu_character_background_cao_chun",
+    "category": "MTU 전설 감시자",
+    "effects": ["전문성 +30, 권위 +30", "군대 지휘 시: 호표기 및 근접 기병 유지비 -20%, 기병 장갑 +10%"]
+  },
+  {
+    "owner": "서황",
+    "title": "청렴한 명장",
+    "key": "bg_mtu_character_background_xu_huang",
+    "category": "MTU 전설 감시자",
+    "effects": ["전문성 +40, 결의 +20", "군대 지휘 시: 도끼병 부대 장갑 +15%, 적 포획 확률 +15%"]
+  },
+  {
+    "owner": "가후",
+    "title": "어둠 속의 칼날",
+    "key": "bg_3k_main_character_background_jia_xu",
+    "category": "바닐라 전설 모사",
+    "effects": ["지략 +30, 본능 +20", "상국/지도자/후계자: 모든 원거리 부대 탄약 +25%", "군대 지휘 시: 적 첩보 비용 +100%, 야간 전투 능력 해금"]
+  },
+  {
+    "owner": "제갈량",
+    "title": "와룡",
+    "key": "bg_3k_main_character_background_zhuge_liang",
+    "category": "바닐라 전설 모사",
+    "effects": ["지략 +60", "상국/지도자/후계자: 연구 속도 +10%, 원거리 부대 관통 투사 피해 +25%", "군대 지휘 시: 숲 통과 특성 부여"]
+  },
+  {
+    "owner": "사마의",
+    "title": "늑대의 아양",
+    "key": "bg_3k_main_character_background_sima_yi",
+    "category": "바닐라 전설 모사",
+    "effects": ["지략 +40, 권위 +20", "상국/지도자/후계자: 모든 부대 유지비 -10%, 적 첩보 비용 증가", "군대 지휘 시: 군대 충원율 +5%"]
+  },
+  {
+    "owner": "주유",
+    "title": "미주랑",
+    "key": "bg_3k_main_character_background_zhou_yu",
+    "category": "바닐라 전설 모사",
+    "effects": ["지략 +40, 전문성 +20", "상국/지도자/후계자: 원거리 부대 연사력 +15%", "군대 지휘 시: 군대 충원율 +5%, 해상전 사기 +6 및 속도 +10%"]
+  },
+  {
+    "owner": "곽가",
+    "title": "뛰어난 선견지명",
+    "key": "bg_3k_main_character_background_guo_jia",
+    "category": "바닐라 전설 모사",
+    "effects": ["지략 +30, 결의 +30", "상국/지도자/후계자: 첩보 네트워크 턴당 획득 +2", "군대 지휘 시: 캠페인 이동 거리 +10%, 캠페인 시야 +50%"]
+  },
+  {
+    "owner": "진궁",
+    "title": "냉철한 모사",
+    "key": "bg_mtu_character_background_chen_gong",
+    "category": "MTU 전설 모사",
+    "effects": ["지략 +40, 전문성 +20", "상국/지도자/후계자: 군대 유지비 -12%, 건설 비용 -10%"]
+  },
+  {
+    "owner": "양송",
+    "title": "배신자",
+    "key": "bg_mtu_character_background_yang_song",
+    "category": "MTU 전설 모사",
+    "effects": ["지략 +30, 전문성 +30", "태수 임명 시: 해당 영지 상업 및 교역 수입 +25%", "패널티: 공공질서 -2"]
+  },
+  {
+    "owner": "이유",
+    "title": "독안",
+    "key": "bg_mtu_character_background_li_ru",
+    "category": "MTU 전설 모사",
+    "effects": ["지략 +50, 본능 +10", "상국/지도자/후계자: 적 간첩 비용 +50%", "군대 지휘 시: 원거리 부대 불화살 및 독 화살 해금"]
+  },
+  {
+    "owner": "조비",
+    "title": "가문의 계승자",
+    "key": "bg_mtu_character_background_cao_pi",
+    "category": "MTU 전설 모사",
+    "effects": ["지략 +40, 권위 +20", "상국/지도자/후계자: 세력 연구 속도 +10%, 외교 관계 악화 완화"]
+  },
+  {
+    "owner": "순욱",
+    "title": "백년의 재목",
+    "key": "bg_mtu_character_background_xun_yu",
+    "category": "MTU 전설 모사",
+    "effects": ["지략 +50, 전문성 +10", "상국/지도자/후계자: 세력 전체 인구 성장 +4,000, 행정관 직위 한도 +1"]
+  }
+]

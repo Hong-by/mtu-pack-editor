@@ -3,8 +3,16 @@ from __future__ import annotations
 from typing import Any
 
 from .adapters import PackSession
+from .character_rules import (
+    coerce_bool as _coerce_bool,
+    gender_compatible_initial_ceo_key as _gender_compatible_initial_ceo_key,
+    spawn_safe_initial_ceo_key as _spawn_safe_initial_ceo_key,
+)
 from .recipe import CharacterClone, CharacterPatch
 
+
+PLAYER_SPAWN_EVENTS = {"campaign_start", "delayed_join"}
+CHARACTER_GAME_MODES = ("historical", "romance")
 
 CHARACTER_TABLE_ALIASES = {
     "character_generation_templates": [
@@ -36,8 +44,9 @@ CHARACTER_TABLE_ALIASES = {
 
 def validate_character_clone(session: PackSession, clone: CharacterClone) -> None:
     tables = _load_tables(session)
+    source_template = _find_row(tables["character_generation_templates"], "key", clone.source_template_key)
     _require_missing(
-        _find_row(tables["character_generation_templates"], "key", clone.source_template_key),
+        source_template,
         f"Source character template not found: {clone.source_template_key}",
     )
     _require_absent(
@@ -90,18 +99,42 @@ def validate_character_clone(session: PackSession, clone: CharacterClone) -> Non
             f"New age range already exists: {clone.new_age_range_key}",
         )
 
-    if clone.new_initial_ceo_key:
-        source_ceo = clone.initial_ceo_source_key or detail_rows[0].get("initial_ceos")
+    source_art_set_row = None
+    if clone.new_art_set_id:
+        source_art_set = clone.art_set_source_id or (source_template or {}).get("art_set_override")
+        source_art_set_row = _find_row(tables["campaign_character_art_sets"], "art_set_id", source_art_set)
+    final_is_male = (
+        clone.art_set_overrides.get("is_male")
+        if clone.art_set_overrides.get("is_male") not in (None, "")
+        else (
+            source_art_set_row.get("is_male")
+            if source_art_set_row and source_art_set_row.get("is_male") not in (None, "")
+            else clone.template_overrides.get("is_male", (source_template or {}).get("is_male"))
+        )
+    )
+    final_subtype = clone.template_overrides.get("subtype", (source_template or {}).get("subtype"))
+    seen_initial_ceos: set[str] = set()
+    for detail in _required_game_mode_details(detail_rows):
+        overrides = clone.detail_overrides.get(detail.get("game_mode", ""), {})
+        raw_initial_ceo = (
+            overrides.get("initial_ceos")
+            or clone.initial_ceo_source_key
+            or detail.get("initial_ceos")
+        )
+        source_ceo = _clone_initial_ceo_key(clone, raw_initial_ceo, final_is_male, final_subtype)
+        if not source_ceo or source_ceo in seen_initial_ceos:
+            continue
+        seen_initial_ceos.add(source_ceo)
         _require_missing(
             _find_row(tables["ceo_initial_datas"], "key", source_ceo),
             f"Source initial CEO not found: {source_ceo}",
         )
-        _require_absent(
-            tables["ceo_initial_datas"],
-            "key",
-            clone.new_initial_ceo_key,
-            f"New initial CEO already exists: {clone.new_initial_ceo_key}",
-        )
+        if clone.new_initial_ceo_key and clone.new_initial_ceo_key != source_ceo:
+            raise ValueError(
+                "Creating new initial CEO keys is not supported because "
+                "`ceo_initial_datas` is a key-only table. "
+                f"requested={clone.new_initial_ceo_key}, source={source_ceo}"
+            )
 
 
 def validate_character_patch(session: PackSession, patch: CharacterPatch) -> None:
@@ -126,7 +159,7 @@ def validate_character_patch(session: PackSession, patch: CharacterPatch) -> Non
         if not detail_rows:
             raise ValueError(f"Character game mode details not found: {patch.template_key}")
         existing_modes = {row.get("game_mode", "") for row in detail_rows}
-        unknown_modes = set(patch.detail_overrides) - existing_modes
+        unknown_modes = set(patch.detail_overrides) - (existing_modes | set(CHARACTER_GAME_MODES))
         if unknown_modes:
             raise ValueError(
                 f"Character detail game mode not found for {patch.template_key}: {', '.join(sorted(unknown_modes))}"
@@ -168,14 +201,40 @@ def apply_character_patches(session: PackSession, patches: list[CharacterPatch])
                 template[column] = value
                 changed += 1
 
-        for detail in [
+        source_detail_rows = [
             row for row in details
             if row.get("character_generation_template") == patch.template_key
-        ]:
-            overrides = patch.detail_overrides.get(detail.get("game_mode", ""), {})
+        ]
+        existing_modes = {
+            str(row.get("game_mode") or "")
+            for row in source_detail_rows
+            if row.get("game_mode") not in (None, "")
+        }
+        fallback_mode = "historical" if "historical" in existing_modes else "romance"
+        for detail in _required_game_mode_details(source_detail_rows):
+            game_mode = str(detail.get("game_mode") or "")
+            override_mode = game_mode
+            if game_mode not in existing_modes and game_mode not in patch.detail_overrides:
+                override_mode = fallback_mode
+            target_detail = next(
+                (
+                    row for row in details
+                    if row.get("character_generation_template") == patch.template_key
+                    and row.get("game_mode") == game_mode
+                ),
+                None,
+            )
+            if target_detail is None:
+                target_detail = {
+                    **detail,
+                    "character_generation_template": patch.template_key,
+                    "game_mode": game_mode,
+                }
+                details.append(target_detail)
+            overrides = patch.detail_overrides.get(override_mode, {})
             for column, value in overrides.items():
-                if detail.get(column) != value:
-                    detail[column] = value
+                if target_detail.get(column) != value:
+                    target_detail[column] = value
                     changed += 1
 
     session.replace_table(table_names["character_generation_templates"], templates)
@@ -216,8 +275,12 @@ def apply_character_clones(session: PackSession, clones: list[CharacterClone]) -
 
         if clone.new_art_set_id:
             source_art_set = clone.art_set_source_id or source_template["art_set_override"]
-            if _find_row(tables["campaign_character_art_sets"], "art_set_id", source_art_set):
+            source_art_set_row = _find_row(tables["campaign_character_art_sets"], "art_set_id", source_art_set)
+            if source_art_set_row:
                 new_template["art_set_override"] = clone.new_art_set_id
+                if source_art_set_row.get("is_male") not in (None, ""):
+                    is_male = _coerce_bool(source_art_set_row.get("is_male"))
+                    new_template["is_male"] = is_male
                 _clone_art_set_rows(tables, source_art_set, clone)
             else:
                 new_template["art_set_override"] = source_art_set
@@ -236,40 +299,74 @@ def apply_character_clones(session: PackSession, clones: list[CharacterClone]) -
         tables["character_generation_templates"].append(new_template)
         created += 1
 
-        if clone.new_initial_ceo_key:
-            if "ceo_initial_datas" not in tables:
-                raise ValueError("Source initial CEO table not found.")
-            source_details = [
-                row for row in tables["character_generation_template_game_mode_details"]
-                if row.get("character_generation_template") == clone.detail_source_template_key
-            ]
-            source_ceo = clone.initial_ceo_source_key or source_details[0]["initial_ceos"]
-            _clone_keyed_row(
-                tables["ceo_initial_datas"],
-                "key",
-                source_ceo,
-                clone.new_initial_ceo_key,
-                {},
-            )
-
-        for source_detail in [
+        source_details = _required_game_mode_details([
             row for row in tables["character_generation_template_game_mode_details"]
             if row.get("character_generation_template") == clone.detail_source_template_key
-        ]:
+        ])
+        for source_detail in source_details:
             game_mode = source_detail.get("game_mode", "")
             overrides = clone.detail_overrides.get(game_mode, {})
+            override_initial_ceo = str(overrides.get("initial_ceos") or "")
             new_detail = {
                 **source_detail,
                 "character_generation_template": clone.new_template_key,
                 **overrides,
             }
-            if clone.new_initial_ceo_key:
-                new_detail["initial_ceos"] = clone.new_initial_ceo_key
+            raw_initial_ceo = (
+                override_initial_ceo
+                or clone.initial_ceo_source_key
+                or new_detail.get("initial_ceos")
+            )
+            if raw_initial_ceo:
+                if clone.new_initial_ceo_key and clone.new_initial_ceo_key != raw_initial_ceo:
+                    raise ValueError(
+                        "Creating new initial CEO keys is not supported because "
+                        "`ceo_initial_datas` is a key-only table. "
+                        f"requested={clone.new_initial_ceo_key}, source={raw_initial_ceo}"
+                    )
+                compatible_initial_ceo = _clone_initial_ceo_key(
+                    clone,
+                    raw_initial_ceo,
+                    new_template.get("is_male"),
+                    new_template.get("subtype"),
+                )
+                if compatible_initial_ceo:
+                    new_detail["initial_ceos"] = compatible_initial_ceo
             tables["character_generation_template_game_mode_details"].append(new_detail)
 
     for alias, rows in tables.items():
+        if alias not in table_names:
+            continue
         session.replace_table(table_names[alias], rows)
     return created
+
+
+def _clone_initial_ceo_key(clone: CharacterClone, initial_ceo: Any, is_male: Any, subtype: Any) -> str:
+    if clone.spawn_event in PLAYER_SPAWN_EVENTS:
+        return _spawn_safe_initial_ceo_key(initial_ceo, is_male, subtype)
+    return _gender_compatible_initial_ceo_key(initial_ceo, is_male, subtype)
+
+
+def _initial_ceo_from_title_ceo_key(title_ceo_key: Any) -> str:
+    key = str(title_ceo_key or "").strip()
+    if "_ceo_career_historical_" not in key:
+        return ""
+    return key.replace("_ceo_career_historical_", "_ceo_initial_data_character_historical_")
+
+
+def _required_game_mode_details(source_details: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not source_details:
+        return []
+    by_mode = {
+        str(row.get("game_mode") or ""): row
+        for row in source_details
+        if row.get("game_mode") not in (None, "")
+    }
+    fallback = by_mode.get("historical") or by_mode.get("romance") or source_details[0]
+    return [
+        {**(by_mode.get(game_mode) or fallback), "game_mode": game_mode}
+        for game_mode in CHARACTER_GAME_MODES
+    ]
 
 
 def resolve_character_table_name(session: PackSession, alias: str) -> str:

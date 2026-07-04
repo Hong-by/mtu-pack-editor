@@ -9,7 +9,6 @@
       "artSetSourceId": "3k_mtu_art_set_historical_dong_min_general",
       "newAgeRangeKey": "hby_age_clone_chen_jiu",
       "ageRangeSourceKey": "3k_mtu_age_fixed_ancestral_ma",
-      "newInitialCeoKey": "hby_ceo_initial_data_clone_chen_jiu",
       "initialCeoSourceKey": "3k_mtu_ceo_initial_data_character_historical_chen_jiu",
       "templateOverrides": {
         "weight": 0.0,

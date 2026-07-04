@@ -13,7 +13,7 @@ from tk_pack_builder.adapters import RpfmAdapter
 NEW_TEMPLATE = "hby_template_clone_chen_jiu_body_dong_min_art"
 NEW_ART_SET = "hby_art_set_clone_dong_min_general"
 NEW_AGE = "hby_age_clone_chen_jiu"
-NEW_CEO = "hby_ceo_initial_data_clone_chen_jiu"
+SOURCE_INITIAL_CEO = "3k_mtu_ceo_initial_data_character_historical_chen_jiu"
 
 
 TABLES = {
@@ -56,14 +56,14 @@ def main() -> None:
         raise SystemExit("arts: expected at least 1 cloned art row")
 
     age = require_one(tables["ages"], lambda row: row.get("key") == NEW_AGE, "age")
-    ceo = require_one(tables["ceos"], lambda row: row.get("key") == NEW_CEO, "ceo")
+    ceo = require_one(tables["ceos"], lambda row: row.get("key") == SOURCE_INITIAL_CEO, "ceo")
 
     if template.get("art_set_override") != NEW_ART_SET:
         raise SystemExit("template: art_set_override does not point to cloned art set")
     if template.get("spawn_age_range") != NEW_AGE:
         raise SystemExit("template: spawn_age_range does not point to cloned age range")
-    if any(row.get("initial_ceos") != NEW_CEO for row in detail_rows):
-        raise SystemExit("details: initial_ceos does not point to cloned CEO")
+    if any(row.get("initial_ceos") != SOURCE_INITIAL_CEO for row in detail_rows):
+        raise SystemExit("details: initial_ceos does not point to the source initial CEO")
 
     summary = {
         "template": template["key"],
