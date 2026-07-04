@@ -1,5 +1,7 @@
 'use strict';
 
+let buildInFlight = false;
+
 function validationItem(level, title, detail, meta = {}) {
   return { level, title, detail, ...meta };
 }
@@ -240,6 +242,15 @@ async function validateServerRecipe() {
 }
 
 async function buildServerPack() {
+  if (buildInFlight) {
+    state.serverMessages = [validationItem('info', '저장 진행 중', '이미 pack 저장을 처리하고 있습니다.')];
+    renderValidation();
+    return;
+  }
+  buildInFlight = true;
+  const buildButton = $('buildButton');
+  const previousDisabled = buildButton?.disabled || false;
+  if (buildButton) buildButton.disabled = true;
   const operationKey = 'buildPack';
   const progressStartedAt = Date.now();
   const saveMode = $('saveModeSelect').value;
@@ -261,6 +272,9 @@ async function buildServerPack() {
       : [validationItem(data.ok === false ? 'error' : 'ok', data.ok === false ? '저장 검증 실패' : '저장 완료', 'pack 생성이 완료되었습니다.')];
   } catch (error) {
     state.serverMessages = [validationItem('error', '저장 실패', `pack 생성에 실패했습니다: ${error.message}`)];
+  } finally {
+    buildInFlight = false;
+    if (buildButton) buildButton.disabled = previousDisabled;
   }
   renderValidation();
 }

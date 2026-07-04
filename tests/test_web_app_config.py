@@ -204,6 +204,21 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("return _load_skill_effect_catalog_for_cache_key(_file_cache_key([catalog_path] if catalog_path else []))", web_py)
         self.assertIn("@lru_cache(maxsize=8)\ndef _load_skill_effect_catalog_for_cache_key", web_py)
 
+    def test_build_requests_are_serialized_for_rpfm_saves(self) -> None:
+        web_py = (ROOT / "tk_pack_builder" / "web.py").read_text(encoding="utf-8")
+        server_js = read_web_script("app-server.js")
+
+        self.assertIn("import threading", web_py)
+        self.assertIn("_BUILD_LOCK = threading.Lock()", web_py)
+        self.assertIn("def build_payload(payload: dict[str, Any]) -> dict[str, Any]:\n    with _BUILD_LOCK:", web_py)
+        self.assertIn("def _build_payload_unlocked(payload: dict[str, Any])", web_py)
+        self.assertIn("let buildInFlight = false;", server_js)
+        self.assertIn("if (buildInFlight)", server_js)
+        self.assertIn("buildInFlight = true;", server_js)
+        self.assertIn("if (buildButton) buildButton.disabled = true;", server_js)
+        self.assertIn("buildInFlight = false;", server_js)
+        self.assertIn("if (buildButton) buildButton.disabled = previousDisabled;", server_js)
+
     def test_skill_nodes_and_candidates_are_deduped_for_ui(self) -> None:
         skills_js = read_web_script("app-skills.js")
         app_js = read_web_script("app.js")

@@ -6,6 +6,7 @@ import os
 import re
 import time
 import hashlib
+import threading
 import traceback
 from functools import lru_cache
 from http import HTTPStatus
@@ -33,6 +34,7 @@ ROOT = Path(os.environ.get("TK_PACK_EDITOR_ROOT", Path(__file__).resolve().paren
 STATIC_ROOT = ROOT / "web"
 WEB_STATIC_SUFFIXES = {".css", ".html", ".js"}
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
+_BUILD_LOCK = threading.Lock()
 REFERENCE_SNAPSHOT = ROOT / "work" / "reference_snapshot.json"
 REFERENCE_SNAPSHOT_VERSION = 20
 OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 15
@@ -2084,6 +2086,11 @@ def _build_response(messages: list[dict[str, Any]], output_path: Path | None = N
 
 
 def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    with _BUILD_LOCK:
+        return _build_payload_unlocked(payload)
+
+
+def _build_payload_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("useInternalMaterials"):
         if not payload.get("delta"):
             raise ValueError("Internal materials build is only available for patch pack output.")
