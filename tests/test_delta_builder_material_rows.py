@@ -32,7 +32,7 @@ from tk_pack_builder.recipe import ArmourTypeClone, AttributeSetClone, Character
 
 
 class DeltaBuilderMaterialRowsTest(unittest.TestCase):
-    def test_write_db_file_uses_schema_table_name_for_custom_ceo_leaf(self) -> None:
+    def test_write_db_file_uses_schema_table_folder_for_custom_leaf(self) -> None:
         class FakeClient:
             def __init__(self) -> None:
                 self.commands: list[object] = []
@@ -61,8 +61,9 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         }
 
         cases = (
-            ("db/frontend_character_ceos_tables/_mtu_characters_ceo", "frontend_character_ceos"),
-            ("db/ceo_initial_datas_tables/_mtu_characters_ceo", "ceo_initial_datas"),
+            ("db/frontend_character_ceos_tables/_mtu_characters_ceo", "frontend_character_ceos_tables"),
+            ("db/ceo_initial_datas_tables/_mtu_characters_ceo", "ceo_initial_datas_tables"),
+            ("db/names_tables/data__", "names_tables"),
         )
         for path, expected_schema_table in cases:
             with self.subTest(path=path):
@@ -80,6 +81,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                 db_spec = new_file_command["NewPackedFile"][2]["DB"]  # type: ignore[index]
                 self.assertEqual(db_spec[1], expected_schema_table)
                 self.assertNotEqual(db_spec[1], "_mtu_characters_ceo")
+                self.assertNotEqual(db_spec[1], "names")
 
     def test_exact_table_patch_preserves_source_rows(self) -> None:
         source_db = {

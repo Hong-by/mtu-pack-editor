@@ -4501,7 +4501,7 @@ def _schema_table_name_for_db_path(path: str, table: dict[str, Any]) -> str:
     normalized = _normalize_pack_path(path)
     for part in normalized.split("/"):
         if part.endswith("_tables") and len(part) > len("_tables"):
-            return part.removesuffix("_tables")
+            return part
     return str(table.get("table_name") or "")
 
 
