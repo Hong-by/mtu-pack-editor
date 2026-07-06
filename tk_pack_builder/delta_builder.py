@@ -4489,12 +4489,20 @@ def _write_db_file(
         "NewPackedFile": [
             target_key,
             output_path,
-            {"DB": [output_path, table["table_name"], table["definition"]["version"]]},
+            {"DB": [output_path, _schema_table_name_for_db_path(output_path, table), table["definition"]["version"]]},
         ]
     }))
     _raise_rpfm_error(session.client.send({
         "SavePackedFileFromView": [target_key, output_path, {"DB": delta_db}]
     }))
+
+
+def _schema_table_name_for_db_path(path: str, table: dict[str, Any]) -> str:
+    normalized = _normalize_pack_path(path)
+    for part in normalized.split("/"):
+        if part.endswith("_tables") and len(part) > len("_tables"):
+            return part.removesuffix("_tables")
+    return str(table.get("table_name") or "")
 
 
 def _delta_table_path(path: str) -> str:

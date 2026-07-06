@@ -25,12 +25,62 @@ from tk_pack_builder.delta_builder import (
     _read_rows,
     _spawn_entries_for_clones,
     _unique_lua_ceo_keys,
+    _write_db_file,
 )
 from tk_pack_builder.internal_materials import MaterialPackSession
 from tk_pack_builder.recipe import ArmourTypeClone, AttributeSetClone, CharacterClone, CharacterPatch, LandUnitClone, Recipe, StatPatch, recipe_from_dict
 
 
 class DeltaBuilderMaterialRowsTest(unittest.TestCase):
+    def test_write_db_file_uses_schema_table_name_for_custom_ceo_leaf(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+
+            def send(self, command: object) -> dict[str, object]:
+                self.commands.append(command)
+                return {}
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.client = FakeClient()
+
+        source_db = {
+            "table": {
+                "table_name": "_mtu_characters_ceo",
+                "definition": {
+                    "version": 0,
+                    "fields": [
+                        {"name": "key"},
+                    ],
+                },
+                "table_data": [
+                    ["source_key"],
+                ],
+            },
+        }
+
+        cases = (
+            ("db/frontend_character_ceos_tables/_mtu_characters_ceo", "frontend_character_ceos"),
+            ("db/ceo_initial_datas_tables/_mtu_characters_ceo", "ceo_initial_datas"),
+        )
+        for path, expected_schema_table in cases:
+            with self.subTest(path=path):
+                session = FakeSession()
+                _write_db_file(
+                    session,  # type: ignore[arg-type]
+                    "target_pack",
+                    path,
+                    source_db,
+                    [{"key": "new_key"}],
+                )
+
+                new_file_command = session.client.commands[0]
+                self.assertIsInstance(new_file_command, dict)
+                db_spec = new_file_command["NewPackedFile"][2]["DB"]  # type: ignore[index]
+                self.assertEqual(db_spec[1], expected_schema_table)
+                self.assertNotEqual(db_spec[1], "_mtu_characters_ceo")
+
     def test_exact_table_patch_preserves_source_rows(self) -> None:
         source_db = {
             "table": {
