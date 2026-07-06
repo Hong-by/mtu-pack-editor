@@ -121,6 +121,81 @@ SAFE_FACTIONS = {
     "silla": "ironic_faction_shitla",
 }
 
+FALLBACK_TEMPLATE_FACTIONS = {
+    "3k_mod_template_dummy_hero_go_fire": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_go_gyesu_hero_wood": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_gogukcheon_hero_fire": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_go_balgi_hero_fire": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_go_baekgo_hero_wood": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_go_yeonu_hero_earth": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_deuk_rae_hero_earth": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_myeongrim_eosu_hero_water": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_mil_u_hero_metal": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_an_ryo_hero_wood": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_eobiryu_hero_water": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_queen_woo_fire": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_woo_so_hero_water": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_yu_okgu_hero_fire": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_yu_yu_hero_metal": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_eul_paso_hero_water": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_jwagaryeo_hero_metal": "ironic_faction_goguryeo",
+    "3k_mod_template_historical_go_su_hero_fire": "ironic_faction_bakaja",
+    "3k_mod_template_historical_gon_no_hero_metal": "ironic_faction_bakaja",
+    "3k_mod_template_historical_gilseon_hero_metal": "ironic_faction_bakaja",
+    "3k_mod_template_dummy_hero_buyeo_earth": "ironic_faction_bakaja",
+    "3k_mod_template_historical_buyeo_gaeru_hero_fire": "ironic_faction_bakaja",
+    "3k_mod_template_historical_buyeo_goi_hero_earth": "ironic_faction_bakaja",
+    "3k_mod_template_historical_buyeo_gusu_hero_fire": "ironic_faction_bakaja",
+    "3k_mod_template_historical_buyeo_giru_hero_earth": "ironic_faction_bakaja",
+    "3k_mod_template_historical_buyeo_saban_hero_wood": "ironic_faction_bakaja",
+    "3k_mod_template_historical_buyeo_usu_hero_water": "ironic_faction_bakaja",
+    "3k_mod_template_historical_buyeo_jil_hero_water": "ironic_faction_bakaja",
+    "3k_mod_template_historical_chogo_hero_earth": "ironic_faction_bakaja",
+    "3k_mod_template_historical_woo_du_hero_water": "ironic_faction_bakaja",
+    "3k_mod_template_historical_yu_gi_hero_earth": "ironic_faction_bakaja",
+    "3k_mod_template_historical_jin_ga_hero_water": "ironic_faction_bakaja",
+    "3k_mod_template_historical_jin_gwa_hero_earth": "ironic_faction_bakaja",
+    "3k_mod_template_historical_hoe_hoe_hero_earth": "ironic_faction_bakaja",
+    "3k_mod_template_historical_gang_hwon_hero_wood": "ironic_faction_shitla",
+    "3k_mod_template_historical_gu_suhye_hero_metal": "ironic_faction_shitla",
+    "3k_mod_template_historical_guk_ryang_hero_earth": "ironic_faction_shitla",
+    "3k_mod_template_historical_kim_gudo_hero_earth": "ironic_faction_shitla",
+    "3k_mod_template_historical_kim_malgu_hero_wood": "ironic_faction_shitla",
+    "3k_mod_template_historical_kim_michu_hero_metal": "ironic_faction_shitla",
+    "3k_mod_template_historical_mulgyeja_hero_wood": "ironic_faction_shitla",
+    "3k_mod_template_dummy_hero_seok_water": "ironic_faction_shitla",
+    "3k_mod_template_historical_seok_goljeong_hero_earth": "ironic_faction_shitla",
+    "3k_mod_template_historical_seok_naleum_hero_wood": "ironic_faction_shitla",
+    "3k_mod_template_historical_seok_naehae_hero_metal": "ironic_faction_shitla",
+    "3k_mod_template_historical_beolhyu_hero_water": "ironic_faction_shitla",
+    "3k_mod_template_historical_lady_seok_hero_water": "ironic_faction_shitla",
+    "3k_mod_template_historical_seok_aihyeo_hero_water": "ironic_faction_shitla",
+    "3k_mod_template_historical_seok_uro_hero_earth": "ironic_faction_shitla",
+    "3k_mod_template_historical_seok_imae_hero_water": "ironic_faction_shitla",
+    "3k_mod_template_historical_seok_jobun_hero_water": "ironic_faction_shitla",
+    "3k_mod_template_historical_seok_cheomhae_hero_metal": "ironic_faction_shitla",
+    "3k_mod_template_historical_seol_bu_hero_earth": "ironic_faction_shitla",
+    "3k_mod_template_historical_lady_sulye_hero_metal": "ironic_faction_shitla",
+    "3k_mod_template_historical_sul_myeong_hero_water": "ironic_faction_shitla",
+    "3k_mod_template_historical_yeon_jin_hero_wood": "ironic_faction_shitla",
+    "3k_mod_template_historical_yun_jong_hero_water": "ironic_faction_shitla",
+    "3k_mod_template_historical_yieum_hero_fire": "ironic_faction_shitla",
+    "3k_mod_template_historical_chung_hwon_hero_fire": "ironic_faction_shitla",
+    "3k_mod_template_historical_hwon_gyeon_hero_fire": "ironic_faction_shitla",
+    "3k_mod_template_historical_heung_sun_hero_wood": "ironic_faction_shitla",
+    "3k_mod_template_historical_go_seongbang_hero_earth": "ironic_faction_tamno",
+    "3k_mod_template_historical_munseong_hero_water": "ironic_faction_tamno",
+}
+
+FALLBACK_ROSTER_HIDDEN_KEYS = {
+    "3k_mod_template_historical_go_baekgo_hero_wood",
+    "3k_mod_template_historical_woo_so_hero_water",
+    "3k_mod_template_historical_buyeo_gaeru_hero_fire",
+    "3k_mod_template_historical_buyeo_giru_hero_earth",
+    "3k_mod_template_historical_seok_goljeong_hero_earth",
+    "3k_mod_template_historical_seok_imae_hero_water",
+}
+
 
 @dataclass(frozen=True)
 class KoreaCharacterInfo:
@@ -149,8 +224,9 @@ class KoreaCharacterInfo:
 def korea_character_index() -> dict[str, dict[str, Any]]:
     root = Path(__file__).resolve().parents[1]
     script_root = root / "work" / "korea_mechanics_extract" / "!!190expande_korea_addon" / "script" / "campaign"
+    result = _fallback_korea_character_index()
     if not script_root.is_dir():
-        return {}
+        return result
 
     index: dict[str, KoreaCharacterInfo] = {}
     roster_hidden: set[str] = set()
@@ -183,7 +259,8 @@ def korea_character_metadata(template_key: str) -> dict[str, Any] | None:
 
 
 def korea_display_name_hint(template_key: str) -> str:
-    return _display_name_hint(_normalize_template_key(template_key))
+    metadata = korea_character_index().get(_normalize_template_key(template_key)) or {}
+    return str(metadata.get("koreaDisplayNameHint") or "")
 
 
 def korea_related_template_keys(template_key: str) -> list[str]:
@@ -299,6 +376,39 @@ def _add_entry(
 
 def _normalize_template_key(value: str) -> str:
     return str(value or "").strip().lower()
+
+
+def _fallback_korea_character_index() -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for template_key, faction_key in FALLBACK_TEMPLATE_FACTIONS.items():
+        normalized_key = _normalize_template_key(template_key)
+        faction, faction_label = FACTION_LABELS[faction_key]
+        metadata = KoreaCharacterInfo(
+            faction_key=faction_key,
+            faction=faction,
+            faction_label=faction_label,
+            role="general",
+            subtype=_subtype_from_template_key(normalized_key),
+            source_script="built_in_korea_fallback",
+            display_name_hint=_display_name_hint(normalized_key),
+        ).to_dict()
+        if normalized_key in FALLBACK_ROSTER_HIDDEN_KEYS:
+            metadata.update(
+                {
+                    "rosterHidden": True,
+                    "koreaRosterHidden": True,
+                    "koreaHiddenReason": "script_spawn_then_kill",
+                }
+            )
+        result[normalized_key] = metadata
+    return result
+
+
+def _subtype_from_template_key(template_key: str) -> str:
+    for element, subtype in SUBTYPE_VARS.items():
+        if template_key.endswith(f"_hero_{element}") or template_key.endswith(f"_{element}"):
+            return subtype
+    return ""
 
 
 def _display_name_hint(template_key: str) -> str:

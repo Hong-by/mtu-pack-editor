@@ -382,6 +382,7 @@ class CliFlowTest(unittest.TestCase):
                 for row in detail_rows
             )
         )
+        self.assertTrue(all(row["min_rank"] == 4 and row["max_rank"] == 4 for row in detail_rows))
 
         art_sets = {row["art_set_id"]: row for row in data["tables"]["campaign_character_art_sets"]}
         self.assertIn("hby_art_set_clone_dong_min_general", art_sets)

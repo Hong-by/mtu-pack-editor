@@ -10,7 +10,7 @@ function hydrateFromPackData(characterData, responseEnvelope = {}) {
     || characterData.assetCacheToken
     || summary.assetCacheToken
     || `data-${state.dataVersion}`;
-  const firstBrowsable = browsableCharacters()[0] || state.characters.find(hasRealTemplateRow);
+  const firstBrowsable = browsableCharacters()[0] || selectableFallbackCharacters()[0] || state.characters.find(hasRealTemplateRow);
   state.selectedKey = realTemplateKey(firstBrowsable) || '';
   state.queue = [];
   state.editingQueueIndex = null;
@@ -25,8 +25,18 @@ function normalizePackCharacter(item, summary) {
   const artSet = summary.artSets.find((candidate) => candidate.key === item.artSet);
   const combatStats = item.combatStats || {};
   const titleInfo = item.titleInfo || {};
-  const sheetHero = sheetHeroInfoFor(item.key);
-  const displayName = sheetHero?.kr || displayLabel(item.label || item.displayName, item.key);
+  const sheetHero = sheetHeroInfoForAny(
+    item.key,
+    item.templateRow?.key,
+    item.artSet,
+    item.displayName,
+    item.label,
+  );
+  const isImageOnly = Boolean(item.imageOnly || item.virtualImageOnly);
+  const imageNameFallback = isImageOnly
+    ? (artSet?.label || item.portrait || item.card || item.artSet || item.key)
+    : item.key;
+  const displayName = sheetHero?.kr || displayLabel(item.label || item.displayName, imageNameFallback);
   const sheetTitle = sheetTitleInfoFor(titleInfo.ceoNodeKey || titleInfo.initialCeoKey || '', item.key);
   const koreaTitleOverride = koreaTitleOverrideFor(item, titleInfo);
   const resolvedTitleName = koreaTitleOverride || displayTitleLabel(titleInfo.label, titleInfo.ceoNodeKey || titleInfo.initialCeoKey || '', sheetTitle?.krTitle);
@@ -66,7 +76,7 @@ function normalizePackCharacter(item, summary) {
     element,
     portrait: portraitGlyph(displayName || item.key),
     artSet: item.artSet || '',
-    imageSetName: displayLabel(artSet?.label, item.artSet || item.key),
+    imageSetName: displayLabel(artSet?.label, item.artSet || item.portrait || item.card || item.key),
     modelSetName: displayLabel(item.uniformLabel || artSet?.uniformLabel || item.uniform || artSet?.uniform, item.artSet || item.key),
     historicalSkill: historical.skillSet || '-',
     romanceSkill: romance.skillSet || historical.skillSet || '-',
@@ -76,7 +86,7 @@ function normalizePackCharacter(item, summary) {
     combatProfile: combatStats.weaponCeo || combatStats.armourCeo || historical.initialCeos || romance.initialCeos || '장비 정보 미확인',
     titleName: resolvedTitleName || manualTitle?.title || '칭호 미확인',
     titleOwnerName: sheetTitle?.krName || manualTitle?.owner || displayName,
-    titleDescription: manualTitle?.effects || titleInfo.description || '',
+    titleDescription: titleInfo.description || '',
     titleKey: titleInfo.ceoNodeKey || '',
     titleInitialCeoKey: titleInfo.initialCeoKey || '',
     titleLocKey: titleInfo.locTitleKey || '',
@@ -139,6 +149,9 @@ function normalizePackCharacter(item, summary) {
     sourceIdentity: item.sourceIdentity || '',
     imageOnly: Boolean(item.imageOnly),
     virtualImageOnly: Boolean(item.virtualImageOnly),
+    rosterHidden: Boolean(item.rosterHidden),
+    koreaRosterHidden: Boolean(item.koreaRosterHidden),
+    koreaHiddenReason: item.koreaHiddenReason || '',
     externalImageSet: Boolean(item.externalImageSet),
     isKoreaAddon: Boolean(item.isKoreaAddon),
     koreaFaction: item.koreaFaction || '',

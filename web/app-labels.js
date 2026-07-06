@@ -2,12 +2,31 @@
 
 function displayLabel(value, fallback = '') {
   const text = String(value || '').trim();
+  if (isBadDisplayHint(text) || isMixedNameTitleLabel(text)) return isBadDisplayHint(fallback) ? '' : friendlyKey(fallback);
   const translated = koreanLabelFromText(text, fallback);
   return genericDisplayName(text) || translated || text || friendlyKey(fallback);
 }
 
+function isBadDisplayHint(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+  return ['잘못된힌트', 'wronghint', 'badhint', 'invalidhint'].includes(normalized);
+}
+
 function hasHangul(value) {
   return /[가-힣]/.test(String(value || ''));
+}
+
+function isMixedNameTitleLabel(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  if (!/[a-z]/.test(lower)) return false;
+  if (/\b([a-z]{2,})\b.*\b\1\b/.test(lower)) return true;
+  if (hasHangul(text) && /\b[a-z]{2,}\b/.test(lower) && /\b\d{1,2}\b$/.test(lower)) return true;
+  return hasHangul(text) && /\b[a-z]{2,}\b/.test(lower) && text.split(/\s+/).length <= 5;
 }
 
 function hasCjk(value) {

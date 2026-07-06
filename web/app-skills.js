@@ -226,7 +226,19 @@ function renderSkillTreeEditors() {
 }
 
 function skillEffectText(info) {
-  return info?.effectSummary || info?.description || '효과 정보 없음';
+  const text = cleanSkillEffectText(info?.effectSummary || info?.description);
+  return text || '효과 정보 없음';
+}
+
+function cleanSkillEffectText(value) {
+  return String(value || '')
+    .replace(/\[\[\/?[a-z0-9_:-]+(?:\s+[^\]]*)?\]\]/gi, '')
+    .replace(/%\+?n%?/gi, '')
+    .replace(/\\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:)])/g, '$1')
+    .replace(/([(])\s+/g, '$1')
+    .trim();
 }
 
 const SKILL_ELEMENT_TABS = [

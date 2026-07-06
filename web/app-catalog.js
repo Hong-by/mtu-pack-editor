@@ -2,9 +2,12 @@
 
 function selectedCharacter() {
   const roster = browsableCharacters();
+  const fallbackRoster = selectableFallbackCharacters();
   return roster.find((character) => realTemplateKey(character) === state.selectedKey || character.key === state.selectedKey)
     || roster[0]
-    || state.characters.find((character) => hasRealTemplateRow(character) && hasCharacterDetails(character))
+    || fallbackRoster.find((character) => hasCharacterDetails(character))
+    || fallbackRoster[0]
+    || state.characters.find((character) => hasRealTemplateRow(character) && !isTemplateVariantPoolCharacter(character))
     || state.characters[0];
 }
 
@@ -77,6 +80,108 @@ function hasUniqueImageSet(character) {
     && !combined.includes('scripted');
 }
 
+function hasFactionRosterMetadata(character) {
+  return Boolean(character?.koreaFaction || character?.koreaFactionKey);
+}
+
+function generatedTemplatePoolSearchText(character) {
+  return [
+    realTemplateKey(character),
+    character?.key,
+    character?.name,
+    character?.displayName,
+    character?.label,
+    character?.titleName,
+    character?.titleOwnerName,
+    character?.retinue,
+    character?.artSet,
+    character?.imageSetName,
+    character?.sourceIdentity,
+    character?.referenceSourcePath,
+    character?.templateRow?._sourceTablePath,
+    character?.templateRow?._referenceSourcePath,
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function hasUsableCharacterLabel(character) {
+  if (hasFactionRosterMetadata(character)) return true;
+  const sheetHero = sheetHeroInfoForAny(
+    character?.key,
+    realTemplateKey(character),
+    character?.artSet,
+    character?.titleInitialCeoKey,
+    character?.titleKey,
+  );
+  if (sheetHero) return true;
+  const labelText = [
+    character?.name,
+    character?.displayName,
+    character?.label,
+    character?.titleOwnerName,
+  ].filter(Boolean).join(' ');
+  if (isLowInformationGeneratedName(labelText)) return false;
+  if (hasUniqueImageSet(character) && !isMixedNameTitleLabel(labelText)) return true;
+  if (hasHangul(labelText) && !isLowQualityGeneratedLabel(labelText)) return true;
+  return false;
+}
+
+function isGeneratedTemplatePoolKey(character) {
+  const combined = generatedTemplatePoolSearchText(character);
+  return /generic_nomads/.test(combined)
+    || /xianbei_template_generic/.test(combined)
+    || /template_generic_(castellan|colonel)/.test(combined)
+    || /generic_(castellan|colonel)/.test(combined)
+    || /(?:^|[_\s-])scripted(?:[_\s-]|$)/.test(combined)
+    || /(?:^|[_\s-])dummy(?:[_\s-]|$)/.test(combined)
+    || /(?:^|[_\s-])placeholder(?:[_\s-]|$)/.test(combined);
+}
+
+function isLowQualityGeneratedLabel(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return false;
+  if (isLowInformationGeneratedName(text)) return true;
+  if (/\bxianbei\b.*\b(generic|castellan|colonel|aristocrat|matriarch|wrangler|lancer|marauder)\b/.test(text)) return true;
+  if (/\bxianbei\s+기본\b/.test(text)) return true;
+  if (/\b(generic\s+)?(castellan|colonel)\b/.test(text)) return true;
+  return /\b0?\d\b.*\b0?\d\b$/.test(text) && (text.includes('generic') || text.includes('xianbei'));
+}
+
+function isLowInformationGeneratedName(value) {
+  const text = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!text) return false;
+  return /^(?:여성|남성)?\s*(?:토|화|목|수|금)(?:\s*(?:장군|책사|모사|용장|선봉장|감시자|지휘관|기본|칭호 미확인))*$/i.test(text);
+}
+
+function isLowQualityGeneratedCharacter(character) {
+  if (hasFactionRosterMetadata(character) || hasUniqueImageSet(character)) return false;
+  const combined = generatedTemplatePoolSearchText(character);
+  if (isGeneratedTemplatePoolKey(character)) return true;
+  if (isLowQualityGeneratedLabel(combined)) return true;
+  if (!hasUsableCharacterLabel(character) && /(?:^|[_\s-])generic(?:[_\s-]|$)/.test(combined)) return true;
+  return false;
+}
+
+function isTemplateVariantPoolCharacter(character) {
+  if (hasFactionRosterMetadata(character) || hasUniqueImageSet(character)) return false;
+  const combined = generatedTemplatePoolSearchText(character);
+  return /(?:^|[_\s-])scripted(?:[_\s-]|$)/.test(combined)
+    || /(?:^|[_\s-])generic(?:[_\s-]|$)/.test(combined)
+    || /(?:^|[_\s-])dummy(?:[_\s-]|$)/.test(combined)
+    || /(?:^|[_\s-])placeholder(?:[_\s-]|$)/.test(combined)
+    || isLowQualityGeneratedCharacter(character);
+}
+
+function selectableFallbackCharacters() {
+  return cachedDerived('selectableFallbackCharacters', () => sortBrowsableCharacters(characters().filter((character) => (
+    hasRealTemplateRow(character)
+    && !character.imageOnly
+    && !character.virtualImageOnly
+    && !isRosterHiddenCharacter(character)
+    && !isTemplateVariantPoolCharacter(character)
+    && hasUsableCharacterLabel(character)
+  ))));
+}
+
 function browsableCharacters() {
   return cachedDerived('browsableCharacters', () => {
     return sortBrowsableCharacters(characters().filter((character) => (
@@ -85,6 +190,8 @@ function browsableCharacters() {
       && !character.imageOnly
       && !character.virtualImageOnly
       && !isRosterHiddenCharacter(character)
+      && !isTemplateVariantPoolCharacter(character)
+      && hasUsableCharacterLabel(character)
     )));
   });
 }
@@ -150,8 +257,38 @@ function isUniqueRosterCharacter(character) {
 function isRecommendedRosterCharacter(character) {
   return isFavoriteCharacter(character)
     || isLeaderCharacter(character)
-    || character?.isKoreaAddon
+    || hasFactionRosterMetadata(character)
     || isUniqueRosterCharacter(character);
+}
+
+const KOREA_FACTION_FILTER_ALIASES = {
+  goguryeo: ['goguryeo', 'ironic_faction_goguryeo', '고구려'],
+  baekje: ['baekje', 'bakaja', 'ironic_faction_bakaja', '백제'],
+  silla: ['silla', 'shitla', 'ironic_faction_shitla', '신라'],
+  tamna: ['tamna', 'tamno', 'ironic_faction_tamno', '탐라'],
+};
+
+function normalizedKoreaFactionAliases(filterKey) {
+  return (KOREA_FACTION_FILTER_ALIASES[filterKey] || [filterKey])
+    .map((value) => normalizeLookupText(value))
+    .filter(Boolean);
+}
+
+function koreaFactionSearchText(character) {
+  return normalizeLookupText([
+    character?.koreaFaction,
+    character?.koreaFactionKey,
+    character?.koreaFactionLabel,
+    character?.koreaSourceScript,
+    character?.sourceIdentity,
+  ].filter(Boolean).join(' '));
+}
+
+function matchesKoreaFactionFilter(character, filterKey) {
+  const aliases = normalizedKoreaFactionAliases(filterKey);
+  if (!aliases.length) return Boolean(character?.isKoreaAddon);
+  const haystack = koreaFactionSearchText(character);
+  return aliases.some((alias) => haystack.includes(alias));
 }
 
 function matchesRosterFilter(character) {
@@ -160,11 +297,11 @@ function matchesRosterFilter(character) {
   if (state.filter === 'recommended') return isRecommendedRosterCharacter(character);
   if (state.filter === 'unique') return isUniqueRosterCharacter(character);
   if (state.filter === 'leader') return isLeaderCharacter(character);
-  if (state.filter === 'korea') return Boolean(character?.isKoreaAddon);
+  if (state.filter === 'korea') return hasFactionRosterMetadata(character);
   if (state.filter === 'favorites') return isFavoriteCharacter(character);
   if (Object.prototype.hasOwnProperty.call(ELEMENTS, state.filter)) return character?.element === state.filter;
   if (state.filter.startsWith('element:')) return character?.element === state.filter.slice(8);
-  if (state.filter.startsWith('korea:')) return character?.koreaFaction === state.filter.slice(6);
+  if (state.filter.startsWith('korea:')) return matchesKoreaFactionFilter(character, state.filter.slice(6));
   return true;
 }
 

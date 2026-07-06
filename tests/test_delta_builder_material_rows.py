@@ -602,6 +602,34 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                     "_sourceTablePath": "db/effects_tables/data__",
                 },
             ],
+            "effect_bonus_value_ids_unit_sets": [
+                {
+                    "bonus_value_id": "bonus_a",
+                    "effect": "effect_a",
+                    "unit_set": "unit_set_a",
+                    "_sourceTablePath": "db/effect_bonus_value_ids_unit_sets_tables/data__",
+                },
+            ],
+            "effect_bonus_value_unit_ability_junctions": [
+                {
+                    "bonus_value_id": "bonus_a",
+                    "unit_ability": "ability_a",
+                    "_sourceTablePath": "db/effect_bonus_value_unit_ability_junctions_tables/data__",
+                },
+            ],
+            "unit_abilities": [
+                {
+                    "key": "ability_a",
+                    "type": "special_a",
+                    "_sourceTablePath": "db/unit_abilities_tables/data__",
+                },
+            ],
+            "unit_special_abilities": [
+                {
+                    "key": "special_a",
+                    "_sourceTablePath": "db/unit_special_abilities_tables/data__",
+                },
+            ],
         }
         table_names = {
             "character_skill_node_sets": "db/character_skill_node_sets_tables/data__",
@@ -609,6 +637,10 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             "character_skill_node_links": "db/character_skill_node_links_tables/data__",
             "character_skill_level_to_effects_junctions": "db/character_skill_level_to_effects_junctions_tables/data__",
             "effects": "db/effects_tables/data__",
+            "effect_bonus_value_ids_unit_sets": "db/effect_bonus_value_ids_unit_sets_tables/data__",
+            "effect_bonus_value_unit_ability_junctions": "db/effect_bonus_value_unit_ability_junctions_tables/data__",
+            "unit_abilities": "db/unit_abilities_tables/data__",
+            "unit_special_abilities": "db/unit_special_abilities_tables/data__",
         }
         rows_by_table = {}
 
@@ -617,6 +649,84 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertIn("db/character_skill_level_to_effects_junctions_tables/data__", rows_by_table)
         self.assertIn("db/effects_tables/data__", rows_by_table)
         self.assertEqual(rows_by_table["db/effects_tables/data__"][0]["effect"], "effect_a")
+        self.assertEqual(rows_by_table["db/effect_bonus_value_ids_unit_sets_tables/data__"][0]["bonus_value_id"], "bonus_a")
+        self.assertEqual(rows_by_table["db/effect_bonus_value_unit_ability_junctions_tables/data__"][0]["unit_ability"], "ability_a")
+        self.assertEqual(rows_by_table["db/unit_abilities_tables/data__"][0]["key"], "ability_a")
+        self.assertEqual(rows_by_table["db/unit_special_abilities_tables/data__"][0]["key"], "special_a")
+
+    def test_existing_skill_dependency_copies_direct_effect_bonus_unit_ability_rows(self) -> None:
+        tables = {
+            "character_skill_node_sets": [
+                {"key": "skillset_a", "_sourceTablePath": "db/character_skill_node_sets_tables/data__"},
+            ],
+            "character_skill_nodes": [
+                {
+                    "key": "skillset_a_0A",
+                    "character_skill_node_set_key": "skillset_a",
+                    "character_skill_key": "skill_a",
+                    "_sourceTablePath": "db/character_skill_nodes_tables/data__",
+                },
+            ],
+            "character_skill_node_links": [],
+            "character_skill_level_to_effects_junctions": [
+                {
+                    "character_skill_key": "skill_a",
+                    "effect_key": "effect_direct",
+                    "effect_scope": "character_to_character_own",
+                    "level": 1,
+                    "_sourceTablePath": "db/character_skill_level_to_effects_junctions_tables/data__",
+                },
+            ],
+            "effects": [
+                {
+                    "effect": "effect_direct",
+                    "category": "campaign",
+                    "_sourceTablePath": "db/effects_tables/data__",
+                },
+            ],
+            "effect_bonus_value_ids_unit_sets": [],
+            "effect_bonus_value_unit_ability_junctions": [
+                {
+                    "effect": "effect_direct",
+                    "bonus_value_id": "enable",
+                    "unit_ability": "ability_direct",
+                    "_sourceTablePath": "db/effect_bonus_value_unit_ability_junctions_tables/data__",
+                },
+            ],
+            "unit_abilities": [
+                {
+                    "key": "ability_direct",
+                    "type": "special_direct",
+                    "_sourceTablePath": "db/unit_abilities_tables/data__",
+                },
+            ],
+            "unit_special_abilities": [
+                {
+                    "key": "special_direct",
+                    "_sourceTablePath": "db/unit_special_abilities_tables/data__",
+                },
+            ],
+        }
+        table_names = {
+            "character_skill_node_sets": "db/character_skill_node_sets_tables/data__",
+            "character_skill_nodes": "db/character_skill_nodes_tables/data__",
+            "character_skill_node_links": "db/character_skill_node_links_tables/data__",
+            "character_skill_level_to_effects_junctions": "db/character_skill_level_to_effects_junctions_tables/data__",
+            "effects": "db/effects_tables/data__",
+            "effect_bonus_value_unit_ability_junctions": "db/effect_bonus_value_unit_ability_junctions_tables/data__",
+            "unit_abilities": "db/unit_abilities_tables/data__",
+            "unit_special_abilities": "db/unit_special_abilities_tables/data__",
+        }
+        rows_by_table = {}
+
+        _copy_skill_dependency(tables, table_names, rows_by_table, "skillset_a")
+
+        bonus_rows = rows_by_table["db/effect_bonus_value_unit_ability_junctions_tables/data__"]
+        self.assertEqual(bonus_rows[0]["effect"], "effect_direct")
+        self.assertEqual(bonus_rows[0]["bonus_value_id"], "enable")
+        self.assertEqual(bonus_rows[0]["unit_ability"], "ability_direct")
+        self.assertEqual(rows_by_table["db/unit_abilities_tables/data__"][0]["key"], "ability_direct")
+        self.assertEqual(rows_by_table["db/unit_special_abilities_tables/data__"][0]["key"], "special_direct")
 
     def test_campaign_start_spawn_emits_lua_event_observer(self) -> None:
         self.assertEqual(
@@ -2006,6 +2116,393 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertEqual(land_unit_row["key"], "hby_land_unit_test")
         self.assertEqual(land_unit_row["armour"], "hby_armour_test")
 
+    def test_skill_source_retinue_battle_abilities_are_copied_to_target_unit(self) -> None:
+        tables = {
+            "character_generation_template_game_mode_details": [
+                {
+                    "character_generation_template": "source_template",
+                    "game_mode": "romance",
+                    "retinue": "source_retinue",
+                    "skill_set_override": "source_skillset",
+                }
+            ],
+            "retinue_slot_initial_units": [
+                {"retinue": "source_retinue", "slot_index": 0, "initial_unit_record": "source_unit"},
+                {"retinue": "target_retinue", "slot_index": 0, "initial_unit_record": "target_unit"},
+            ],
+            "character_skill_nodes": [
+                {
+                    "key": "node_a",
+                    "character_skill_node_set_key": "source_skillset",
+                    "character_skill_key": "3k_main_skill_special_ability_metal_venomous_shot",
+                }
+            ],
+            "land_units_to_unit_abilites_junctions": [
+                {
+                    "land_unit": "source_unit",
+                    "ability": "3k_main_ability_venomous_shot",
+                    "_sourceTablePath": "db/land_units_to_unit_abilites_junctions_tables/data__",
+                },
+                {
+                    "land_unit": "source_unit",
+                    "ability": "unrelated_ability",
+                    "_sourceTablePath": "db/land_units_to_unit_abilites_junctions_tables/data__",
+                }
+            ],
+            "unit_abilities": [
+                {
+                    "key": "3k_main_ability_venomous_shot",
+                    "type": "custom_special",
+                    "_sourceTablePath": "db/unit_abilities_tables/data__",
+                },
+                {
+                    "key": "contact_effect",
+                    "type": "contact_effect",
+                    "_sourceTablePath": "db/unit_abilities_tables/data__",
+                }
+            ],
+            "unit_special_abilities": [
+                {
+                    "key": "custom_special",
+                    "activated_projectile": "custom_projectile",
+                    "bombardment": "custom_bombardment",
+                    "_sourceTablePath": "db/unit_special_abilities_tables/data__",
+                },
+                {
+                    "key": "contact_effect",
+                    "_sourceTablePath": "db/unit_special_abilities_tables/data__",
+                }
+            ],
+            "special_ability_to_special_ability_phase_junctions": [
+                {
+                    "special_ability": "custom_special",
+                    "phase": "custom_phase",
+                    "order": 1,
+                    "_sourceTablePath": "db/special_ability_to_special_ability_phase_junctions_tables/data__",
+                },
+                {
+                    "special_ability": "contact_effect",
+                    "phase": "contact_phase",
+                    "order": 1,
+                    "_sourceTablePath": "db/special_ability_to_special_ability_phase_junctions_tables/data__",
+                }
+            ],
+            "special_ability_phases": [
+                {
+                    "id": "custom_phase",
+                    "duration": 15,
+                    "phase_display": "custom_phase_display",
+                    "_sourceTablePath": "db/special_ability_phases_tables/data__",
+                },
+                {
+                    "id": "contact_phase",
+                    "duration": 6,
+                    "_sourceTablePath": "db/special_ability_phases_tables/data__",
+                }
+            ],
+            "special_ability_phase_stat_effects": [
+                {
+                    "phase": "custom_phase",
+                    "stat": "melee_attack",
+                    "value": 12,
+                    "how": "additive",
+                    "_sourceTablePath": "db/special_ability_phase_stat_effects_tables/data__",
+                }
+            ],
+            "special_ability_phase_attribute_effects": [
+                {
+                    "phase": "custom_phase",
+                    "attribute": "unbreakable",
+                    "attribute_type": "positive",
+                    "_sourceTablePath": "db/special_ability_phase_attribute_effects_tables/data__",
+                }
+            ],
+            "special_ability_phase_displays": [
+                {
+                    "key": "custom_phase_display",
+                    "_sourceTablePath": "db/special_ability_phase_displays_tables/data__",
+                }
+            ],
+            "special_ability_to_auto_deactivate_flags": [
+                {
+                    "special_ability": "custom_special",
+                    "auto_deactivate_flag": "routing",
+                    "_sourceTablePath": "db/special_ability_to_auto_deactivate_flags_tables/data__",
+                }
+            ],
+            "special_ability_to_invalid_target_flags": [
+                {
+                    "special_ability": "custom_special",
+                    "invalid_target_flag": "wall",
+                    "_sourceTablePath": "db/special_ability_to_invalid_target_flags_tables/data__",
+                }
+            ],
+            "special_ability_to_invalid_usage_flags": [
+                {
+                    "special_ability": "custom_special",
+                    "invalid_usage_flag": "climbing",
+                    "_sourceTablePath": "db/special_ability_to_invalid_usage_flags_tables/data__",
+                }
+            ],
+            "projectile_bombardments": [
+                {
+                    "key": "custom_bombardment",
+                    "_sourceTablePath": "db/projectile_bombardments_tables/data__",
+                }
+            ],
+            "projectile_displays": [
+                {
+                    "key": "custom_display",
+                    "_sourceTablePath": "db/projectile_displays_tables/data__",
+                }
+            ],
+            "projectile_impacts": [
+                {
+                    "key": "custom_impact",
+                    "_sourceTablePath": "db/projectile_impacts_tables/data__",
+                }
+            ],
+            "projectiles": [
+                {
+                    "key": "custom_projectile",
+                    "category": "arrow",
+                    "contact_stat_effect": "contact_effect",
+                    "projectile_display": "custom_display",
+                    "projectile_impact": "custom_impact",
+                    "_sourceTablePath": "db/projectiles_tables/data__",
+                }
+            ],
+        }
+        rows_by_table: dict[str, list[dict[str, object]]] = {}
+
+        delta_builder._copy_skill_source_retinue_abilities(
+            tables,
+            {},
+            {},
+            rows_by_table,
+            "source_skillset",
+            "target_retinue",
+        )
+
+        ability_row = rows_by_table["db/land_units_to_unit_abilites_junctions_tables/data__"][0]
+        self.assertEqual(ability_row["land_unit"], "target_unit")
+        self.assertEqual(ability_row["ability"], "3k_main_ability_venomous_shot")
+        self.assertEqual(len(rows_by_table["db/land_units_to_unit_abilites_junctions_tables/data__"]), 1)
+        self.assertEqual(rows_by_table["db/unit_abilities_tables/data__"][0]["key"], "3k_main_ability_venomous_shot")
+        self.assertEqual(rows_by_table["db/unit_special_abilities_tables/data__"][0]["key"], "custom_special")
+        self.assertEqual(rows_by_table["db/special_ability_to_special_ability_phase_junctions_tables/data__"][0]["phase"], "custom_phase")
+        self.assertEqual(rows_by_table["db/special_ability_phases_tables/data__"][0]["id"], "custom_phase")
+        self.assertEqual(rows_by_table["db/special_ability_phase_stat_effects_tables/data__"][0]["phase"], "custom_phase")
+        self.assertEqual(rows_by_table["db/special_ability_phase_attribute_effects_tables/data__"][0]["phase"], "custom_phase")
+        self.assertEqual(rows_by_table["db/special_ability_phase_displays_tables/data__"][0]["key"], "custom_phase_display")
+        self.assertEqual(rows_by_table["db/special_ability_to_auto_deactivate_flags_tables/data__"][0]["special_ability"], "custom_special")
+        self.assertEqual(rows_by_table["db/special_ability_to_invalid_target_flags_tables/data__"][0]["special_ability"], "custom_special")
+        self.assertEqual(rows_by_table["db/special_ability_to_invalid_usage_flags_tables/data__"][0]["special_ability"], "custom_special")
+        self.assertEqual(rows_by_table["db/projectiles_tables/data__"][0]["key"], "custom_projectile")
+        self.assertEqual(rows_by_table["db/projectile_bombardments_tables/data__"][0]["key"], "custom_bombardment")
+        self.assertEqual(rows_by_table["db/projectile_displays_tables/data__"][0]["key"], "custom_display")
+        self.assertEqual(rows_by_table["db/projectile_impacts_tables/data__"][0]["key"], "custom_impact")
+        self.assertTrue(any(row["key"] == "contact_effect" for row in rows_by_table["db/unit_abilities_tables/data__"]))
+        self.assertTrue(any(row["key"] == "contact_effect" for row in rows_by_table["db/unit_special_abilities_tables/data__"]))
+        self.assertTrue(any(row["id"] == "contact_phase" for row in rows_by_table["db/special_ability_phases_tables/data__"]))
+
+    def test_unique_skill_ability_without_source_junction_is_added_to_target_general(self) -> None:
+        tables = {
+            "character_generation_template_game_mode_details": [],
+            "retinue_slot_initial_units": [
+                {"retinue": "target_retinue", "slot_index": 0, "initial_unit_record": "target_general"},
+            ],
+            "character_skill_nodes": [
+                {
+                    "key": "node_a",
+                    "character_skill_node_set_key": "source_skillset",
+                    "character_skill_key": "3k_main_skill_special_ability_water_stifling_deluge",
+                }
+            ],
+            "character_skill_level_to_effects_junctions": [
+                {
+                    "character_skill_key": "3k_main_skill_special_ability_water_stifling_deluge",
+                    "effect_key": "effect_stifling_deluge",
+                    "effect_scope": "character_to_character_own",
+                    "level": 1,
+                }
+            ],
+            "effect_bonus_value_ids_unit_sets": [
+                {
+                    "bonus_value_id": "bonus_stifling_deluge",
+                    "effect": "effect_stifling_deluge",
+                    "unit_set": "general",
+                }
+            ],
+            "effect_bonus_value_unit_ability_junctions": [
+                {
+                    "bonus_value_id": "bonus_stifling_deluge",
+                    "unit_ability": "3k_main_ability_stifling_deluge",
+                }
+            ],
+            "land_units_to_unit_abilites_junctions": [],
+            "unit_abilities": [
+                {
+                    "key": "3k_main_ability_stifling_deluge",
+                    "type": "3k_main_ability_stifling_deluge",
+                    "_sourceTablePath": "db/unit_abilities_tables/data__",
+                }
+            ],
+            "unit_special_abilities": [
+                {
+                    "key": "3k_main_ability_stifling_deluge",
+                    "_sourceTablePath": "db/unit_special_abilities_tables/data__",
+                }
+            ],
+        }
+        table_names = {
+            "land_units_to_unit_abilites_junctions": "db/land_units_to_unit_abilites_junctions_tables/data__",
+            "unit_abilities": "db/unit_abilities_tables/data__",
+            "unit_special_abilities": "db/unit_special_abilities_tables/data__",
+        }
+        rows_by_table: dict[str, list[dict[str, object]]] = {}
+
+        delta_builder._copy_skill_source_retinue_abilities(
+            tables,
+            table_names,
+            {},
+            rows_by_table,
+            "source_skillset",
+            "target_retinue",
+        )
+
+        self.assertEqual(rows_by_table["db/land_units_to_unit_abilites_junctions_tables/data__"], [{
+            "land_unit": "target_general",
+            "ability": "3k_main_ability_stifling_deluge",
+        }])
+        self.assertEqual(rows_by_table["db/unit_abilities_tables/data__"][0]["key"], "3k_main_ability_stifling_deluge")
+        self.assertEqual(rows_by_table["db/unit_special_abilities_tables/data__"][0]["key"], "3k_main_ability_stifling_deluge")
+
+    def test_unique_skill_direct_effect_bonus_ability_is_added_to_target_general(self) -> None:
+        tables = {
+            "character_generation_template_game_mode_details": [],
+            "retinue_slot_initial_units": [
+                {"retinue": "target_retinue", "slot_index": 0, "initial_unit_record": "target_general"},
+            ],
+            "character_skill_nodes": [
+                {
+                    "key": "node_a",
+                    "character_skill_node_set_key": "source_skillset",
+                    "character_skill_key": "3k_main_skill_special_ability_fire_rage_of_lu_bu",
+                }
+            ],
+            "character_skill_level_to_effects_junctions": [
+                {
+                    "character_skill_key": "3k_main_skill_special_ability_fire_rage_of_lu_bu",
+                    "effect_key": "3k_main_skill_rage_of_lu_bu",
+                    "effect_scope": "character_to_character_own",
+                    "level": 1,
+                }
+            ],
+            "effect_bonus_value_ids_unit_sets": [],
+            "effect_bonus_value_unit_ability_junctions": [
+                {
+                    "effect": "3k_main_skill_rage_of_lu_bu",
+                    "bonus_value_id": "enable",
+                    "unit_ability": "3k_main_ability_rage_of_lu_bu",
+                }
+            ],
+            "land_units_to_unit_abilites_junctions": [],
+            "unit_abilities": [
+                {
+                    "key": "3k_main_ability_rage_of_lu_bu",
+                    "type": "3k_main_ability_rage_of_lu_bu",
+                    "_sourceTablePath": "db/unit_abilities_tables/data__",
+                }
+            ],
+            "unit_special_abilities": [
+                {
+                    "key": "3k_main_ability_rage_of_lu_bu",
+                    "_sourceTablePath": "db/unit_special_abilities_tables/data__",
+                }
+            ],
+        }
+        table_names = {
+            "land_units_to_unit_abilites_junctions": "db/land_units_to_unit_abilites_junctions_tables/data__",
+            "unit_abilities": "db/unit_abilities_tables/data__",
+            "unit_special_abilities": "db/unit_special_abilities_tables/data__",
+        }
+        rows_by_table: dict[str, list[dict[str, object]]] = {}
+
+        delta_builder._copy_skill_source_retinue_abilities(
+            tables,
+            table_names,
+            {},
+            rows_by_table,
+            "source_skillset",
+            "target_retinue",
+        )
+
+        self.assertEqual(rows_by_table["db/land_units_to_unit_abilites_junctions_tables/data__"], [{
+            "land_unit": "target_general",
+            "ability": "3k_main_ability_rage_of_lu_bu",
+        }])
+        self.assertEqual(rows_by_table["db/unit_abilities_tables/data__"][0]["key"], "3k_main_ability_rage_of_lu_bu")
+        self.assertEqual(rows_by_table["db/unit_special_abilities_tables/data__"][0]["key"], "3k_main_ability_rage_of_lu_bu")
+
+    def test_cloned_skillset_battle_ability_is_copied_from_any_character_unit_to_target_general(self) -> None:
+        tables = {
+            "character_generation_template_game_mode_details": [],
+            "retinue_slot_initial_units": [
+                {"retinue": "target_retinue", "slot_index": 0, "initial_unit_record": "target_general"},
+                {"retinue": "target_retinue", "slot_index": 1, "initial_unit_record": "target_bodyguard"},
+            ],
+            "character_skill_nodes": [
+                {
+                    "key": "node_a",
+                    "character_skill_node_set_key": "hby_skillset_clone",
+                    "character_skill_key": "3k_main_skill_special_ability_metal_hail_of_arrows",
+                }
+            ],
+            "land_units_to_unit_abilites_junctions": [
+                {
+                    "land_unit": "3k_main_hero_metal_taishi_ci",
+                    "ability": "3k_main_ability_hail_of_arrows",
+                    "_sourceTablePath": "db/land_units_to_unit_abilites_junctions_tables/data__",
+                },
+                {
+                    "land_unit": "3k_main_unit_metal_axe_band",
+                    "ability": "3k_main_ability_hail_of_arrows",
+                    "_sourceTablePath": "db/land_units_to_unit_abilites_junctions_tables/data__",
+                },
+            ],
+            "unit_abilities": [
+                {
+                    "key": "3k_main_ability_hail_of_arrows",
+                    "type": "3k_main_ability_hail_of_arrows",
+                    "_sourceTablePath": "db/unit_abilities_tables/data__",
+                }
+            ],
+            "unit_special_abilities": [
+                {
+                    "key": "3k_main_ability_hail_of_arrows",
+                    "_sourceTablePath": "db/unit_special_abilities_tables/data__",
+                }
+            ],
+        }
+        rows_by_table: dict[str, list[dict[str, object]]] = {}
+
+        delta_builder._copy_skill_source_retinue_abilities(
+            tables,
+            {},
+            {},
+            rows_by_table,
+            "hby_skillset_clone",
+            "target_retinue",
+        )
+
+        ability_rows = rows_by_table["db/land_units_to_unit_abilites_junctions_tables/data__"]
+        self.assertEqual(ability_rows, [{
+            "land_unit": "target_general",
+            "ability": "3k_main_ability_hail_of_arrows",
+        }])
+        self.assertEqual(rows_by_table["db/unit_abilities_tables/data__"][0]["key"], "3k_main_ability_hail_of_arrows")
+
     def test_material_land_unit_clone_creates_fallback_retinue_slot(self) -> None:
         payload = {
             "tables": {
@@ -2156,6 +2653,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         details = rows_by_table["db/character_generation_template_game_mode_details_tables/_mtu_characters"]
         self.assertEqual({row["game_mode"] for row in details}, {"historical", "romance"})
         self.assertTrue(all(row["retinue"] == "hby_retinue_new" for row in details))
+        self.assertTrue(all(row["min_rank"] == 4 and row["max_rank"] == 4 for row in details))
         art = rows_by_table["db/campaign_character_arts_tables/_mtu_characters"][0]
         self.assertEqual(art["art_set_id"], "hby_art_new")
         self.assertEqual(art["portrait"], "hby_template_new/")
@@ -2811,6 +3309,88 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         initial_rows = rows_by_table["db/ceo_initial_datas_tables/data__"]
         self.assertIn(details[0]["initial_ceos"], {row["key"] for row in initial_rows})
 
+    def test_material_character_clone_ignores_title_source_initial_override(self) -> None:
+        selected_title = "3k_main_ceo_career_historical_lady_sun"
+        selected_initial = "3k_main_ceo_initial_data_character_historical_lady_sun"
+        payload = {
+            "tables": {
+                "db/character_generation_templates_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"key": "source_template", "art_set_override": "source_art", "forename": "1"}],
+                },
+                "db/character_generation_template_game_mode_details_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "character_generation_template": "source_template",
+                        "game_mode": "historical",
+                        "initial_ceos": "source_initial",
+                    }],
+                },
+                "db/ceo_initial_datas_tables/data__": {
+                    "db": {"table": {"definition": {"fields": [{"name": "key"}]}, "table_data": []}},
+                    "rows": [
+                        {"key": "source_initial"},
+                        {"key": selected_initial},
+                    ],
+                },
+                "db/campaign_character_art_sets_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"art_set_id": "source_art"}],
+                },
+                "db/campaign_character_arts_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"art_set_id": "source_art", "age": 16, "has_come_of_age": True}],
+                },
+                "db/character_generation_spawn_age_ranges_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"key": "age"}],
+                },
+                "db/names_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"id": "1"}],
+                },
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+
+        rows_by_table = {}
+        source_dbs = {}
+        _collect_character_clone_rows(
+            session,
+            [CharacterClone(
+                new_template_key="hby_template_new",
+                source_template_key="source_template",
+                detail_source_template_key="source_template",
+                new_art_set_id="hby_art_new",
+                art_set_source_id="source_art",
+                new_age_range_key=None,
+                age_range_source_key=None,
+                new_initial_ceo_key=None,
+                initial_ceo_source_key=None,
+                template_overrides={},
+                detail_overrides={
+                    "historical": {"initial_ceos": selected_initial},
+                    "romance": {"initial_ceos": selected_initial},
+                },
+                art_set_overrides={},
+                art_overrides={},
+                age_range_overrides={},
+                image_assets=[],
+                title_ceo_key=selected_title,
+            )],
+            source_dbs,
+            rows_by_table,
+            {},
+        )
+
+        details = rows_by_table["db/character_generation_template_game_mode_details_tables/_mtu_characters"]
+        self.assertEqual({row["initial_ceos"] for row in details}, {"source_initial"})
+
     def test_material_character_clone_embeds_selected_title_traits_and_keeps_equipment_for_lua(self) -> None:
         selected_title = "3k_main_ceo_career_historical_lady_sun"
         selected_initial = "3k_main_ceo_initial_data_character_historical_lady_sun"
@@ -2950,7 +3530,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         active_rows = rows_by_table["db/ceo_initial_data_active_ceos_tables/data__"]
         self.assertEqual(
             {row["active_ceo"] for row in active_rows},
-            {"new_weapon", "old_armour", "new_trait"},
+            {"new_weapon", "old_armour", "old_title", "new_trait"},
         )
 
     def test_material_character_clone_derives_named_initial_ceo_from_base_template_when_source_is_generic(self) -> None:

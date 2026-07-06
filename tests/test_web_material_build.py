@@ -132,6 +132,103 @@ class WebMaterialBuildTest(unittest.TestCase):
         self.assertEqual("정리된 칭호", catalog[0]["label"])
         self.assertEqual("정리된 효과", catalog[0]["description"])
 
+    def test_common_generic_titles_are_canonicalized_by_element_and_role(self) -> None:
+        characters = [
+            {
+                "key": "3k_main_template_generic_metal_agent_normal_m_hero",
+                "displayName": "generic agent normal m",
+                "titleInfo": {
+                    "ceoNodeKey": "3k_main_ceo_node_career_historical_3k_main_template_generic_metal_agent_normal_m_hero_01",
+                    "initialCeoKey": "3k_main_ceo_initial_data_character_generic_m_metal_agent",
+                    "label": "금 첩보원",
+                },
+                "templateRow": {"_sourceTablePath": "db/character_generation_templates_tables/data__"},
+            },
+            {
+                "key": "3k_mtu_template_generic_metal_agent_normal_f_hero",
+                "displayName": "generic agent normal f",
+                "titleInfo": {
+                    "ceoNodeKey": "3k_mtu_ceo_node_career_historical_3k_korea_template_generic_metal_agent_normal_f_hero_01",
+                    "initialCeoKey": "3k_main_ceo_initial_data_character_generic_f_metal_agent",
+                    "label": "금 첩보원",
+                },
+                "templateRow": {"_sourceTablePath": "db/character_generation_templates_tables/_mtu_characters"},
+            },
+        ]
+
+        with patch.object(web, "_load_title_effect_catalog", return_value=({}, [])):
+            catalog = web._build_title_catalog(characters)
+
+        self.assertEqual(1, len(catalog))
+        self.assertEqual("common_title:metal:agent", catalog[0]["canonicalTitleGroup"])
+        self.assertEqual("사무원", catalog[0]["label"])
+        self.assertEqual("기본 칭호", catalog[0]["ownerName"])
+        self.assertIn("전문성 +15", catalog[0]["effectSummary"])
+        self.assertEqual("common", catalog[0]["titleSourceKind"])
+
+    def test_common_generic_title_mapping_does_not_override_unique_titles_with_generic_initials(self) -> None:
+        title_key = "3k_main_ceo_node_career_historical_guan_yu_01"
+        characters = [
+            {
+                "key": "3k_main_template_historical_guan_yu_hero_wood",
+                "displayName": "관우",
+                "titleInfo": {
+                    "ceoNodeKey": title_key,
+                    "initialCeoKey": "3k_main_ceo_initial_data_character_generic_m_wood_general",
+                    "label": "무신",
+                },
+                "templateRow": {"_sourceTablePath": "db/character_generation_templates_tables/data__"},
+            },
+        ]
+
+        with patch.object(web, "_load_title_effect_catalog", return_value=({}, [])):
+            catalog = web._build_title_catalog(characters)
+
+        self.assertEqual(1, len(catalog))
+        self.assertEqual(title_key, catalog[0]["key"])
+        self.assertEqual("무신", catalog[0]["label"])
+        self.assertFalse(catalog[0].get("canonicalTitleGroup"))
+
+    def test_title_info_rejects_mixed_name_title_loc_and_uses_frontend_title(self) -> None:
+        loc_text = {
+            "ceo_nodes_title_3k_main_ceo_node_career_historical_lu_zheng_01": "여 zheng 여 zheng 01",
+            "frontend_faction_leader_unique_characters_localised_description_3k_mtu_template_historical_lady_lu_zheng_hero_water_190": (
+                "[[b]]육정[[/b]]\\n태원의 정찰병\\n\\n장군 유형: {{tr:3k_general_type_water}}"
+            ),
+        }
+
+        info = web._title_info_for_character(
+            {"key": "3k_mtu_template_historical_lady_lu_zheng_hero_water"},
+            [
+                {
+                    "gameMode": "historical",
+                    "initialCeos": "3k_mtu_ceo_initial_data_character_historical_lady_lu_zheng",
+                }
+            ],
+            loc_text,
+        )
+
+        self.assertEqual("태원의 정찰병", info["label"])
+
+    def test_title_catalog_skips_generated_template_pool_labels(self) -> None:
+        characters = [
+            {
+                "key": "3k_xianbei_template_generic_castellan_f_01",
+                "displayName": "generic castellan f 01",
+                "titleInfo": {
+                    "ceoNodeKey": "3k_mtu_ceo_node_career_historical_3k_xianbei_template_generic_castellan_f_01_01",
+                    "label": "xianbei 기본 castellan 여성 01 xianbei 기본 castellan 여성 01 01",
+                },
+                "templateRow": {"_sourceTablePath": "db/character_generation_templates_tables/generic_nomads"},
+                "details": [],
+            },
+        ]
+
+        with patch.object(web, "_load_title_effect_catalog", return_value=({}, [])):
+            catalog = web._build_title_catalog(characters)
+
+        self.assertEqual([], catalog)
+
     def test_title_info_prefers_korean_loc_over_earlier_generic_loc(self) -> None:
         loc_text = {
             "ceo_nodes_title_3k_mtu_ceo_node_career_historical_generic_m_metal_general_01": "generic m metal general",
@@ -200,6 +297,35 @@ class WebMaterialBuildTest(unittest.TestCase):
         self.assertEqual("background", by_key["bg_3k_main_character_background_commander_officer"]["titleSourceKind"])
         self.assertTrue(any(item.get("key") == "bg_mtu_character_background_xun_yu" for item in entries))
 
+    def test_mtu_background_title_priority_wins_duplicate_labels(self) -> None:
+        web._load_title_effect_catalog.cache_clear()
+        effects_by_title, _entries = web._load_title_effect_catalog()
+
+        label_lookup = effects_by_title[web._title_effect_lookup_key("백마장군")]
+        self.assertEqual("방덕", label_lookup["owner"])
+        self.assertEqual("bg_3k_main_character_background_pang_de", label_lookup["key"])
+
+        label_only = web._title_effect_for_key_or_label(effects_by_title, "백마장군")
+        self.assertEqual({}, label_only)
+
+        pang_de = web._title_effect_for_key_or_label(
+            effects_by_title,
+            "백마장군",
+            "bg_3k_main_character_background_pang_de",
+        )
+        self.assertEqual("방덕", pang_de["owner"])
+
+    def test_background_title_aliases_are_lookup_keys(self) -> None:
+        web._load_title_effect_catalog.cache_clear()
+        effects_by_title, _entries = web._load_title_effect_catalog()
+
+        primary = effects_by_title[web._title_effect_lookup_key("혈기넘치는 군관")]
+        alias = effects_by_title[web._title_effect_lookup_key("애꾸눈의 망명자")]
+
+        self.assertEqual("하후돈", primary["owner"])
+        self.assertEqual(primary["key"], alias["key"])
+        self.assertEqual("혈기넘치는 군관", alias["title"])
+
     def test_background_title_elements_follow_stat_bonuses(self) -> None:
         web._load_title_effect_catalog.cache_clear()
         _, entries = web._load_title_effect_catalog()
@@ -266,6 +392,63 @@ class WebMaterialBuildTest(unittest.TestCase):
             "fire",
             summary["skillIndex"]["3k_mtu_skill_special_active_lu_lingqi_fury"]["element"],
         )
+
+    def test_skill_effect_summary_strips_game_ui_markup(self) -> None:
+        summary = web._effect_summary([
+            {
+                "effectKey": "test_effect_instinct",
+                "name": "[[b]][[b]]본능 [[/b]]%+n[[/b]]",
+                "value": 4,
+            },
+            {
+                "effectKey": "test_effect_morale",
+                "name": "부대 사기 [[b]]%+n[[/b]]",
+                "value": 2,
+            },
+        ])
+
+        self.assertEqual(summary, "본능 +4 · 부대 사기 +2")
+        self.assertNotIn("[[", summary)
+        self.assertNotIn("%+n", summary)
+
+    def test_skill_tree_effect_summary_strips_loc_markup(self) -> None:
+        summary = web._summarize_skill_trees(
+            {
+                "character_skill_node_sets": [{"key": "test_skillset"}],
+                "character_skill_nodes": [
+                    {
+                        "key": "test_node",
+                        "character_skill_node_set_key": "test_skillset",
+                        "character_skill_key": "test_skill",
+                        "indent": 1,
+                        "tier": 1,
+                    }
+                ],
+                "character_skill_node_links": [],
+                "character_skill_level_to_effects_junctions": [
+                    {
+                        "character_skill_key": "test_skill",
+                        "effect_key": "test_effect_instinct",
+                        "effect_scope": "character_to_character_own",
+                        "level": 1,
+                        "value": 4,
+                    }
+                ],
+                "effects": [{"key": "test_effect_instinct"}],
+            },
+            {"effects_description_test_effect_instinct": "[[b]][[b]]본능 [[/b]]%+n[[/b]]"},
+            [
+                {
+                    "key": "test_character",
+                    "label": "테스트",
+                    "details": [{"gameMode": "romance", "skillSet": "test_skillset"}],
+                }
+            ],
+        )
+
+        node = summary["romance"][0]["nodes"][0]
+        self.assertEqual(node["effectSummary"], "본능 +4")
+        self.assertEqual(summary["skillIndex"]["test_skill"]["effectSummary"], "본능 +4")
 
     def test_catalogs_use_database_base_and_mtu_override(self) -> None:
         tables = {
@@ -406,6 +589,27 @@ class WebMaterialBuildTest(unittest.TestCase):
         tree = next(item for item in skill_trees["romance"] if item["key"] == "mtu_skillset_test")
         self.assertEqual(tree["nodes"][0]["skillKey"], "3k_mtu_skill_wood_test")
         self.assertIn("3k_mtu_skill_wood_test", skill_trees["skillIndex"])
+
+    def test_summary_skips_art_sets_without_art_rows(self) -> None:
+        tables = {
+            "character_generation_templates": [],
+            "character_generation_template_game_mode_details": [],
+            "campaign_character_art_sets": [
+                {"art_set_id": "orphan_art_set", "is_male": True}
+            ],
+            "campaign_character_arts": [],
+            "character_generation_spawn_age_ranges": [],
+            "ceo_initial_datas": [],
+            "character_skill_node_sets": [],
+            "character_skill_nodes": [],
+            "character_skill_node_links": [],
+            "character_skill_level_to_effects_junctions": [],
+        }
+
+        summary = web.summarize_character_tables(tables, {}, [])
+
+        self.assertNotIn("orphan_art_set", {item["key"] for item in summary["artSets"]})
+        self.assertNotIn("orphan_art_set", {item["key"] for item in summary["modelSets"]})
 
     def test_romance_skill_tree_prefers_romance_nodes_at_same_position(self) -> None:
         tables = {
@@ -870,6 +1074,44 @@ class WebMaterialBuildTest(unittest.TestCase):
         self.assertIn("ui/characters/hby_test/stills/unitcards/hby_test.png", asset_files)
         self.assertEqual(report["addedAssets"], 1)
 
+    def test_internal_asset_manifest_skips_unavailable_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extracted_root = root / "assets"
+            source_id = "source_a"
+            available_path = "ui/characters/available/stills/unitcards/available.png"
+            missing_path = "ui/characters/missing/stills/unitcards/missing.png"
+            extracted = extracted_root / source_id / available_path
+            extracted.parent.mkdir(parents=True)
+            extracted.write_bytes(b"png")
+            manifest_path = root / "asset_manifest.json"
+            manifest_path.write_text(json.dumps({
+                "assets": {
+                    available_path: {
+                        "sourceId": source_id,
+                        "sourcePath": "",
+                        "extractedPath": str(extracted),
+                    },
+                    missing_path: {
+                        "sourceId": "missing_source",
+                        "sourcePath": "",
+                        "extractedPath": str(root / "missing.png"),
+                    },
+                }
+            }), encoding="utf-8")
+            asset_files: list[str] = []
+            asset_sources: dict[str, str] = {}
+
+            with (
+                patch.object(web, "INTERNAL_ASSET_MANIFEST", manifest_path),
+                patch.object(web, "EXTRACTED_ASSET_ROOT", extracted_root),
+            ):
+                added = web._merge_internal_asset_manifest(asset_files, asset_sources, set())
+
+        self.assertEqual(added, 1)
+        self.assertIn(available_path, asset_files)
+        self.assertNotIn(missing_path, asset_files)
+
     def test_core_reference_still_includes_default_game_packs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -972,8 +1214,8 @@ class WebMaterialBuildTest(unittest.TestCase):
                 patch.object(web, "read_character_data", return_value=character_data),
                 patch.object(web.PACK_CACHE, "put_open_payload", return_value=None),
                 patch.object(web, "_write_reference_snapshot", return_value=None),
-                patch.object(web, "korea_character_metadata", return_value={"isKoreaAddon": True}),
-                patch.object(web, "korea_display_name_hint", return_value="고계수"),
+                patch.object(web, "korea_character_metadata", return_value={"isKoreaAddon": True, "koreaDisplayNameHint": "고계수"}),
+                patch.object(web, "korea_display_name_hint", return_value="잘못된힌트"),
             ):
                 result = web.open_pack_payload({
                     "inputPath": str(pack_path),
@@ -986,6 +1228,93 @@ class WebMaterialBuildTest(unittest.TestCase):
             self.assertTrue(character["isKoreaAddon"])
             self.assertEqual(character["displayName"], "고계수")
             self.assertEqual(character["label"], "고계수")
+
+    def test_korea_name_hint_is_not_applied_without_metadata(self) -> None:
+        character_data = {
+            "pack": {
+                "characters": [
+                    {
+                        "key": "3k_main_template_historical_qiulijiu_hero_fire",
+                        "displayName": "구리거",
+                        "label": "구리거",
+                        "isKoreaAddon": True,
+                        "koreaFaction": "",
+                        "koreaDisplayNameHint": "고계수",
+                    }
+                ]
+            }
+        }
+
+        with (
+            patch.object(web, "_merge_internal_material_character_summary", return_value=None),
+            patch.object(web, "_merge_auxiliary_catalog_characters", return_value=None),
+            patch.object(web, "korea_character_metadata", return_value=None),
+            patch.object(web, "korea_display_name_hint", return_value="고계수"),
+        ):
+            web._enrich_korea_addon_character_data(character_data)
+
+        character = character_data["pack"]["characters"][0]
+        self.assertEqual(character["displayName"], "구리거")
+        self.assertEqual(character["label"], "구리거")
+        self.assertNotIn("isKoreaAddon", character)
+        self.assertNotIn("koreaDisplayNameHint", character)
+
+    def test_stale_korea_material_name_falls_back_to_template_token(self) -> None:
+        character = web._sanitize_stale_korea_character({
+            "key": "3k_main_template_historical_qiulijiu_hero_fire",
+            "displayName": "고계수",
+            "label": "고계수",
+            "isKoreaAddon": True,
+            "koreaDisplayNameHint": "고계수",
+            "templateRow": {"key": "3k_main_template_historical_qiulijiu_hero_fire"},
+            "titleInfo": {"label": "qiulijiu"},
+        })
+
+        self.assertEqual(character["displayName"], "qiulijiu")
+        self.assertEqual(character["label"], "qiulijiu")
+        self.assertNotIn("isKoreaAddon", character)
+
+    def test_stale_korea_material_name_uses_known_character_name(self) -> None:
+        character = web._sanitize_stale_korea_character({
+            "key": "3k_mtu_template_historical_lady_zou_yuan_hero_water",
+            "displayName": "고계수",
+            "label": "고계수",
+            "isKoreaAddon": True,
+            "koreaDisplayNameHint": "고계수",
+            "templateRow": {"key": "3k_mtu_template_historical_lady_zou_yuan_hero_water"},
+        })
+
+        self.assertEqual(character["displayName"], "추원")
+        self.assertEqual(character["label"], "추원")
+        self.assertNotIn("isKoreaAddon", character)
+
+    def test_image_only_bad_hint_name_uses_art_set_label(self) -> None:
+        summary = {
+            "characters": [
+                {
+                    "key": "image_only_hby_generated_character_sets_hby_hero_special_go_yeon_hwa",
+                    "displayName": "잘못된힌트",
+                    "label": "잘못된힌트",
+                    "forename": "잘못된힌트",
+                    "artSet": "image_only_hby_generated_character_sets_hby_hero_special_go_yeon_hwa",
+                    "portrait": "hby_hero_special_go_yeon_hwa",
+                    "virtualImageOnly": True,
+                }
+            ],
+            "artSets": [
+                {
+                    "key": "image_only_hby_generated_character_sets_hby_hero_special_go_yeon_hwa",
+                    "label": "고연화",
+                }
+            ],
+        }
+
+        web._repair_image_only_character_labels(summary)
+
+        character = summary["characters"][0]
+        self.assertEqual(character["displayName"], "고연화")
+        self.assertEqual(character["label"], "고연화")
+        self.assertEqual(character["forename"], "고연화")
 
     def test_build_payload_uses_internal_materials_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

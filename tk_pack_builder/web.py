@@ -36,8 +36,8 @@ WEB_STATIC_SUFFIXES = {".css", ".html", ".js"}
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
 _BUILD_LOCK = threading.Lock()
 REFERENCE_SNAPSHOT = ROOT / "work" / "reference_snapshot.json"
-REFERENCE_SNAPSHOT_VERSION = 20
-OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 15
+REFERENCE_SNAPSHOT_VERSION = 21
+OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 21
 INTERNAL_CHARACTER_CATALOG = ROOT / "work" / "internal_dbs" / "character_catalog.json"
 INTERNAL_MATERIALS_PATH = ROOT / "work" / "internal_materials" / "materials.v015.json"
 INTERNAL_ASSET_MANIFEST = ROOT / "work" / "internal_materials" / "asset_manifest.v015.json"
@@ -50,6 +50,143 @@ SKILL_EFFECT_CATALOG = ROOT / "work" / "internal_materials" / "skill_effects.ko.
 EXTRACTED_ASSET_ROOT = ROOT / "work" / "assets"
 IMAGE_ONLY_ASSET_PREFIX = "__image_only_reference__"
 _ROMANIZED_NAME_LOOKUP_CACHE: dict[tuple[int, int], dict[str, str]] = {}
+
+COMMON_TITLE_ROLE_ALIASES = {
+    "clerk": "agent",
+    "merchant": "envoy",
+}
+
+COMMON_TITLE_ROLE_ORDER = {
+    "agent": 1,
+    "envoy": 2,
+    "general": 3,
+    "governor": 4,
+    "minister": 5,
+    "villager": 6,
+}
+
+COMMON_TITLE_CATALOG: dict[tuple[str, str], dict[str, Any]] = {
+    ("metal", "agent"): {
+        "label": "사무원",
+        "effects": ["전문성 +15", "건설 시간 -2턴(세력 전체)"],
+    },
+    ("metal", "envoy"): {
+        "label": "장인",
+        "effects": ["전문성 +15, 결의 +5", "산업 수입 +15%(해당 군현)"],
+    },
+    ("metal", "general"): {
+        "label": "도공",
+        "effects": ["전문성 +15", "산업 수입 +10%(해당 군현)"],
+    },
+    ("metal", "governor"): {
+        "label": "건설자",
+        "effects": ["전문성 +15", "비축 물자 +5, 건설 비용 -10%(해당 군현)"],
+    },
+    ("metal", "minister"): {
+        "label": "양조장 주인",
+        "effects": ["전문성 +15, 본능 +5", "상업 수입 +10%(해당 군현)"],
+    },
+    ("metal", "villager"): {
+        "label": "옥 조각가",
+        "effects": ["전문성 +15", "상업 및 산업 수입 +5%(해당 군현)"],
+    },
+    ("wood", "agent"): {
+        "label": "소작농",
+        "effects": ["결의 +15", "농업 수입 +15%(해당 군현)"],
+    },
+    ("wood", "envoy"): {
+        "label": "벌목꾼",
+        "effects": ["결의 +15, 전문성 +5", "농업 수입 +10%(해당 군현)"],
+    },
+    ("wood", "general"): {
+        "label": "어부",
+        "effects": ["결의 +15", "식량 생산 +25%(해당 군현)"],
+    },
+    ("wood", "governor"): {
+        "label": "사냥꾼",
+        "effects": ["결의 +15, 본능 +5", "군사 보급품 +5(인접 군현)"],
+    },
+    ("wood", "minister"): {
+        "label": "광부",
+        "effects": ["결의 +15", "산업 수입 +10%(해당 군현)"],
+    },
+    ("wood", "villager"): {
+        "label": "석공",
+        "effects": ["결의 +15", "건설 비용 -10%(해당 군현)"],
+    },
+    ("water", "agent"): {
+        "label": "학자",
+        "effects": ["지략 +15", "캐릭터 경험치 +10%(세력 전체)"],
+    },
+    ("water", "envoy"): {
+        "label": "서기",
+        "effects": ["지략 +15, 권위 +5", "행정 장관(태수) 제한 +1(세력 전체)"],
+    },
+    ("water", "general"): {
+        "label": "스승",
+        "effects": ["지략 +15", "충원 +2%(조정 임명 시 세력 전체)"],
+    },
+    ("water", "governor"): {
+        "label": "철학자",
+        "effects": ["지략 +15", "연구 속도 +10%(세력 전체)"],
+    },
+    ("water", "minister"): {
+        "label": "천문학자",
+        "effects": ["지략 +15, 결의 +5", "군사 보급품 +5(세력 전체)"],
+    },
+    ("water", "villager"): {
+        "label": "점술가",
+        "effects": ["지략 +15", "만족도 +4(세력 전체)"],
+    },
+    ("fire", "agent"): {
+        "label": "약탈자",
+        "effects": ["본능 +15", "전후 포획 전리품 +10%(지휘 군대)"],
+    },
+    ("fire", "envoy"): {
+        "label": "무법자",
+        "effects": ["본능 +15, 결의 +5", "적 군대 약탈 수입 +15%(지휘 군대)"],
+    },
+    ("fire", "general"): {
+        "label": "도적",
+        "effects": ["본능 +15", "적 영토에서의 군사 보급품 +10(지휘 군대)"],
+    },
+    ("fire", "governor"): {
+        "label": "용병",
+        "effects": ["본능 +15, 권위 +5", "적 격퇴 수입 +15%(지휘 군대)"],
+    },
+    ("fire", "minister"): {
+        "label": "밀수꾼",
+        "effects": ["본능 +15", "상업 수입 +10%(해당 군현)"],
+    },
+    ("fire", "villager"): {
+        "label": "해적",
+        "effects": ["본능 +15, 전문성 +5", "습격 수입 +15%(지휘 군대)"],
+    },
+    ("earth", "agent"): {
+        "label": "소지주",
+        "effects": ["권위 +15, 결의 +5", "농업 수입 +10%(해당 군현)"],
+    },
+    ("earth", "envoy"): {
+        "label": "상인",
+        "effects": ["권위 +15", "상업 수입 +15%(해당 군현)"],
+    },
+    ("earth", "general"): {
+        "label": "귀족",
+        "effects": ["권위 +15", "만족도 +4(세력 전체)"],
+    },
+    ("earth", "governor"): {
+        "label": "세금 징수원",
+        "effects": ["권위 +15", "세금 징수령 효과 +20%(해당 군현)"],
+    },
+    ("earth", "minister"): {
+        "label": "수송관",
+        "effects": ["권위 +15, 지략 +5", "군대 이동 거리 +5%(지휘 군대)"],
+    },
+    ("earth", "villager"): {
+        "label": "가신",
+        "effects": ["권위 +15", "수행원(부대) 모집 비용 -10%(지휘 군대)"],
+    },
+}
 DEFAULT_GAME_DATA_DIRS = [
     Path(os.environ["TK_PACK_EDITOR_GAME_DATA_DIR"])
     for _ in [0]
@@ -81,6 +218,91 @@ SKILL_TABLE_ALIASES = {
     "effects": [
         "effects",
         "db/effects_tables/_mtu_characters_skills_effects",
+    ],
+    "effect_bonus_value_ids_unit_sets": [
+        "effect_bonus_value_ids_unit_sets",
+        "db/effect_bonus_value_ids_unit_sets_tables/_mtu_characters_effects",
+        "db/effect_bonus_value_ids_unit_sets_tables/data__",
+    ],
+    "effect_bonus_value_unit_ability_junctions": [
+        "effect_bonus_value_unit_ability_junctions",
+        "db/effect_bonus_value_unit_ability_junctions_tables/_mtu_characters_skills_effects",
+        "db/effect_bonus_value_unit_ability_junctions_tables/data__",
+    ],
+    "land_units_to_unit_abilites_junctions": [
+        "land_units_to_unit_abilites_junctions",
+        "db/land_units_to_unit_abilites_junctions_tables/_mtu_characters_skills_abilities_land_units",
+        "db/land_units_to_unit_abilites_junctions_tables/data__",
+    ],
+    "unit_abilities": [
+        "unit_abilities",
+        "db/unit_abilities_tables/_mtu_characters_skills_abilities",
+        "db/unit_abilities_tables/data__",
+    ],
+    "unit_special_abilities": [
+        "unit_special_abilities",
+        "db/unit_special_abilities_tables/_mtu_characters_skills_abilities",
+        "db/unit_special_abilities_tables/data__",
+    ],
+    "special_ability_to_special_ability_phase_junctions": [
+        "special_ability_to_special_ability_phase_junctions",
+        "db/special_ability_to_special_ability_phase_junctions_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_to_special_ability_phase_junctions_tables/data__",
+    ],
+    "special_ability_phases": [
+        "special_ability_phases",
+        "db/special_ability_phases_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_phases_tables/data__",
+    ],
+    "special_ability_phase_stat_effects": [
+        "special_ability_phase_stat_effects",
+        "db/special_ability_phase_stat_effects_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_phase_stat_effects_tables/data__",
+    ],
+    "special_ability_phase_attribute_effects": [
+        "special_ability_phase_attribute_effects",
+        "db/special_ability_phase_attribute_effects_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_phase_attribute_effects_tables/data__",
+    ],
+    "special_ability_phase_displays": [
+        "special_ability_phase_displays",
+        "db/special_ability_phase_displays_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_phase_displays_tables/data__",
+    ],
+    "special_ability_to_auto_deactivate_flags": [
+        "special_ability_to_auto_deactivate_flags",
+        "db/special_ability_to_auto_deactivate_flags_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_to_auto_deactivate_flags_tables/data__",
+    ],
+    "special_ability_to_invalid_target_flags": [
+        "special_ability_to_invalid_target_flags",
+        "db/special_ability_to_invalid_target_flags_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_to_invalid_target_flags_tables/data__",
+    ],
+    "special_ability_to_invalid_usage_flags": [
+        "special_ability_to_invalid_usage_flags",
+        "db/special_ability_to_invalid_usage_flags_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_to_invalid_usage_flags_tables/data__",
+    ],
+    "projectile_bombardments": [
+        "projectile_bombardments",
+        "db/projectile_bombardments_tables/_mtu_characters_skills_abilities",
+        "db/projectile_bombardments_tables/data__",
+    ],
+    "projectile_displays": [
+        "projectile_displays",
+        "db/projectile_displays_tables/_mtu_characters_skills_abilities",
+        "db/projectile_displays_tables/data__",
+    ],
+    "projectile_impacts": [
+        "projectile_impacts",
+        "db/projectile_impacts_tables/_mtu_characters_skills_abilities",
+        "db/projectile_impacts_tables/data__",
+    ],
+    "projectiles": [
+        "projectiles",
+        "db/projectiles_tables/_mtu_characters_skills_abilities",
+        "db/projectiles_tables/data__",
     ],
 }
 
@@ -1154,20 +1376,40 @@ def _apply_korea_addon_metadata_to_characters(character_data: dict[str, Any]) ->
                 continue
             key = str(character.get("key", ""))
             metadata = korea_character_metadata(key) or {}
-            display_name_hint = str(metadata.get("koreaDisplayNameHint") or korea_display_name_hint(key) or "")
+            if not metadata:
+                _clear_stale_korea_metadata(character)
+                continue
+            display_name_hint = str(metadata.get("koreaDisplayNameHint") or "")
             if display_name_hint:
                 character["displayName"] = display_name_hint
                 character["label"] = display_name_hint
-            if not metadata:
-                continue
             character.update(metadata)
             if display_name_hint:
                 character["koreaDisplayNameHint"] = display_name_hint
 
 
+KOREA_METADATA_FIELDS = {
+    "isKoreaAddon",
+    "koreaFactionKey",
+    "koreaFaction",
+    "koreaFactionLabel",
+    "koreaRole",
+    "koreaSubtype",
+    "koreaSourceScript",
+    "koreaDisplayNameHint",
+    "koreaRosterHidden",
+    "koreaHiddenReason",
+}
+
+
+def _clear_stale_korea_metadata(character: dict[str, Any]) -> None:
+    for field in KOREA_METADATA_FIELDS:
+        character.pop(field, None)
+
+
 def _character_enrichment_token() -> str:
     payload = {
-        "version": 6,
+        "version": 12,
         "internalMaterialToken": _internal_material_cache_token(),
     }
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
@@ -1193,6 +1435,7 @@ def _merge_internal_material_character_summary(character_data: dict[str, Any]) -
     for character in internal_summary.get("characters", []):
         if not isinstance(character, dict):
             continue
+        character = _sanitize_stale_korea_character(character)
         key = str(character.get("key", "")).lower()
         if not key:
             continue
@@ -1203,9 +1446,11 @@ def _merge_internal_material_character_summary(character_data: dict[str, Any]) -
             target_by_key[key] = character
     target_summary["characters"] = _dedupe_characters_by_key(target_characters)
     _merge_summary_supporting_rows(target_summary, internal_summary)
+    _repair_image_only_character_labels(target_summary)
 
 
 def _merge_internal_material_character(target: dict[str, Any], incoming: dict[str, Any]) -> None:
+    incoming = _sanitize_stale_korea_character(incoming)
     for field, value in incoming.items():
         if field == "combatStats":
             target[field] = _merge_combat_stats_preserving_target(
@@ -1215,6 +1460,9 @@ def _merge_internal_material_character(target: dict[str, Any], incoming: dict[st
             continue
         if field in {"details", "templateRow"} and _has_useful_value(target.get(field)):
             continue
+        if field in {"displayName", "label", "forename"} and _is_bad_display_hint(value):
+            if _has_useful_value(target.get(field)):
+                continue
         if _has_useful_value(value) or not _has_useful_value(target.get(field)):
             target[field] = value
 
@@ -1232,6 +1480,116 @@ def _merge_combat_stats_preserving_target(
 
 def _has_useful_value(value: Any) -> bool:
     return value not in (None, "", [], {})
+
+
+def _sanitize_stale_korea_character(character: dict[str, Any]) -> dict[str, Any]:
+    if not _has_stale_korea_metadata(character):
+        return character
+    sanitized = dict(character)
+    _clear_stale_korea_metadata(sanitized)
+    fallback_name = _fallback_display_name_for_stale_korea_character(sanitized)
+    if fallback_name:
+        sanitized["displayName"] = fallback_name
+        sanitized["label"] = fallback_name
+    else:
+        sanitized.pop("displayName", None)
+        sanitized.pop("label", None)
+    return sanitized
+
+
+def _has_stale_korea_metadata(character: dict[str, Any]) -> bool:
+    key = str((character.get("templateRow") or {}).get("key") or character.get("key") or "")
+    if korea_character_metadata(key):
+        return False
+    return any(field in character for field in KOREA_METADATA_FIELDS)
+
+
+def _fallback_display_name_for_stale_korea_character(character: dict[str, Any]) -> str:
+    key = str((character.get("templateRow") or {}).get("key") or character.get("key") or "")
+    korean_name = korean_character_name(key)
+    if korean_name:
+        return korean_name
+    token = _character_token_from_template(key)
+    if token:
+        return token.replace("_", " ")
+    title_label = str((character.get("titleInfo") or {}).get("label") or "").strip()
+    if title_label:
+        return title_label
+    return _friendly_character_label(key)
+
+
+BAD_DISPLAY_HINTS = {
+    "잘못된힌트",
+    "잘못된 힌트",
+    "wronghint",
+    "wrong hint",
+    "badhint",
+    "bad hint",
+    "invalidhint",
+    "invalid hint",
+}
+
+
+def _is_bad_display_hint(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    normalized = re.sub(r"[\s_\-]+", "", text.casefold())
+    return normalized in {
+        re.sub(r"[\s_\-]+", "", hint.casefold())
+        for hint in BAD_DISPLAY_HINTS
+    }
+
+
+def _repair_image_only_character_labels(summary: dict[str, Any]) -> None:
+    characters = summary.get("characters", [])
+    art_sets = summary.get("artSets", [])
+    if not isinstance(characters, list) or not isinstance(art_sets, list):
+        return
+    art_labels = {
+        str(art_set.get("key") or "").lower(): str(art_set.get("label") or "").strip()
+        for art_set in art_sets
+        if isinstance(art_set, dict) and art_set.get("key")
+    }
+    for character in characters:
+        if not isinstance(character, dict):
+            continue
+        if not (character.get("virtualImageOnly") or character.get("imageOnly")):
+            continue
+        current = str(character.get("displayName") or character.get("label") or "").strip()
+        if current and not _is_bad_display_hint(current):
+            continue
+        art_key = str(character.get("artSet") or character.get("key") or "").lower()
+        replacement = art_labels.get(art_key, "")
+        if not replacement or _is_bad_display_hint(replacement):
+            replacement = _image_only_character_label_fallback(character)
+        if not replacement or _is_bad_display_hint(replacement):
+            continue
+        character["displayName"] = replacement
+        character["label"] = replacement
+        if _is_bad_display_hint(character.get("forename")) or not character.get("forename"):
+            character["forename"] = replacement
+
+
+def _image_only_character_label_fallback(character: dict[str, Any]) -> str:
+    for field in ("portrait", "card"):
+        value = str(character.get(field) or "").strip()
+        if value:
+            return _friendly_image_character_label(value)
+    for field in ("portraitImagePath", "cardImagePath"):
+        value = str(character.get(field) or "").replace("\\", "/").strip("/")
+        if not value:
+            continue
+        parts = [part for part in value.split("/") if part]
+        if "characters" in parts:
+            index = parts.index("characters")
+            if index + 1 < len(parts):
+                return _friendly_image_character_label(parts[index + 1])
+        stem = Path(value).stem
+        if stem:
+            return _friendly_image_character_label(stem)
+    key = str(character.get("artSet") or character.get("key") or "").strip()
+    return _friendly_character_label(key)
 
 
 def _load_internal_material_summary() -> dict[str, Any]:
@@ -1297,7 +1655,7 @@ def _internal_material_cache_token() -> dict[str, Any]:
     if skill_catalog_path is not None:
         paths.append(skill_catalog_path)
     return {
-        "version": 16,
+        "version": 25,
         "localAssets": _local_asset_cache_token(),
         "sources": {
             str(path): _file_cache_fingerprint(path)
@@ -1318,10 +1676,13 @@ def _read_internal_material_summary_cache() -> dict[str, Any] | None:
     if payload.get("cache") != _internal_material_cache_token():
         return None
     summary = payload.get("summary")
-    return summary if isinstance(summary, dict) else None
+    if not isinstance(summary, dict):
+        return None
+    return _sanitize_summary_stale_korea_metadata(summary)
 
 
 def _write_internal_material_summary_cache(summary: dict[str, Any]) -> None:
+    summary = _sanitize_summary_stale_korea_metadata(summary)
     try:
         INTERNAL_MATERIAL_SUMMARY.parent.mkdir(parents=True, exist_ok=True)
         with INTERNAL_MATERIAL_SUMMARY.open("w", encoding="utf-8") as handle:
@@ -1336,6 +1697,23 @@ def _write_internal_material_summary_cache(summary: dict[str, Any]) -> None:
             )
     except OSError:
         return
+
+
+def _sanitize_summary_stale_korea_metadata(summary: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(summary, dict):
+        return summary
+    characters = summary.get("characters")
+    if not isinstance(characters, list):
+        return summary
+    cleaned = [
+        _sanitize_stale_korea_character(character) if isinstance(character, dict) else character
+        for character in characters
+    ]
+    if cleaned == characters:
+        return summary
+    sanitized = dict(summary)
+    sanitized["characters"] = cleaned
+    return sanitized
 
 
 def _iter_character_summaries(character_data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1629,6 +2007,141 @@ def _title_catalog_score(row: dict[str, Any]) -> tuple[int, int, int, int]:
     )
 
 
+def _normalize_common_title_role(role: str) -> str:
+    normalized = str(role or "").strip().lower()
+    return COMMON_TITLE_ROLE_ALIASES.get(normalized, normalized)
+
+
+def _common_title_match_from_text(value: Any) -> tuple[str, str] | None:
+    text = str(value or "").lower()
+    if not text or "legendary" in text or "generic_bandit" in text or "nanman" in text:
+        return None
+    role_pattern = r"(agent|clerk|envoy|general|governor|minister|merchant|villager)"
+    element_pattern = r"(metal|wood|water|fire|earth)"
+    patterns = (
+        rf"generic_[mf]_{element_pattern}_{role_pattern}(?:$|[^a-z0-9])",
+        rf"template_generic_{element_pattern}_{role_pattern}_normal_[mf]_hero",
+        rf"korea_template_generic_{element_pattern}_{role_pattern}_normal_[mf]_hero",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        element = match.group(1)
+        role = _normalize_common_title_role(match.group(2))
+        if (element, role) in COMMON_TITLE_CATALOG:
+            return element, role
+    return None
+
+
+def _common_title_info_for_values(*values: Any) -> dict[str, Any]:
+    for value in values:
+        match = _common_title_match_from_text(value)
+        if not match:
+            continue
+        element, role = match
+        info = COMMON_TITLE_CATALOG.get((element, role))
+        if not info:
+            continue
+        effects = [str(item) for item in info.get("effects") or [] if str(item)]
+        return {
+            "canonicalTitleGroup": f"common_title:{element}:{role}",
+            "title": info.get("label") or "",
+            "label": info.get("label") or "",
+            "effects": effects,
+            "effectSummary": " / ".join(effects),
+            "effectTitle": info.get("label") or "",
+            "element": element,
+            "elements": [element],
+            "commonTitleRole": role,
+            "commonTitleRoleOrder": COMMON_TITLE_ROLE_ORDER.get(role, 0),
+            "titleSourceKind": "common",
+        }
+    return {}
+
+
+def _title_catalog_character_has_game_mode_details(character: dict[str, Any]) -> bool:
+    return any(
+        isinstance(detail, dict) and bool(detail.get("gameMode"))
+        for detail in character.get("details") or []
+    )
+
+
+def _generated_template_pool_text(
+    character: dict[str, Any],
+    title_info: dict[str, Any],
+    label: Any,
+    key: Any,
+) -> str:
+    template_row = character.get("templateRow") or {}
+    values = [
+        key,
+        label,
+        title_info.get("ceoNodeKey"),
+        title_info.get("initialCeoKey"),
+        title_info.get("locTitleKey"),
+        character.get("key"),
+        character.get("displayName"),
+        character.get("label"),
+        character.get("subtype"),
+        character.get("artSet"),
+        character.get("sourceIdentity"),
+        character.get("referenceSourcePath"),
+        template_row.get("key"),
+        template_row.get("art_set_override"),
+        template_row.get("_sourceTablePath"),
+        template_row.get("_referenceSourcePath"),
+    ]
+    return " ".join(str(value or "") for value in values).lower()
+
+
+def _looks_like_generated_title_pool_label(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    if re.search(r"\bxianbei\b.*\b(generic|castellan|colonel|aristocrat|matriarch|wrangler|lancer|marauder)\b", text):
+        return True
+    if re.search(r"\bxianbei\s+기본\b", text):
+        return True
+    if re.search(r"\b(generic\s+)?(castellan|colonel)\b", text):
+        return True
+    return bool(re.search(r"\b0?\d\b.*\b0?\d\b$", text) and ("generic" in text or "xianbei" in text))
+
+
+def _is_generated_template_pool_title_candidate(
+    character: dict[str, Any],
+    title_info: dict[str, Any],
+    label: Any,
+    key: Any,
+    common_title_info: dict[str, Any],
+) -> bool:
+    if common_title_info:
+        return False
+    text = _generated_template_pool_text(character, title_info, label, key)
+    if not text:
+        return False
+    if any(
+        marker in text
+        for marker in (
+            "generic_nomads",
+            "xianbei_template_generic",
+            "template_generic_castellan",
+            "template_generic_colonel",
+            "generic_castellan",
+            "generic_colonel",
+        )
+    ):
+        return True
+    if _looks_like_generated_title_pool_label(label):
+        return True
+    if not _title_catalog_character_has_game_mode_details(character):
+        return bool(re.search(r"\b(generic|scripted|dummy|placeholder|castellan|colonel)\b", text))
+    return bool(
+        not _contains_hangul(str(label or ""))
+        and re.search(r"\b(generic|scripted|template|dummy|placeholder|xianbei|castellan|colonel)\b", text)
+    )
+
+
 def _merge_title_catalog_entry(
     base: dict[str, Any],
     fallback: dict[str, Any],
@@ -1653,6 +2166,10 @@ def _merge_title_catalog_entry(
         "sourceTablePath",
         "sourceRank",
         "sourceTag",
+        "canonicalTitleGroup",
+        "commonTitleRole",
+        "commonTitleRoleOrder",
+        "titleSourceKind",
     ):
         if not merged.get(key) and fallback.get(key):
             merged[key] = fallback[key]
@@ -1665,7 +2182,7 @@ def _dedupe_title_catalog_entries(rows: list[dict[str, Any]]) -> list[dict[str, 
     for row in rows:
         if not isinstance(row, dict):
             continue
-        key = str(row.get("key") or "")
+        key = str(row.get("canonicalTitleGroup") or row.get("key") or "")
         if not key:
             continue
         if key not in by_key:
@@ -1768,6 +2285,19 @@ def _build_title_catalog(characters: list[dict[str, Any]]) -> list[dict[str, Any
             title_info.get("initialCeoKey"),
             title_info.get("locTitleKey"),
         )
+        common_title_info = _common_title_info_for_values(
+            key,
+            title_info.get("ceoNodeKey"),
+            title_info.get("locTitleKey"),
+            character.get("key"),
+            character.get("displayName"),
+            character.get("label"),
+        )
+        if common_title_info:
+            label = str(common_title_info.get("label") or label)
+            effect_info = common_title_info
+        if _is_generated_template_pool_title_candidate(character, title_info, label, key, common_title_info):
+            continue
         title_context = " ".join(
             str(value or "")
             for value in (
@@ -1789,8 +2319,8 @@ def _build_title_catalog(characters: list[dict[str, Any]]) -> list[dict[str, Any
                 "effects": effect_info.get("effects") or [],
                 "effectSummary": effect_info.get("effectSummary") or "",
                 "effectTitle": effect_info.get("title") or "",
-                "ownerKey": character.get("key") or "",
-                "ownerName": character.get("displayName") or character.get("label") or "",
+                "ownerKey": common_title_info.get("canonicalTitleGroup") or character.get("key") or "",
+                "ownerName": "기본 칭호" if common_title_info else character.get("displayName") or character.get("label") or "",
                 "initialCeoKey": title_info.get("initialCeoKey") or "",
                 "ceoNodeKey": title_info.get("ceoNodeKey") or "",
                 "titleCeoKey": effect_info.get("key") or "",
@@ -1802,6 +2332,10 @@ def _build_title_catalog(characters: list[dict[str, Any]]) -> list[dict[str, Any
                 "sourceTablePath": (character.get("templateRow") or {}).get("_sourceTablePath") or "",
                 "sourceRank": _catalog_source_rank(character.get("templateRow") or character),
                 "sourceTag": _catalog_source_tag(character.get("templateRow") or character),
+                "canonicalTitleGroup": common_title_info.get("canonicalTitleGroup") or "",
+                "commonTitleRole": common_title_info.get("commonTitleRole") or "",
+                "commonTitleRoleOrder": common_title_info.get("commonTitleRoleOrder") or 0,
+                "titleSourceKind": common_title_info.get("titleSourceKind") or "",
             }
         )
     deduped = _dedupe_title_catalog_entries(candidates)
@@ -1880,12 +2414,25 @@ def _title_effect_for_key_or_label(
     label: Any,
     *keys: Any,
 ) -> dict[str, Any]:
+    effect_info = _title_effect_for_keys(effects_by_title, *keys)
+    if effect_info:
+        return effect_info
+    label_effect_info = effects_by_title.get(_title_effect_lookup_key(label)) or {}
+    if label_effect_info and (label_effect_info.get("key") or label_effect_info.get("keys")):
+        return {}
+    return label_effect_info
+
+
+def _title_effect_for_keys(
+    effects_by_title: dict[str, dict[str, Any]],
+    *keys: Any,
+) -> dict[str, Any]:
     for key in keys:
         for lookup_key in _title_effect_lookup_variants(key):
             effect_info = effects_by_title.get(lookup_key)
             if effect_info:
                 return effect_info
-    return effects_by_title.get(_title_effect_lookup_key(label)) or {}
+    return {}
 
 
 def _load_title_effect_catalog() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
@@ -1919,6 +2466,9 @@ def _load_title_effect_catalog_for_cache_key(_cache_key: str) -> tuple[dict[str,
             if not entry:
                 continue
             for lookup_key in _title_effect_entry_lookup_keys(entry):
+                existing = by_title.get(lookup_key)
+                if existing and _title_effect_entry_priority(existing) > _title_effect_entry_priority(entry):
+                    continue
                 by_title[lookup_key] = entry
             cleaned.append(entry)
     return by_title, cleaned
@@ -1955,6 +2505,16 @@ def _title_effect_entry_from_row(row: Any) -> dict[str, Any]:
         "effects": effect_lines,
         "effectSummary": " / ".join(effect_lines),
     }
+
+
+def _title_effect_entry_priority(entry: dict[str, Any]) -> int:
+    category = str(entry.get("category") or "").lower()
+    key_text = " ".join(str(value or "") for value in [entry.get("key"), *(entry.get("keys") or [])]).lower()
+    if category.startswith("mtu") or "_mtu_" in key_text or key_text.startswith("bg_mtu_"):
+        return 100
+    if entry.get("key") or entry.get("keys"):
+        return 80
+    return 50
 
 
 def _title_effect_entry_lookup_keys(entry: dict[str, Any]) -> list[str]:
@@ -2375,6 +2935,8 @@ def summarize_character_tables(
             continue
         known_art_set_ids.add(str(art_set_id))
         art_rows = art_rows_by_set.get(str(art_set_id), [])
+        if not art_rows:
+            continue
         primary_art = _primary_art_row(art_rows)
         art_set_label = _friendly_art_set_label(str(art_set_id), loc_text)
         reference_source = str(
@@ -2501,7 +3063,7 @@ def summarize_character_tables(
         korea_metadata = korea_character_metadata(key) or {}
         reference_source = template.get("_referenceSourcePath")
         display_name = _character_display_name(template, loc_text)
-        korea_name_hint = str(korea_metadata.get("koreaDisplayNameHint") or korea_display_name_hint(key) or "")
+        korea_name_hint = str(korea_metadata.get("koreaDisplayNameHint") or "")
         if korea_name_hint:
             display_name = korea_name_hint
         details = sorted(
@@ -3573,20 +4135,20 @@ def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> st
         f"effects_name_{key}",
     ):
         if loc_text.get(loc_key):
-            label = loc_text[loc_key]
+            label = _clean_game_ui_text(loc_text[loc_key])
             if _contains_hangul(label):
                 return label
-            return _localized_label(label, key, context="effect", loc_text=loc_text)
+            return _clean_game_ui_text(_localized_label(label, key, context="effect", loc_text=loc_text))
     for field in ("description", "onscreen_name", "name", "icon"):
         value = row.get(field)
         if value and loc_text.get(str(value)):
-            label = loc_text[str(value)]
+            label = _clean_game_ui_text(loc_text[str(value)])
             if _contains_hangul(label):
                 return label
-            return _localized_label(label, key, context="effect", loc_text=loc_text)
+            return _clean_game_ui_text(_localized_label(label, key, context="effect", loc_text=loc_text))
         if value and field != "icon":
-            return _localized_label(str(value), key, context="effect", loc_text=loc_text)
-    return _friendly_effect_key(key)
+            return _clean_game_ui_text(_localized_label(str(value), key, context="effect", loc_text=loc_text))
+    return _clean_game_ui_text(_friendly_effect_key(key))
 
 
 def _friendly_effect_key(key: str) -> str:
@@ -3611,8 +4173,10 @@ def _visible_effect_label(effect: dict[str, Any]) -> str:
     key = str(effect.get("effectKey") or "")
     name = str(effect.get("name") or "")
     label = name if name and not name.lower().startswith("effect ") else _friendly_effect_key(key)
+    label = _clean_game_ui_text(label)
     if label and not _contains_hangul(label):
         label = _friendly_effect_key(key)
+    label = _clean_game_ui_text(label)
     lower = f"{key} {label}".lower()
     if "ai_hint" in lower or "ai hint" in lower:
         return ""
@@ -3628,10 +4192,23 @@ def _effect_summary(effects: list[dict[str, Any]]) -> str:
         label = _visible_effect_label(effect)
         value = effect.get("value")
         suffix = f" {value:+g}" if isinstance(value, (int, float)) else f" {value}" if value not in {None, ""} else ""
-        pieces.append(f"{label}{suffix}")
+        pieces.append(_clean_game_ui_text(f"{label}{suffix}"))
     if len(useful_effects) > 4:
         pieces.append(f"외 {len(useful_effects) - 4}개")
     return " · ".join(pieces)
+
+
+def _clean_game_ui_text(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    text = re.sub(r"\[\[/?[a-z0-9_:\-]+(?:\s+[^\]]*)?\]\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"%\+?n%?", "", text, flags=re.IGNORECASE)
+    text = text.replace("\\n", " ")
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s+([,.;:)])", r"\1", text)
+    text = re.sub(r"([(])\s+", r"\1", text)
+    return text.strip(" ·-")
 
 
 def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
@@ -3758,7 +4335,23 @@ def _title_info_for_character(
     matched, title_text = _best_title_loc_candidate(candidates, loc_text)
     matched = matched or (candidates[0] if candidates else "")
     description = _loc_description_for_ceo_node(matched, loc_text) or ""
-    label = title_text if _contains_hangul(title_text) else _friendly_title_label(matched or template_key)
+    _frontend_name, frontend_title = _frontend_character_description_parts(template_key, loc_text)
+    effects_by_title, _effect_entries = _load_title_effect_catalog()
+    keyed_effect_info = _title_effect_for_keys(
+        effects_by_title,
+        matched,
+        initial_key,
+        f"ceo_nodes_title_{matched}" if matched else "",
+        f"ceo_nodes_description_{matched}" if matched else "",
+        template_key,
+    )
+    label = (
+        _usable_title_label(keyed_effect_info.get("title"))
+        or _usable_title_label(title_text)
+        or _usable_title_label(frontend_title)
+        or _usable_title_label(_friendly_title_label(matched or template_key))
+        or "칭호 미확인"
+    )
     return {
         "status": "read_only_spike",
         "label": label,
@@ -3787,12 +4380,35 @@ def _best_title_loc_candidate(
         title_text = _loc_title_for_ceo_node(key, loc_text) or ""
         if not title_text:
             continue
-        if _contains_hangul(title_text):
+        if _usable_title_label(title_text):
             return key, title_text
         if not fallback_key:
             fallback_key = key
             fallback_text = title_text
     return fallback_key, fallback_text
+
+
+def _usable_title_label(value: Any) -> str:
+    text = _clean_game_ui_text(str(value or "").strip())
+    if not text or _is_bad_display_hint(text) or _looks_like_mixed_name_title_label(text):
+        return ""
+    if _contains_hangul(text):
+        return text
+    return ""
+
+
+def _looks_like_mixed_name_title_label(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    lower = text.lower()
+    if not re.search(r"[a-z]", lower):
+        return False
+    if re.search(r"\b([a-z]{2,})\b.*\b\1\b", lower):
+        return True
+    if _contains_hangul(text) and re.search(r"\b[a-z]{2,}\b", lower) and re.search(r"\b\d{1,2}\b$", lower):
+        return True
+    return bool(_contains_hangul(text) and re.search(r"\b[a-z]{2,}\b", lower) and len(text.split()) <= 5)
 
 
 def _preferred_initial_ceo(details: list[dict[str, Any]]) -> str:
@@ -4229,6 +4845,8 @@ def _merge_internal_asset_manifest(
             continue
         if _is_aw_asset_path(str(packed_path)):
             continue
+        if not _internal_manifest_asset_is_available(str(packed_path), info):
+            continue
         asset_files.append(str(packed_path))
         known_assets.add(str(packed_path))
         source = ""
@@ -4237,6 +4855,23 @@ def _merge_internal_asset_manifest(
         asset_sources[str(packed_path)] = source or str(INTERNAL_ASSET_MANIFEST)
         added += 1
     return added
+
+
+def _internal_manifest_asset_is_available(packed_path: str, info: Any) -> bool:
+    if not isinstance(info, dict):
+        return False
+    source = str(info.get("sourcePack") or info.get("sourcePath") or "").strip()
+    if source and Path(source).is_file():
+        return True
+    extracted_path = str(info.get("extractedPath") or "").strip()
+    if extracted_path and Path(extracted_path).is_file():
+        return True
+    source_id = str(info.get("sourceId") or "").strip()
+    if source_id:
+        candidate = EXTRACTED_ASSET_ROOT / source_id / _normalize_pack_asset_path(packed_path)
+        if candidate.is_file():
+            return True
+    return False
 
 
 def _merge_extracted_asset_inventory(
@@ -4976,9 +5611,14 @@ def _loc_merge_priority(loc_path: str) -> tuple[int, str]:
 
 def _character_display_name(template: dict[str, Any], loc_text: dict[str, str]) -> str | None:
     key = str(template.get("key", ""))
-    korea_name = korea_display_name_hint(key)
+    korea_metadata = korea_character_metadata(key) or {}
+    korea_name = str(korea_metadata.get("koreaDisplayNameHint") or "")
     if korea_name:
         return korea_name
+
+    frontend_name, _frontend_title = _frontend_character_description_parts(key, loc_text)
+    if frontend_name:
+        return frontend_name
 
     korean_name = korean_character_name(key)
     if korean_name:
@@ -4992,6 +5632,47 @@ def _character_display_name(template: dict[str, Any], loc_text: dict[str, str]) 
     id_text = "".join(part for part in parts if part)
     key_text = _display_name_from_key(key, loc_text)
     return id_text or key_text
+
+
+def _frontend_character_description_parts(template_key: str, loc_text: dict[str, str]) -> tuple[str, str]:
+    key = str(template_key or "").strip()
+    if not key or not loc_text:
+        return "", ""
+    prefixes = [
+        f"frontend_faction_leader_unique_characters_localised_description_{key}",
+        f"frontend_characters_localised_description_{key}",
+    ]
+    values: list[str] = []
+    for prefix in prefixes:
+        for suffix in ("_190", "_194", "_200", ""):
+            value = loc_text.get(f"{prefix}{suffix}")
+            if value:
+                values.append(str(value))
+    if not values:
+        for loc_key, value in loc_text.items():
+            loc_key_text = str(loc_key or "")
+            if any(loc_key_text.startswith(prefix) for prefix in prefixes):
+                values.append(str(value))
+                break
+    for value in values:
+        lines = _frontend_description_lines(value)
+        if len(lines) >= 2:
+            return lines[0], lines[1]
+        if lines:
+            return lines[0], ""
+    return "", ""
+
+
+def _frontend_description_lines(value: str) -> list[str]:
+    text = str(value or "").replace("\\\\n", "\n").replace("\\n", "\n")
+    text = re.sub(r"\{\{tr:[^}]+\}\}", "", text)
+    text = re.sub(r"\[\[/?(?:b|i|col:[^\]]+)\]\]", "", text)
+    text = re.sub(r"\[\[/?[^\]]+\]\]", "", text)
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("장군 유형:")
+    ]
 
 
 def _name_text(value: Any, loc_text: dict[str, str]) -> str | None:

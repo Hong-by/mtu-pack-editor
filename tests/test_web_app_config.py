@@ -41,9 +41,9 @@ class WebAppConfigTest(unittest.TestCase):
         clone_func = recipe_js[recipe_js.index("const cloneInitialCeoForMode = (mode) =>"):]
         clone_func = clone_func[:clone_func.index("};", clone_func.index("return genderCompatibleInitialCeoKey"))]
         self.assertIn("baseDetails[mode]?.initialCeos", clone_func)
-        self.assertIn("titleChoiceChanged(titleSource, defaultTitleSource)", clone_func)
+        self.assertNotIn("titleChoiceChanged(titleSource, defaultTitleSource)", clone_func)
         self.assertNotIn("(titleChanged ? titleInitialCeoForModeFromChoice(titleSource, mode) : null)", clone_func)
-        self.assertIn("const titleInitial = titleInitialCeoForModeFromChoice(titleSource, mode);", clone_func)
+        self.assertNotIn("titleInitialCeoForModeFromChoice(titleSource, mode)", clone_func)
         self.assertIn("return genderCompatibleInitialCeoKey(rawInitialCeo, finalTemplateGender, payload.subtype);", clone_func)
         self.assertIn("initial_ceos: cloneInitialCeoForMode(mode)", recipe_js)
         self.assertIn("newInitialCeoKey: null", recipe_js)
@@ -69,17 +69,16 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("3k_dlc04_ceo_initial_data_character_historical_non_deployable_empress_he_fire", recipe_js)
         self.assertIn("key.replace(/_lady_sun_shangxiang$/i, '_lady_sun')", recipe_js)
         self.assertIn("function isBackgroundTitleCeoKey(key)", recipe_js)
-        self.assertIn("if (isBackgroundTitleCeoKey(key)) return key;", recipe_js)
+        self.assertIn("if (isBackgroundTitleCeoKey(key)) return '';", recipe_js)
         self.assertIn("if (isBackgroundTitleCeoKey(titleCeoKey)) return null;", recipe_js)
         self.assertIn("function defaultTitleChoiceForCharacter(character)", recipe_js)
         self.assertIn("function titleChoiceChanged(titleSource, defaultTitleSource)", recipe_js)
         self.assertIn("const selected = titleCeoKeyFromChoice(titleSource)", recipe_js)
         self.assertIn("const baseline = titleCeoKeyFromChoice(defaultTitleSource)", recipe_js)
-        self.assertIn("if (titleChoiceChanged(titleSource, defaultTitleSource))", recipe_js)
         self.assertNotIn("const titleChanged = titleChoiceChanged(titleSource, defaultTitleSource);", recipe_js)
         self.assertNotIn("(titleChanged ? titleInitialCeoForModeFromChoice(titleSource, mode) : null)", recipe_js)
         self.assertIn("if (currentTitleCeoKey && currentTitleCeoKey === titleCeoKey) return {};", recipe_js)
-        self.assertIn("initial_ceos: titleInitial", recipe_js)
+        self.assertNotIn("initial_ceos: titleInitial", recipe_js)
         self.assertIn("titleCeoKey,", recipe_js)
         self.assertIn("removableTitleCeoKeys:", recipe_js)
         self.assertIn("...titleCeoRecipeFields(titleSource, targetCharacter)", recipe_js)
@@ -108,12 +107,14 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("knownInitialCeoKeysForTitles", appearance_js)
         self.assertIn("3k_dlc04_ceo_initial_data_character_historical_non_deployable_empress_he_fire", appearance_js)
         self.assertIn("titleKey: matchedTitleSource?.titleKey", appearance_js)
-        self.assertIn("manualTitleChoices().filter((item) => titleChoiceCanSetInitialCeo(item) && (!item.manualTitleOnly || canonicalTitleChoiceKey(item)))", appearance_js)
+        self.assertIn("manualTitleAnchored: Boolean(matchedTitleSource)", appearance_js)
+        self.assertIn("manualTitleChoices().filter((item) => item.manualTitleAnchored)", appearance_js)
 
     def test_title_choices_are_deduped_by_canonical_title_key(self) -> None:
         appearance_js = read_web_script("app-appearance.js")
 
         self.assertIn("function canonicalTitleChoiceKey(item)", appearance_js)
+        self.assertIn("if (item?.titleCanonicalKey) return String(item.titleCanonicalKey);", appearance_js)
         self.assertIn("function isBackgroundTitleChoiceKey(value)", appearance_js)
         self.assertIn("function isInitialCeoTitleKey(value)", appearance_js)
         self.assertIn("function titleChoiceCanSetInitialCeo(item)", appearance_js)
@@ -122,10 +123,15 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("function dedupeTitleChoicesByDisplay(items)", appearance_js)
         self.assertIn("item?.titleCeoKey", appearance_js)
         self.assertIn("titleCeoKey: item.titleCeoKey || item.ceoKey || item.key", appearance_js)
+        self.assertIn("titleCanonicalKey: item.canonicalTitleGroup || ''", appearance_js)
         self.assertIn("dedupeTitleChoices((state.options?.titleCatalog || [])", appearance_js)
-        self.assertIn("const catalog = titleCatalogChoices().filter(titleChoiceCanSetInitialCeo);", appearance_js)
+        self.assertIn("function isGeneratedTitleCatalogItem(item)", appearance_js)
+        self.assertIn(".filter((item) => !isGeneratedTitleCatalogItem(item))", appearance_js)
+        self.assertIn("const catalog = titleCatalogChoices();", appearance_js)
         self.assertIn("return sortTitleCandidates(dedupeTitleChoicesByDisplay(dedupeTitleChoices([...manual, ...regular])));", appearance_js)
-        self.assertIn("function titleDisplayDedupeKey(character)", read_web_script("app-title-effects.js"))
+        title_effects_js = read_web_script("app-title-effects.js")
+        self.assertIn("function titleDisplayDedupeKey(character)", title_effects_js)
+        self.assertIn("function sheetHeroInfoForAny(...keys)", title_effects_js)
 
     def test_title_choices_are_filtered_by_stat_buttons(self) -> None:
         appearance_js = read_web_script("app-appearance.js")
@@ -182,7 +188,7 @@ class WebAppConfigTest(unittest.TestCase):
         normalize_js = read_web_script("app-normalize.js")
         server_js = read_web_script("app-server.js")
 
-        self.assertIn("OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 15", web_py)
+        self.assertIn("OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 21", web_py)
         self.assertIn('json.dumps(payload, ensure_ascii=False, separators=(",", ":"))', web_py)
         self.assertIn('"assetCacheToken": asset_cache_token', web_py)
         self.assertIn('cached["assetCacheToken"] = asset_cache_token', web_py)
@@ -198,11 +204,33 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("def _file_cache_key(paths: list[Path])", web_py)
         self.assertIn("catalog_paths = _title_effect_catalog_paths()", web_py)
         self.assertIn("skill_catalog_path = _skill_effect_catalog_path()", web_py)
-        self.assertIn('"version": 16', web_py)
+        self.assertIn('"version": 25', web_py)
         self.assertIn("return _load_title_effect_catalog_for_cache_key(_file_cache_key(_title_effect_catalog_paths()))", web_py)
         self.assertIn("@lru_cache(maxsize=8)\ndef _load_title_effect_catalog_for_cache_key", web_py)
         self.assertIn("return _load_skill_effect_catalog_for_cache_key(_file_cache_key([catalog_path] if catalog_path else []))", web_py)
         self.assertIn("@lru_cache(maxsize=8)\ndef _load_skill_effect_catalog_for_cache_key", web_py)
+
+    def test_image_gallery_ignores_bad_hint_labels(self) -> None:
+        labels_js = read_web_script("app-labels.js")
+        normalize_js = read_web_script("app-normalize.js")
+        appearance_js = read_web_script("app-appearance.js")
+
+        self.assertIn("function isBadDisplayHint(value)", labels_js)
+        self.assertIn("function isMixedNameTitleLabel(value)", labels_js)
+        self.assertIn("'잘못된힌트'", labels_js)
+        self.assertIn("const imageNameFallback = isImageOnly", normalize_js)
+        self.assertIn("displayLabel(item.label || item.displayName, imageNameFallback)", normalize_js)
+        self.assertIn("sheetHeroInfoForAny(", normalize_js)
+        self.assertIn("function mergeImageOnlyAppearance(existing, incoming)", appearance_js)
+        self.assertIn("cleanDisplayCandidate(item?.name)", appearance_js)
+
+    def test_skill_effect_text_strips_game_ui_markup(self) -> None:
+        skills_js = read_web_script("app-skills.js")
+
+        self.assertIn("function cleanSkillEffectText(value)", skills_js)
+        self.assertIn("replace(/\\[\\[\\/?[a-z0-9_:-]+", skills_js)
+        self.assertIn("replace(/%\\+?n%?/gi, '')", skills_js)
+        self.assertIn("const text = cleanSkillEffectText(info?.effectSummary || info?.description);", skills_js)
 
     def test_build_requests_are_serialized_for_rpfm_saves(self) -> None:
         web_py = (ROOT / "tk_pack_builder" / "web.py").read_text(encoding="utf-8")
@@ -351,6 +379,8 @@ class WebAppConfigTest(unittest.TestCase):
         app_js = read_web_script("app.js")
 
         self.assertIn("function setLazySelect(id, optionLoader, selectedOption = null)", editor_js)
+        self.assertIn("function selectableFormCharacters()", editor_js)
+        self.assertIn("return browsable.length ? browsable : selectableFallbackCharacters();", editor_js)
         self.assertIn("select._optionLoader = optionLoader;", editor_js)
         self.assertIn("function ensureSelectOptionsLoaded(select)", editor_js)
         self.assertIn("ensureSelectOptionsLoaded(select);", editor_js)
@@ -360,6 +390,8 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("setLazySelect('sourceSkill', () => selectableFormCharacters().map(skillSelectOption), skillSelectOption(character));", editor_js)
         self.assertIn("setLazySelect('sourceTitle', () => titleChoicesForPrefix('source', character).map", editor_js)
         self.assertIn("function applyCreateBaseDefaults(base)", editor_js)
+        self.assertIn("state.selectedAppearanceCardKey = '';", editor_js)
+        self.assertIn("setSelectValue('sourceImageSet', base.artSet || base.key);", editor_js)
         self.assertIn("applyCreateBaseDefaults(base);", app_js)
 
         begin_body = editor_js[
@@ -441,6 +473,42 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn('class="spawn-help"', index_html)
         self.assertIn('class="workflow-actions"', index_html)
 
+    def test_korea_roster_filters_match_faction_aliases(self) -> None:
+        catalog_js = read_web_script("app-catalog.js")
+
+        self.assertIn("const KOREA_FACTION_FILTER_ALIASES", catalog_js)
+        self.assertIn("goguryeo: ['goguryeo', 'ironic_faction_goguryeo'", catalog_js)
+        self.assertIn("baekje: ['baekje', 'bakaja', 'ironic_faction_bakaja'", catalog_js)
+        self.assertIn("silla: ['silla', 'shitla', 'ironic_faction_shitla'", catalog_js)
+        self.assertIn("tamna: ['tamna', 'tamno', 'ironic_faction_tamno'", catalog_js)
+        self.assertIn("function matchesKoreaFactionFilter", catalog_js)
+        self.assertIn("koreaFactionSearchText(character)", catalog_js)
+        self.assertIn("return aliases.some((alias) => haystack.includes(alias));", catalog_js)
+        self.assertIn("return matchesKoreaFactionFilter(character, state.filter.slice(6));", catalog_js)
+
+    def test_normalized_korea_roster_hidden_flags_are_preserved(self) -> None:
+        normalize_js = read_web_script("app-normalize.js")
+
+        self.assertIn("rosterHidden: Boolean(item.rosterHidden)", normalize_js)
+        self.assertIn("koreaRosterHidden: Boolean(item.koreaRosterHidden)", normalize_js)
+        self.assertIn("koreaHiddenReason: item.koreaHiddenReason || ''", normalize_js)
+
+    def test_roster_hides_scripted_generic_template_variant_pool(self) -> None:
+        catalog_js = read_web_script("app-catalog.js")
+
+        self.assertIn("function isTemplateVariantPoolCharacter", catalog_js)
+        self.assertIn("function selectableFallbackCharacters()", catalog_js)
+        self.assertIn("function isLowQualityGeneratedCharacter(character)", catalog_js)
+        self.assertIn("function isLowInformationGeneratedName(value)", catalog_js)
+        self.assertIn("generic_nomads", catalog_js)
+        self.assertIn("xianbei_template_generic", catalog_js)
+        self.assertIn("generic_(castellan|colonel)", catalog_js)
+        self.assertIn("hasUniqueImageSet(character)", catalog_js)
+        self.assertIn("scripted(?:[_\\s-]|$)", catalog_js)
+        self.assertIn("generic(?:[_\\s-]|$)", catalog_js)
+        self.assertIn("&& !isTemplateVariantPoolCharacter(character)", catalog_js)
+        self.assertIn("&& hasUsableCharacterLabel(character)", catalog_js)
+
     def test_character_editor_does_not_expose_model_swaps(self) -> None:
         script_text = "\n".join(
             read_web_script(name)
@@ -448,8 +516,11 @@ class WebAppConfigTest(unittest.TestCase):
         )
         index_html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn('select id="editGender"', index_html)
-        self.assertIn('select id="createGender"', index_html)
+        self.assertNotIn('select id="editGender"', index_html)
+        self.assertNotIn('select id="createGender"', index_html)
+        self.assertNotIn("bind('editGender'", script_text)
+        self.assertNotIn("bind('createGender'", script_text)
+        self.assertIn("syncWorkflowGender(characterGenderKey(base));", script_text)
         self.assertIn('select id="editSkill"', index_html)
         self.assertNotIn('id="editModelSet"', index_html)
         self.assertNotIn('id="sourceModelSet"', index_html)
@@ -468,6 +539,8 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("spawnEvent: spawnPlan.event", workflow_js)
         self.assertIn("min_spawn_round: spawnPlan.minRound", workflow_js)
         self.assertIn("max_spawn_round: 999", workflow_js)
+        self.assertIn("min_rank: 4", recipe_js)
+        self.assertIn("max_rank: 4", recipe_js)
         self.assertNotIn("event: $('sourceSpawnEvent').value", workflow_js)
         self.assertNotIn("maxRound: Number($('createMaxRound').value)", workflow_js)
         self.assertIn('<select id="sourceSpawnEvent" hidden aria-hidden="true"></select>', index_html)
@@ -476,12 +549,22 @@ class WebAppConfigTest(unittest.TestCase):
     def test_image_art_keys_do_not_invent_missing_card_assets(self) -> None:
         recipe_js = read_web_script("app-recipe.js")
         workflow_js = read_web_script("app-workflow.js")
+        appearance_js = read_web_script("app-appearance.js")
 
         self.assertIn("function artImageKeysFromTargetAssets(imageAssets, fallbackPortraitToken = '', fallbackCardToken = '')", workflow_js)
         self.assertIn("const cardStem = imageFileStemFromPath(cardPath) || fallbackCardToken;", workflow_js)
         self.assertNotIn("const cardStem = imageFileStemFromPath(cardPath) || fallbackCardToken || portraitFolder;", workflow_js)
         self.assertIn("artImageKeysFromTargetAssets(patchImageAssets, targetImageToken)", recipe_js)
         self.assertNotIn("artImageKeysFromTargetAssets(patchImageAssets, targetImageToken, targetCardToken)", recipe_js)
+        self.assertIn("function imageCompositeArtOverridesFromAppearance(appearance, targetAssets = [])", appearance_js)
+        self.assertIn("hasCompositeAsset ? 'EMPTY' : ''", appearance_js)
+        self.assertIn("...imageCompositeArtOverridesFromAppearance(imageSet, patchImageAssets)", recipe_js)
+        self.assertIn("...imageCompositeArtOverridesFromAppearance(imageSet, customImageAssets)", recipe_js)
+        self.assertNotIn("safeCampaignUniformForGeneratedArt", recipe_js)
+        self.assertNotIn("3k_main_hero_skin_male_01", recipe_js)
+        self.assertNotIn("3k_main_hero_skin_female_01", recipe_js)
+        self.assertIn("artOverrides: hasAppearanceOverride ? patchImageArtOverrides : {}", recipe_js)
+        self.assertIn("artOverrides: customImageArtOverrides", recipe_js)
 
     def test_custom_image_assets_emit_composite_aliases(self) -> None:
         workflow_js = read_web_script("app-workflow.js")
@@ -523,8 +606,9 @@ class WebAppConfigTest(unittest.TestCase):
         catalog_js = read_web_script("app-catalog.js")
 
         self.assertIn("function hasCharacterDetails(character)", catalog_js)
-        self.assertIn("hasRealTemplateRow(character) && hasCharacterDetails(character)", catalog_js)
+        self.assertIn("hasRealTemplateRow(character)", catalog_js)
         self.assertIn("&& hasCharacterDetails(character)", catalog_js)
+        self.assertIn("function selectableFallbackCharacters()", catalog_js)
 
 
 if __name__ == "__main__":

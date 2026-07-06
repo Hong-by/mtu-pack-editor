@@ -13,6 +13,7 @@ from .recipe import CharacterClone, CharacterPatch
 
 PLAYER_SPAWN_EVENTS = {"campaign_start", "delayed_join"}
 CHARACTER_GAME_MODES = ("historical", "romance")
+GENERATED_CHARACTER_START_RANK = 4
 
 CHARACTER_TABLE_ALIASES = {
     "character_generation_templates": [
@@ -312,6 +313,8 @@ def apply_character_clones(session: PackSession, clones: list[CharacterClone]) -
                 "character_generation_template": clone.new_template_key,
                 **overrides,
             }
+            new_detail["min_rank"] = GENERATED_CHARACTER_START_RANK
+            new_detail["max_rank"] = GENERATED_CHARACTER_START_RANK
             raw_initial_ceo = (
                 override_initial_ceo
                 or clone.initial_ceo_source_key

@@ -153,11 +153,7 @@ function stageCreate() {
     renderValidation();
     return;
   }
-  if (!matchesGender(base, state.createGender)) {
-    state.serverMessages = [validationItem('error', '신규 생성 준비 실패', `${genderLabel(state.createGender)} 기준 장수를 선택해야 합니다.`)];
-    renderValidation();
-    return;
-  }
+  syncWorkflowGender(characterGenderKey(base));
   const skill = characters().find((item) => item.key === $('sourceSkill').value);
   const titleSource = resolveTitleChoice($('sourceTitle').value);
   const attribute = resolveAttributeChoice($('sourceAttributeSet').value);
@@ -211,7 +207,7 @@ function stageCreate() {
     kind: 'clone_character',
     type: '신규 생성',
     title: `${$('createName').value || '새 장수'} 생성`,
-    description: `기본 ${base?.name || '-'} · 성별 ${genderLabel(characterGenderKey(base))} · 칭호 ${titleSource?.titleName || titleSource?.name || '-'} · 트레잇 ${ceoSetDescription('trait', traitSet)} · 이미지 ${imageSet?.name || '-'} · 모델 고정(${base?.name || '-'}) · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 ${ceoSetDescription('equipment', equipmentSet)} · 장비 수치 참조(${equipmentBrief(combat)}) · 병종 ${unit?.name || '-'} · 스킬셋 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
+    description: `기본 ${base?.name || '-'} · 원본 성별 ${genderLabel(characterGenderKey(base))} · 칭호 ${titleSource?.titleName || titleSource?.name || '-'} · 트레잇 ${ceoSetDescription('trait', traitSet)} · 이미지 ${imageSet?.name || '-'} · 모델 고정(${base?.name || '-'}) · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 ${ceoSetDescription('equipment', equipmentSet)} · 장비 수치 참조(${equipmentBrief(combat)}) · 병종 ${unit?.name || '-'} · 스킬셋 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
     payload,
   });
 }

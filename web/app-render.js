@@ -267,7 +267,7 @@ function renderEditorFlowSummary() {
   setFlowText('editFlowGear', equipmentBrief(editCombat));
   setFlowText('editFlowSpawn', editSpawnEvent.name);
   setFlowText('editFlowSkill', editSkill?.name || editSkill?.historicalSkill || '-');
-  setFlowText('createFlowTarget', `${genderLabel(state.createGender)} · ${createBase.name || '-'}`);
+  setFlowText('createFlowTarget', `${genderLabel(characterGenderKey(createBase))} · ${createBase.name || '-'}`);
   setFlowText('createFlowImage', displayLabel(createImage?.imageSetName || createImage?.name, createImage?.artSet || createImage?.key));
   setFlowText('createFlowGear', equipmentBrief(createCombat));
   setFlowText('createFlowSpawn', createSpawnPlan.minRound <= 0 ? '캠페인 시작' : `${createSpawnPlan.minRound}턴 등장`);

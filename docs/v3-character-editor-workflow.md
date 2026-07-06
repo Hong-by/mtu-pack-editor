@@ -39,6 +39,8 @@ These rules are the baseline contract, not optimization details. If code changes
   Reason: first-turn listeners and dual campaign script paths can race. The Lua side must lock both already-created templates and in-progress spawn attempts, so double triggers do not become double characters.
 - Spawn age is not silently normalized. If the user enters a birth year, clone a spawn-age row with that value; if the field is blank, preserve the base/source character's `spawn_age_range`.
   Reason: the editor must not reinterpret user intent. Child-chain risk is real for young sources, but changing it is an explicit UI choice, not a hidden builder correction.
+- Generated characters always write `min_rank = 4` and `max_rank = 4` in both historical and romance detail rows.
+  Reason: the created general should enter the campaign at a fixed usable rank instead of inheriting a low or variable source rank.
 - The generated Lua is packed at both `script/campaign/3k_main_campaign_map/mod/hby_mtu_pack_editor_player_spawn.lua` and `script/campaign/3k_main_campaign_map/hby_mtu_pack_editor_player_spawn.lua`.
   Reason: local 3K/Korea extracted scripts differ on campaign-map subfolder loading. The shared `attempt_key` prevents the dual write from creating duplicate characters if both paths load.
 - Do not add Warhammer-style `cm:spawn_character_to_faction` calls. Verified Lua direct-spawn calls must stay behind the generated preflight and attempt lock, and must not be paired with DB `SPAWN_AGENT_OFF_MAP` for the same template.
@@ -94,6 +96,8 @@ Reason: Three Kingdoms applies starting title/trait/equipment through the initia
 - `character_skill_level_to_effects_junctions_tables`
 - `effects_tables`
   Reason: copied only as needed for skill tree links/effects. Skill node labels alone are not enough if linked effect rows are missing.
+- `effect_bonus_value_ids_unit_sets_tables`, `effect_bonus_value_unit_ability_junctions_tables`, `unit_abilities_tables`, `unit_special_abilities_tables`, `special_ability_*_tables`, `projectiles_tables`, and projectile display/impact/bombardment tables.
+  Reason: active battle skills such as arrow-rain abilities can show an enabled button from the land-unit ability junction but still fail to fire unless the effect unlock, special ability, projectile, contact effect, and targeting/display dependencies are copied together.
 
 ### Spawn event and script chain
 

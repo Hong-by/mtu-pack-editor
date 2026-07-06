@@ -14,7 +14,7 @@ function fillForms(character) {
   $('createMinRound').value = 0;
   $('createMaxRound').value = 999;
 
-  const selectableCharacters = browsableCharacters().length ? browsableCharacters() : characters();
+  const selectableCharacters = selectableFormCharacters();
   const selectedBase = character;
   const baseCandidates = [selectedBase].filter(Boolean);
   const editTitleFilter = titleFilterForPrefix('edit');
@@ -110,7 +110,7 @@ function fillForms(character) {
 
 function selectableFormCharacters() {
   const browsable = browsableCharacters();
-  return browsable.length ? browsable : characters();
+  return browsable.length ? browsable : selectableFallbackCharacters();
 }
 
 function characterSearchText(character) {
@@ -275,9 +275,13 @@ function resetWorkflowDraft(prefix, character) {
 
 function applyCreateBaseDefaults(base) {
   if (!base) return;
+  syncWorkflowGender(characterGenderKey(base));
+  renderWorkflowGenderButtons();
   $('createName').value = `${base.name} 파생`;
   setSelectValue('createSubtype', elementMeta(base.element).subtype);
   setupCreateLazySelects(base);
+  state.selectedAppearanceCardKey = '';
+  setSelectValue('sourceImageSet', base.artSet || base.key);
   setSelectValue('sourceTraitSet', CEO_SET_BASE_VALUE);
   setSelectValue('sourceEquipmentSet', CEO_SET_BASE_VALUE);
   $('createAgeRange').value = base.birthYear ?? '';

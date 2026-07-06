@@ -128,7 +128,7 @@ function titleCareerCeoKeyFromValue(value) {
     .replace('_ceo_initial_data_character_romance_', '_ceo_career_historical_')
     .replace('_ceo_initial_data_character_', '_ceo_career_historical_')
     .replace(/_\d\d$/, '');
-  if (isBackgroundTitleCeoKey(key)) return key;
+  if (isBackgroundTitleCeoKey(key)) return '';
   if (!/_ceo_career_/i.test(key)) return '';
   return key;
 }
@@ -322,6 +322,12 @@ function recipeFromQueue() {
       const patchImageArtKeys = imageSet
         ? artImageKeysFromTargetAssets(patchImageAssets, targetImageToken)
         : {};
+      const patchImageArtOverrides = imageSet
+        ? compactObject({
+          ...patchImageArtKeys,
+          ...imageCompositeArtOverridesFromAppearance(imageSet, patchImageAssets),
+        })
+        : {};
       if (payload.attributeSetClone) {
         recipe.attributeSetClones.push({
           sourceSetKey: payload.attributeSetClone.sourceSetKey,
@@ -364,17 +370,6 @@ function recipeFromQueue() {
           skill_set_override: patchSkillSetOverride,
         });
       }
-      if (titleChoiceChanged(titleSource, defaultTitleSource)) {
-        for (const mode of ['historical', 'romance']) {
-          const titleInitial = titleInitialCeoForModeFromChoice(titleSource, mode);
-          if (titleInitial) {
-            detailOverrides[mode] = compactObject({
-              ...detailOverrides[mode],
-              initial_ceos: titleInitial,
-            });
-          }
-        }
-      }
       recipe.characterPatches.push({
         templateKey: payload.targetKey,
         displayName: payload.displayName,
@@ -388,7 +383,7 @@ function recipeFromQueue() {
         }),
         imageAssets: patchImageAssets,
         artSetOverrides: {},
-        artOverrides: hasAppearanceOverride ? patchImageArtKeys : {},
+        artOverrides: hasAppearanceOverride ? patchImageArtOverrides : {},
         detailOverrides,
         ...titleCeoRecipeFields(titleSource, targetCharacter),
         ...ceoSetRecipeFields(payload),
@@ -464,12 +459,14 @@ function recipeFromQueue() {
       const customImageArtKeys = imageSet
         ? artImageKeysFromTargetAssets(customImageAssets, customImageToken, customImageToken)
         : {};
+      const customImageArtOverrides = imageSet
+        ? compactObject({
+          ...customImageArtKeys,
+          ...imageCompositeArtOverridesFromAppearance(imageSet, customImageAssets),
+        })
+        : {};
       const finalTemplateGender = baseTemplate.is_male;
       const cloneInitialCeoForMode = (mode) => {
-        if (titleChoiceChanged(titleSource, defaultTitleSource)) {
-          const titleInitial = titleInitialCeoForModeFromChoice(titleSource, mode);
-          if (titleInitial) return titleInitial;
-        }
         const rawInitialCeo = baseDetails[mode]?.initialCeos
           || baseDetails.historical?.initialCeos
           || baseDetails.romance?.initialCeos
@@ -480,6 +477,8 @@ function recipeFromQueue() {
         detailOverridesWithSkill[mode] = compactObject({
           ...detailOverridesWithSkill[mode],
           initial_ceos: cloneInitialCeoForMode(mode),
+          min_rank: 4,
+          max_rank: 4,
         });
       }
       const clonedSkillSetOverride = skillSetCloneFromPayload(recipe, payload.skillTree, customTemplateKey, itemNumber);
@@ -502,7 +501,7 @@ function recipeFromQueue() {
         spawnEvent: spawnPlan.event,
         displayName: payload.newName,
         imageAssets: customImageAssets,
-        artOverrides: compactObject(customImageArtKeys),
+        artOverrides: customImageArtOverrides,
         ...titleCeoRecipeFields(titleSource, base),
         ...ceoSetRecipeFields(payload),
         templateOverrides: compactObject({

@@ -80,6 +80,36 @@ function sheetHeroInfoFor(key) {
   return null;
 }
 
+function sheetHeroInfoForAny(...keys) {
+  const candidates = [];
+  for (const key of keys) {
+    const text = String(key || '').trim();
+    if (!text) continue;
+    const slug = slugFromKey(text);
+    candidates.push(text, slug);
+    if (slug.startsWith('lady_')) candidates.push(slug.replace(/^lady_/, ''));
+    if (text.includes('lady_')) candidates.push(text.replace(/lady_/g, ''));
+  }
+  for (const candidate of candidates) {
+    const info = sheetHeroInfoFor(candidate);
+    if (info) return info;
+  }
+  for (const candidate of candidates) {
+    const tokens = labelTokens(candidate);
+    const joined = longestCharacterToken(tokens);
+    if (joined && KOREAN_CHARACTER_TOKEN_MAP[joined]) {
+      return { kr: KOREAN_CHARACTER_TOKEN_MAP[joined], slug: joined };
+    }
+    if (joined?.startsWith('lady_')) {
+      const withoutLady = joined.replace(/^lady_/, '');
+      if (KOREAN_CHARACTER_TOKEN_MAP[withoutLady]) {
+        return { kr: KOREAN_CHARACTER_TOKEN_MAP[withoutLady], slug: withoutLady };
+      }
+    }
+  }
+  return null;
+}
+
 function sheetTitleInfoFor(titleKey, characterKey = '') {
   const titles = sheetTitleMap();
   for (const key of titleKeyVariants(titleKey)) {
@@ -194,9 +224,6 @@ function titleEffectCacheKey(character) {
 }
 
 function computeTitleEffectFor(character) {
-  if (character?.manualTitleEffect) return character.manualTitleEffect;
-  const manual = manualTitleEffectFor(character?.titleOwnerName || character?.name, character?.titleName);
-  if (manual) return manual;
   const embeddedSummary = character?.titleEffectSummary || (Array.isArray(character?.titleEffects) ? character.titleEffects.join(' / ') : '');
   if (embeddedSummary) {
     return {
@@ -205,6 +232,9 @@ function computeTitleEffectFor(character) {
       effects: embeddedSummary,
     };
   }
+  if (character?.manualTitleEffect) return character.manualTitleEffect;
+  const manual = manualTitleEffectFor(character?.titleOwnerName || character?.name, character?.titleName);
+  if (manual) return manual;
   return catalogTitleEffectFor(character?.titleName);
 }
 

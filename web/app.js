@@ -137,15 +137,11 @@ bind('editAttributeSet', 'change', () => syncAttributeSummary('edit', 'editAttri
 bind('sourceAttributeSet', 'change', () => syncAttributeSummary('source', 'sourceAttributeSet'));
 bind('editUnitProfile', 'change', () => syncUnitSummary('edit', 'editUnitProfile'));
 bind('sourceUnitProfile', 'change', () => syncUnitSummary('source', 'sourceUnitProfile'));
-bind('editGender', 'change', () => {
-  setWorkflowGender($('editGender').value || 'male');
-});
-bind('createGender', 'change', () => {
-  setWorkflowGender($('createGender').value || 'male');
-});
 bind('sourceBase', 'change', () => {
   const base = characters().find((item) => item.key === $('sourceBase').value);
   if (base) {
+    syncWorkflowGender(characterGenderKey(base));
+    renderWorkflowGenderButtons();
     applyCreateBaseDefaults(base);
   }
   renderSelectedPreview();

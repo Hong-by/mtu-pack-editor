@@ -158,6 +158,8 @@ function ensureWorkflowSelection() {
   const next = rosterCharacters().find((character) => matchesRosterFilter(character))
     || browsableCharacters().find((character) => matchesGender(character, state.workflowGender))
     || browsableCharacters()[0]
+    || selectableFallbackCharacters().find((character) => matchesGender(character, state.workflowGender))
+    || selectableFallbackCharacters()[0]
     || characters()[0];
   if (next) {
     state.selectedKey = realTemplateKey(next) || next.key;
@@ -305,7 +307,9 @@ function retargetArtImageKey(value, targetToken) {
 function characterByAppearanceKey(key) {
   if (!key) return null;
   const candidates = characters().filter((item) => (
-    (item.key === key || item.artSet === key) && !item.virtualImageOnly
+    (item.key === key || item.artSet === key)
+    && !item.virtualImageOnly
+    && !isTemplateVariantPoolCharacter(item)
   ));
   return candidates.find((item) => item.source === 'reference')
     || candidates.find((item) => item.source === 'pack')

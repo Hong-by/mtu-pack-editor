@@ -73,6 +73,75 @@ MATERIAL_TABLE_ALIASES = {
     "cai_retinues_to_aspects": [
         "db/cai_retinues_to_aspects_tables/data__",
     ],
+    "effect_bonus_value_ids_unit_sets": [
+        "db/effect_bonus_value_ids_unit_sets_tables/_mtu_characters_effects",
+        "db/effect_bonus_value_ids_unit_sets_tables/data__",
+    ],
+    "effect_bonus_value_unit_ability_junctions": [
+        "db/effect_bonus_value_unit_ability_junctions_tables/_mtu_characters_skills_effects",
+        "db/effect_bonus_value_unit_ability_junctions_tables/data__",
+    ],
+    "land_units_to_unit_abilites_junctions": [
+        "db/land_units_to_unit_abilites_junctions_tables/_mtu_characters_skills_abilities_land_units",
+        "db/land_units_to_unit_abilites_junctions_tables/data__",
+    ],
+    "unit_abilities": [
+        "db/unit_abilities_tables/_mtu_characters_skills_abilities",
+        "db/unit_abilities_tables/data__",
+    ],
+    "unit_special_abilities": [
+        "db/unit_special_abilities_tables/_mtu_characters_skills_abilities",
+        "db/unit_special_abilities_tables/data__",
+    ],
+    "special_ability_to_special_ability_phase_junctions": [
+        "db/special_ability_to_special_ability_phase_junctions_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_to_special_ability_phase_junctions_tables/data__",
+    ],
+    "special_ability_phases": [
+        "db/special_ability_phases_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_phases_tables/data__",
+    ],
+    "special_ability_phase_stat_effects": [
+        "db/special_ability_phase_stat_effects_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_phase_stat_effects_tables/data__",
+    ],
+    "special_ability_phase_attribute_effects": [
+        "db/special_ability_phase_attribute_effects_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_phase_attribute_effects_tables/data__",
+    ],
+    "special_ability_phase_displays": [
+        "db/special_ability_phase_displays_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_phase_displays_tables/data__",
+    ],
+    "special_ability_to_auto_deactivate_flags": [
+        "db/special_ability_to_auto_deactivate_flags_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_to_auto_deactivate_flags_tables/data__",
+    ],
+    "special_ability_to_invalid_target_flags": [
+        "db/special_ability_to_invalid_target_flags_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_to_invalid_target_flags_tables/data__",
+    ],
+    "special_ability_to_invalid_usage_flags": [
+        "db/special_ability_to_invalid_usage_flags_tables/_mtu_characters_skills_abilities",
+        "db/special_ability_to_invalid_usage_flags_tables/data__",
+    ],
+    "projectile_bombardments": [
+        "db/projectile_bombardments_tables/_mtu_characters_skills_abilities",
+        "db/projectile_bombardments_tables/data__",
+    ],
+    "projectile_displays": [
+        "db/projectile_displays_tables/_mtu_characters_skills_abilities",
+        "db/projectile_displays_tables/data__",
+    ],
+    "projectile_impacts": [
+        "db/projectile_impacts_tables/_mtu_characters_skills_abilities",
+        "db/projectile_impacts_tables/data__",
+    ],
+    "projectiles": [
+        "db/projectiles_tables/_mtu_characters_skills_abilities",
+        "db/projectiles_tables/_mtu_characters_weapons",
+        "db/projectiles_tables/data__",
+    ],
 }
 
 

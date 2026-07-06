@@ -37,6 +37,7 @@ CAMPAIGN_SPAWN_SCRIPT_PATHS = (
     "script/campaign/3k_main_campaign_map/hby_mtu_pack_editor_player_spawn.lua",
 )
 SPAWN_EVENT_TEMPLATE_WEIGHT = 19.5
+GENERATED_CHARACTER_START_RANK = 4
 SPAWN_INCIDENT_EVENT_CATEGORY = "historical"
 CHARACTER_GAME_MODES = ("historical", "romance")
 MTU_CHARACTER_ART_SETS_TABLE = "db/campaign_character_art_sets_tables/_mtu_characters"
@@ -1102,7 +1103,10 @@ def _collect_character_patch_rows(
             detail_table = detail.get("_sourceTablePath") or table_names["character_generation_template_game_mode_details"]
             existing_detail = _find_delta_row(rows_by_table, _detail_key, _detail_key(detail), detail_table)
             patched = dict(existing_detail or detail)
+            title_initial_override = _title_initial_override_to_ignore(patch.title_ceo_key, overrides.get("initial_ceos"))
             for column, value in overrides.items():
+                if column == "initial_ceos" and title_initial_override:
+                    continue
                 if patched.get(column) != value:
                     patched[column] = value
                     changed += 1
@@ -1116,9 +1120,8 @@ def _collect_character_patch_rows(
             if resolved_initial_ceo and patched.get("initial_ceos") != resolved_initial_ceo:
                 patched["initial_ceos"] = resolved_initial_ceo
                 changed += 1
-            active_ceo_keys = _unique_strings([patch.title_ceo_key or "", *patch.trait_ceo_keys])
+            active_ceo_keys = _unique_strings([*patch.trait_ceo_keys])
             removable_active_ceo_keys = _unique_strings([
-                *patch.removable_title_ceo_keys,
                 *patch.removable_trait_ceo_keys,
             ])
             if active_ceo_keys or patch.equipment_ceo_keys:
@@ -1148,6 +1151,14 @@ def _collect_character_patch_rows(
             if str(patched.get("skill_set_override") or "") not in patched_skill_set_keys:
                 _copy_skill_dependency(tables, table_names, rows_by_table, patched.get("skill_set_override"))
             _copy_retinue_dependency(tables, table_names, rows_by_table, patched.get("retinue"))
+            _copy_skill_source_retinue_abilities(
+                tables,
+                table_names,
+                source_dbs,
+                rows_by_table,
+                patched.get("skill_set_override"),
+                patched.get("retinue"),
+            )
     return changed
 
 
@@ -1575,8 +1586,16 @@ def _collect_character_clone_rows(
                 "character_generation_template": clone.new_template_key,
                 **overrides,
             }
+            new_detail["min_rank"] = GENERATED_CHARACTER_START_RANK
+            new_detail["max_rank"] = GENERATED_CHARACTER_START_RANK
+            title_initial_override = _title_initial_override_to_ignore(
+                clone.title_ceo_key,
+                overrides.get("initial_ceos"),
+            )
+            if title_initial_override:
+                new_detail["initial_ceos"] = source_detail.get("initial_ceos")
             raw_initial_ceo = (
-                overrides.get("initial_ceos")
+                (None if title_initial_override else overrides.get("initial_ceos"))
                 or
                 clone.initial_ceo_source_key
                 or source_detail.get("initial_ceos")
@@ -1606,9 +1625,8 @@ def _collect_character_clone_rows(
             )
             if compatible_initial_ceo:
                 new_detail["initial_ceos"] = compatible_initial_ceo
-            active_ceo_keys = _unique_strings([clone.title_ceo_key or "", *clone.trait_ceo_keys])
+            active_ceo_keys = _unique_strings([*clone.trait_ceo_keys])
             removable_active_ceo_keys = _unique_strings([
-                *clone.removable_title_ceo_keys,
                 *clone.removable_trait_ceo_keys,
             ])
             if active_ceo_keys or clone.equipment_ceo_keys:
@@ -1960,6 +1978,14 @@ def _collect_character_dependency_rows(
             _copy_attribute_dependency(tables, table_names, source_dbs, rows_by_table, detail.get("attribute_set"))
             _copy_skill_dependency(tables, table_names, rows_by_table, detail.get("skill_set_override"))
             _copy_retinue_dependency(tables, table_names, rows_by_table, detail.get("retinue"))
+            _copy_skill_source_retinue_abilities(
+                tables,
+                table_names,
+                source_dbs,
+                rows_by_table,
+                detail.get("skill_set_override"),
+                detail.get("retinue"),
+            )
 
     after = sum(len(rows) for rows in rows_by_table.values())
     return max(0, after - before)
@@ -1990,6 +2016,14 @@ def _initial_ceo_from_title_ceo_key(title_ceo_key: Any) -> str:
     if "_ceo_career_historical_" not in key:
         return ""
     return key.replace("_ceo_career_historical_", "_ceo_initial_data_character_historical_")
+
+
+def _title_initial_override_to_ignore(title_ceo_key: Any, initial_ceo_override: Any) -> bool:
+    initial_key = str(initial_ceo_override or "").strip()
+    if not initial_key:
+        return False
+    title_initial = _initial_ceo_from_title_ceo_key(title_ceo_key)
+    return bool(title_initial and initial_key == title_initial)
 
 
 def _clone_frontend_character_ceos_delta(
@@ -2326,9 +2360,20 @@ def _character_dependency_aliases() -> dict[str, list[str]]:
             "db/frontend_character_ceos_tables/data",
             "db/frontend_character_ceos_tables/data__",
         ],
-        "retinues": ["retinues"],
-        "retinue_slot_initial_units": ["retinue_slot_initial_units"],
-        "cai_retinues_to_aspects": ["cai_retinues_to_aspects"],
+        "retinues": [
+            "retinues",
+            "db/retinues_tables/data__",
+        ],
+        "retinue_slot_initial_units": [
+            "retinue_slot_initial_units",
+            "db/retinue_slot_initial_units_tables/data__",
+            "db/retinue_slot_initial_units_tables/zhou_yu_fix",
+        ],
+        "cai_retinues_to_aspects": [
+            "cai_retinues_to_aspects",
+            "db/cai_retinues_to_aspects_tables/data__",
+            "db/cai_retinues_to_aspects_tables/unit",
+        ],
         "character_attribute_sets": [
             "character_attribute_sets",
             "db/character_attribute_sets_tables/data__",
@@ -2362,11 +2407,100 @@ def _character_dependency_aliases() -> dict[str, list[str]]:
             "effects",
             "db/effects_tables/_mtu_characters_skills_effects",
         ],
+        "effect_bonus_value_ids_unit_sets": [
+            "effect_bonus_value_ids_unit_sets",
+            "db/effect_bonus_value_ids_unit_sets_tables/_mtu_characters_effects",
+            "db/effect_bonus_value_ids_unit_sets_tables/data__",
+        ],
+        "effect_bonus_value_unit_ability_junctions": [
+            "effect_bonus_value_unit_ability_junctions",
+            "db/effect_bonus_value_unit_ability_junctions_tables/_mtu_characters_skills_effects",
+            "db/effect_bonus_value_unit_ability_junctions_tables/data__",
+        ],
         "land_units": [
             "land_units",
             "db/land_units_tables/_mtu_characters_custom_battles_land_units",
         ],
-        "land_units_to_unit_abilites_junctions": ["land_units_to_unit_abilites_junctions"],
+        "land_units_to_unit_abilites_junctions": [
+            "land_units_to_unit_abilites_junctions",
+            "db/land_units_to_unit_abilites_junctions_tables/_mtu_characters_skills_abilities_land_units",
+            "db/land_units_to_unit_abilites_junctions_tables/_mtu_characters_skills_abilities_land_units_bug_unique",
+            "db/land_units_to_unit_abilites_junctions_tables/_mtu_characters_skills_abilities_land_units_duel",
+            "db/land_units_to_unit_abilites_junctions_tables/_mtu_characters_skills_abilities_land_units_elephant_skill",
+            "db/land_units_to_unit_abilites_junctions_tables/data__",
+        ],
+        "unit_abilities": [
+            "unit_abilities",
+            "db/unit_abilities_tables/_mtu_characters_skills_abilities",
+            "db/unit_abilities_tables/data__",
+        ],
+        "unit_special_abilities": [
+            "unit_special_abilities",
+            "db/unit_special_abilities_tables/_mtu_characters_skills_abilities",
+            "db/unit_special_abilities_tables/data__",
+        ],
+        "special_ability_to_special_ability_phase_junctions": [
+            "special_ability_to_special_ability_phase_junctions",
+            "db/special_ability_to_special_ability_phase_junctions_tables/_mtu_characters_skills_abilities",
+            "db/special_ability_to_special_ability_phase_junctions_tables/data__",
+        ],
+        "special_ability_phases": [
+            "special_ability_phases",
+            "db/special_ability_phases_tables/_mtu_characters_skills_abilities",
+            "db/special_ability_phases_tables/data__",
+        ],
+        "special_ability_phase_stat_effects": [
+            "special_ability_phase_stat_effects",
+            "db/special_ability_phase_stat_effects_tables/_mtu_characters_skills_abilities",
+            "db/special_ability_phase_stat_effects_tables/data__",
+        ],
+        "special_ability_phase_attribute_effects": [
+            "special_ability_phase_attribute_effects",
+            "db/special_ability_phase_attribute_effects_tables/_mtu_characters_skills_abilities",
+            "db/special_ability_phase_attribute_effects_tables/data__",
+        ],
+        "special_ability_phase_displays": [
+            "special_ability_phase_displays",
+            "db/special_ability_phase_displays_tables/_mtu_characters_skills_abilities",
+            "db/special_ability_phase_displays_tables/data__",
+        ],
+        "special_ability_to_auto_deactivate_flags": [
+            "special_ability_to_auto_deactivate_flags",
+            "db/special_ability_to_auto_deactivate_flags_tables/_mtu_characters_skills_abilities",
+            "db/special_ability_to_auto_deactivate_flags_tables/data__",
+        ],
+        "special_ability_to_invalid_target_flags": [
+            "special_ability_to_invalid_target_flags",
+            "db/special_ability_to_invalid_target_flags_tables/_mtu_characters_skills_abilities",
+            "db/special_ability_to_invalid_target_flags_tables/data__",
+        ],
+        "special_ability_to_invalid_usage_flags": [
+            "special_ability_to_invalid_usage_flags",
+            "db/special_ability_to_invalid_usage_flags_tables/_mtu_characters_skills_abilities",
+            "db/special_ability_to_invalid_usage_flags_tables/_mtu_characters_skills_elephant_restraint",
+            "db/special_ability_to_invalid_usage_flags_tables/data__",
+        ],
+        "projectile_bombardments": [
+            "projectile_bombardments",
+            "db/projectile_bombardments_tables/_mtu_characters_skills_abilities",
+            "db/projectile_bombardments_tables/data__",
+        ],
+        "projectile_displays": [
+            "projectile_displays",
+            "db/projectile_displays_tables/_mtu_characters_skills_abilities",
+            "db/projectile_displays_tables/data__",
+        ],
+        "projectile_impacts": [
+            "projectile_impacts",
+            "db/projectile_impacts_tables/_mtu_characters_skills_abilities",
+            "db/projectile_impacts_tables/data__",
+        ],
+        "projectiles": [
+            "projectiles",
+            "db/projectiles_tables/_mtu_characters_skills_abilities",
+            "db/projectiles_tables/_mtu_characters_weapons",
+            "db/projectiles_tables/data__",
+        ],
     }
 
 
@@ -3114,6 +3248,43 @@ def _copy_skill_effect_dependencies(
             lambda row, keys=effect_keys: _effect_key(row) in keys,
             _effect_key,
         )
+        _copy_effect_bonus_value_dependencies(tables, table_names, rows_by_table, effect_keys)
+
+
+def _copy_effect_bonus_value_dependencies(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    effect_keys: set[str],
+) -> None:
+    if not effect_keys:
+        return
+    bonus_value_ids: set[str] = set()
+    for row in tables.get("effect_bonus_value_ids_unit_sets", []):
+        effect_key = str(row.get("effect") or row.get("effect_key") or "")
+        if effect_key not in effect_keys:
+            continue
+        bonus_value_id = _effect_bonus_value_id(row)
+        if bonus_value_id:
+            bonus_value_ids.add(bonus_value_id)
+        table_path = row.get("_sourceTablePath") or table_names.get("effect_bonus_value_ids_unit_sets")
+        if table_path:
+            _upsert_delta_row_once(rows_by_table, table_path, _effect_bonus_value_unit_set_key, _clean_source_row(row))
+
+    ability_keys: set[str] = set()
+    for row in tables.get("effect_bonus_value_unit_ability_junctions", []):
+        bonus_value_id = _effect_bonus_value_id(row)
+        effect_key = str(row.get("effect") or row.get("effect_key") or "")
+        if bonus_value_id not in bonus_value_ids and effect_key not in effect_keys:
+            continue
+        ability_key = _effect_bonus_unit_ability(row)
+        if ability_key:
+            ability_keys.add(ability_key)
+        table_path = row.get("_sourceTablePath") or table_names.get("effect_bonus_value_unit_ability_junctions")
+        if table_path:
+            _upsert_delta_row_once(rows_by_table, table_path, _effect_bonus_value_unit_ability_key, _clean_source_row(row))
+
+    _copy_unit_ability_dependencies(tables, table_names, rows_by_table, ability_keys)
 
 
 def _skill_node_clone_key(source_set_key: str, new_set_key: str, source_node_key: str) -> str:
@@ -3149,13 +3320,490 @@ def _copy_retinue_dependency(
             _upsert_delta_row(rows_by_table, table_path, _retinue_slot_key, clean_row)
     for unit_key in unit_keys:
         _copy_matching_rows(tables, table_names, rows_by_table, "land_units", lambda row, key=unit_key: row.get("key") == key, "key")
-        _copy_matching_rows(
+        _copy_land_unit_ability_rows(tables, table_names, rows_by_table, unit_key)
+
+
+def _copy_skill_source_retinue_abilities(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    skill_set: Any,
+    target_retinue: Any,
+) -> None:
+    skill_set_key = str(skill_set or "")
+    target_retinue_key = str(target_retinue or "")
+    if not skill_set_key or not target_retinue_key:
+        return
+    target_slots = _retinue_unit_by_slot(tables.get("retinue_slot_initial_units", []), target_retinue_key)
+    if not target_slots:
+        return
+    ability_keys = _battle_ability_keys_for_skill_set(tables, skill_set_key)
+    if not ability_keys:
+        return
+    source_retinues = [
+        str(row.get("retinue") or "")
+        for row in tables.get("character_generation_template_game_mode_details", [])
+        if row.get("skill_set_override") == skill_set_key
+    ]
+    for source_retinue in _unique_strings(source_retinues):
+        if not source_retinue or source_retinue == target_retinue_key:
+            continue
+        source_slots = _retinue_unit_by_slot(tables.get("retinue_slot_initial_units", []), source_retinue)
+        for slot_index, source_unit in source_slots.items():
+            target_unit = target_slots.get(slot_index)
+            if target_unit:
+                _copy_land_unit_ability_rows(tables, table_names, rows_by_table, source_unit, target_unit, ability_keys)
+    target_character_unit = _first_retinue_unit_key(target_slots)
+    if not target_character_unit:
+        return
+    for row in tables.get("land_units_to_unit_abilites_junctions", []):
+        ability_key = str(row.get("ability") or "")
+        source_unit = str(row.get("land_unit") or "")
+        if ability_key in ability_keys and _is_character_land_unit_key(source_unit):
+            _copy_land_unit_ability_rows(tables, table_names, rows_by_table, source_unit, target_character_unit, ability_keys)
+    for ability_key in ability_keys:
+        _ensure_land_unit_ability_row(
+            tables,
+            table_names,
+            source_dbs,
+            rows_by_table,
+            target_character_unit,
+            ability_key,
+        )
+
+
+def _ensure_land_unit_ability_row(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    target_unit: Any,
+    ability: Any,
+) -> bool:
+    target_unit_key = str(target_unit or "")
+    ability_key = str(ability or "")
+    if not target_unit_key or not ability_key:
+        return False
+    _copy_unit_ability_dependencies(tables, table_names, rows_by_table, {ability_key})
+    if _land_unit_ability_row_exists(tables, rows_by_table, target_unit_key, ability_key):
+        return False
+    table_path = _ensure_dependency_table_name(
+        table_names,
+        source_dbs,
+        "land_units_to_unit_abilites_junctions",
+        "land_units_to_unit_abilites_junctions_tables",
+    )
+    if not table_path:
+        table_path = _first_source_table_path(tables.get("land_units_to_unit_abilites_junctions", []))
+    if not table_path:
+        return False
+    return _upsert_delta_row_once(
+        rows_by_table,
+        table_path,
+        _land_unit_ability_key,
+        {"land_unit": target_unit_key, "ability": ability_key},
+    )
+
+
+def _land_unit_ability_row_exists(
+    tables: dict[str, list[dict[str, Any]]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    target_unit: str,
+    ability: str,
+) -> bool:
+    for row in tables.get("land_units_to_unit_abilites_junctions", []):
+        if str(row.get("land_unit") or "") == target_unit and str(row.get("ability") or "") == ability:
+            return True
+    for table_path, rows in rows_by_table.items():
+        if "land_units_to_unit_abilites_junctions_tables" not in _normalize_pack_path(table_path):
+            continue
+        for row in rows:
+            if str(row.get("land_unit") or "") == target_unit and str(row.get("ability") or "") == ability:
+                return True
+    return False
+
+
+def _first_source_table_path(rows: list[dict[str, Any]]) -> str:
+    for row in rows:
+        table_path = str(row.get("_sourceTablePath") or "")
+        if table_path:
+            return table_path
+    return ""
+
+
+def _retinue_unit_by_slot(rows: list[dict[str, Any]], retinue: str) -> dict[Any, str]:
+    result: dict[Any, str] = {}
+    for row in rows:
+        if row.get("retinue") != retinue:
+            continue
+        unit_key = str(row.get("initial_unit_record") or "")
+        if unit_key:
+            result[row.get("slot_index")] = unit_key
+    return result
+
+
+def _first_retinue_unit_key(slots: dict[Any, str]) -> str:
+    if not slots:
+        return ""
+    if 0 in slots:
+        return slots[0]
+    try:
+        first_slot = sorted(slots)[0]
+    except TypeError:
+        first_slot = next(iter(slots))
+    return slots.get(first_slot, "")
+
+
+def _is_character_land_unit_key(unit_key: str) -> bool:
+    return "_hero_" in unit_key or "_general_" in unit_key or unit_key.startswith(("3k_main_hero", "3k_main_general"))
+
+
+def _battle_ability_keys_for_skill_set(tables: dict[str, list[dict[str, Any]]], skill_set: str) -> set[str]:
+    skill_keys = {
+        str(row.get("character_skill_key") or "")
+        for row in tables.get("character_skill_nodes", [])
+        if row.get("character_skill_node_set_key") == skill_set and row.get("character_skill_key")
+    }
+    effect_keys = {
+        str(row.get("effect_key") or "")
+        for row in tables.get("character_skill_level_to_effects_junctions", [])
+        if str(row.get("character_skill_key") or "") in skill_keys and row.get("effect_key")
+    }
+    candidates: set[str] = set()
+    for key in [*skill_keys, *effect_keys]:
+        candidates.update(_battle_ability_key_candidates(key))
+    known_land_unit_abilities = {
+        str(row.get("ability") or "")
+        for row in tables.get("land_units_to_unit_abilites_junctions", [])
+        if row.get("ability")
+    }
+    known_unit_abilities = {
+        str(row.get("key") or "")
+        for row in tables.get("unit_abilities", [])
+        if row.get("key")
+    }
+    effect_bonus_abilities = _battle_ability_keys_from_effect_bonus_rows(tables, effect_keys)
+    explicit_abilities = {
+        key
+        for key in effect_bonus_abilities
+        if key in known_land_unit_abilities or key in known_unit_abilities
+    }
+    existing_junction_abilities = {key for key in candidates if key in known_land_unit_abilities}
+    return explicit_abilities | existing_junction_abilities
+
+
+def _battle_ability_keys_from_effect_bonus_rows(
+    tables: dict[str, list[dict[str, Any]]],
+    effect_keys: set[str],
+) -> set[str]:
+    if not effect_keys:
+        return set()
+    bonus_value_ids = {
+        _effect_bonus_value_id(row)
+        for row in tables.get("effect_bonus_value_ids_unit_sets", [])
+        if str(row.get("effect") or row.get("effect_key") or "") in effect_keys
+    }
+    bonus_value_ids.discard("")
+    return {
+        _effect_bonus_unit_ability(row)
+        for row in tables.get("effect_bonus_value_unit_ability_junctions", [])
+        if (
+            _effect_bonus_value_id(row) in bonus_value_ids
+            or str(row.get("effect") or row.get("effect_key") or "") in effect_keys
+        )
+        and _effect_bonus_unit_ability(row)
+    }
+
+
+def _battle_ability_key_candidates(source_key: str) -> set[str]:
+    key = str(source_key or "").strip()
+    if not key:
+        return set()
+    candidates = {key}
+    special_marker = "_skill_special_ability_"
+    if special_marker in key:
+        prefix, suffix = key.split(special_marker, 1)
+        parts = suffix.split("_", 1)
+        if parts[0] in {"metal", "wood", "water", "fire", "earth"} and len(parts) == 2:
+            suffix = parts[1]
+        candidates.add(f"{prefix}_ability_{suffix}")
+        candidates.add(f"{prefix}_special_ability_{suffix}")
+    for marker in ("_skill_", "_skill_effect_"):
+        if marker in key:
+            prefix, suffix = key.split(marker, 1)
+            candidates.add(f"{prefix}_ability_{suffix}")
+            candidates.add(f"{prefix}_special_ability_{suffix}")
+    if key.startswith("3k_main_skill_"):
+        candidates.add(f"3k_main_ability_{key.removeprefix('3k_main_skill_')}")
+    return candidates
+
+
+def _copy_land_unit_ability_rows(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    source_unit: Any,
+    target_unit: Any | None = None,
+    ability_filter: set[str] | None = None,
+) -> int:
+    source_unit_key = str(source_unit or "")
+    target_unit_key = str(target_unit or source_unit_key)
+    if not source_unit_key or not target_unit_key:
+        return 0
+    ability_keys: set[str] = set()
+    copied = 0
+    for row in tables.get("land_units_to_unit_abilites_junctions", []):
+        if row.get("land_unit") != source_unit_key:
+            continue
+        ability_key = str(row.get("ability") or "")
+        if ability_filter is not None and ability_key not in ability_filter:
+            continue
+        if ability_key:
+            ability_keys.add(ability_key)
+        table_path = row.get("_sourceTablePath") or table_names.get("land_units_to_unit_abilites_junctions")
+        if not table_path:
+            continue
+        clean_row = _clean_source_row(row)
+        clean_row["land_unit"] = target_unit_key
+        if _upsert_delta_row_once(rows_by_table, table_path, _land_unit_ability_key, clean_row):
+            copied += 1
+    _copy_unit_ability_dependencies(tables, table_names, rows_by_table, ability_keys)
+    return copied
+
+
+def _copy_unit_ability_dependencies(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    ability_keys: set[str],
+    seen_special_abilities: set[str] | None = None,
+    seen_projectiles: set[str] | None = None,
+) -> None:
+    ability_keys = {str(key) for key in ability_keys if str(key or "")}
+    if not ability_keys:
+        return
+    special_ability_keys: set[str] = set()
+    for row in tables.get("unit_abilities", []):
+        ability_key = str(row.get("key") or "")
+        if ability_key not in ability_keys:
+            continue
+        special_key = str(row.get("type") or "")
+        if special_key:
+            special_ability_keys.add(special_key)
+        table_path = row.get("_sourceTablePath") or table_names.get("unit_abilities")
+        if table_path:
+            _upsert_delta_row_once(rows_by_table, table_path, "key", _clean_source_row(row))
+    _copy_special_ability_dependencies(
+        tables,
+        table_names,
+        rows_by_table,
+        special_ability_keys,
+        seen_special_abilities,
+        seen_projectiles,
+    )
+
+
+def _copy_special_ability_dependencies(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    special_ability_keys: set[str],
+    seen_special_abilities: set[str] | None = None,
+    seen_projectiles: set[str] | None = None,
+) -> None:
+    if seen_special_abilities is None:
+        seen_special_abilities = set()
+    special_ability_keys = {
+        str(key)
+        for key in special_ability_keys
+        if str(key or "") and str(key) not in seen_special_abilities
+    }
+    if not special_ability_keys:
+        return
+    seen_special_abilities.update(special_ability_keys)
+    projectile_keys: set[str] = set()
+    bombardment_keys: set[str] = set()
+    phase_keys: set[str] = set()
+    for row in tables.get("unit_special_abilities", []):
+        special_key = str(row.get("key") or "")
+        if special_key not in special_ability_keys:
+            continue
+        projectile_key = str(row.get("activated_projectile") or "")
+        if projectile_key:
+            projectile_keys.add(projectile_key)
+        bombardment_key = str(row.get("bombardment") or "")
+        if bombardment_key:
+            bombardment_keys.add(bombardment_key)
+        table_path = row.get("_sourceTablePath") or table_names.get("unit_special_abilities")
+        if table_path:
+            _upsert_delta_row_once(rows_by_table, table_path, "key", _clean_source_row(row))
+    for row in tables.get("special_ability_to_special_ability_phase_junctions", []):
+        special_key = str(row.get("special_ability") or "")
+        if special_key not in special_ability_keys:
+            continue
+        phase_key = str(row.get("phase") or "")
+        if phase_key:
+            phase_keys.add(phase_key)
+        table_path = row.get("_sourceTablePath") or table_names.get("special_ability_to_special_ability_phase_junctions")
+        if table_path:
+            _upsert_delta_row_once(rows_by_table, table_path, _special_ability_phase_link_key, _clean_source_row(row))
+    if not phase_keys:
+        phase_keys.update(special_ability_keys)
+    phase_display_keys = {
+        str(row.get("phase_display") or row.get("display") or "")
+        for row in tables.get("special_ability_phases", [])
+        if str(row.get("id") or "") in phase_keys and str(row.get("phase_display") or row.get("display") or "")
+    }
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "special_ability_phases",
+        lambda row, keys=phase_keys: str(row.get("id") or "") in keys,
+        "id",
+    )
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "special_ability_phase_stat_effects",
+        lambda row, keys=phase_keys: str(row.get("phase") or "") in keys,
+        _special_ability_phase_stat_effect_key,
+    )
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "special_ability_phase_attribute_effects",
+        lambda row, keys=phase_keys: str(row.get("phase") or "") in keys,
+        _special_ability_phase_attribute_effect_key,
+    )
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "special_ability_phase_displays",
+        lambda row, keys=phase_display_keys: _generic_key_or_id(row) in keys,
+        _generic_key_or_id,
+    )
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "special_ability_to_auto_deactivate_flags",
+        lambda row, keys=special_ability_keys: str(row.get("special_ability") or "") in keys,
+        _special_ability_auto_deactivate_flag_key,
+    )
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "special_ability_to_invalid_target_flags",
+        lambda row, keys=special_ability_keys: str(row.get("special_ability") or "") in keys,
+        _special_ability_invalid_target_flag_key,
+    )
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "special_ability_to_invalid_usage_flags",
+        lambda row, keys=special_ability_keys: str(row.get("special_ability") or "") in keys,
+        _special_ability_invalid_usage_flag_key,
+    )
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "projectile_bombardments",
+        lambda row, keys=bombardment_keys: _generic_key_or_id(row) in keys,
+        _generic_key_or_id,
+    )
+    if projectile_keys:
+        _copy_projectile_dependencies(
             tables,
             table_names,
             rows_by_table,
-            "land_units_to_unit_abilites_junctions",
-            lambda row, key=unit_key: row.get("land_unit") == key,
-            _land_unit_ability_key,
+            projectile_keys,
+            seen_special_abilities,
+            seen_projectiles,
+        )
+
+
+def _copy_projectile_dependencies(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    projectile_keys: set[str],
+    seen_special_abilities: set[str] | None = None,
+    seen_projectiles: set[str] | None = None,
+) -> None:
+    if seen_projectiles is None:
+        seen_projectiles = set()
+    projectile_keys = {
+        str(key)
+        for key in projectile_keys
+        if str(key or "") and str(key) not in seen_projectiles
+    }
+    if not projectile_keys:
+        return
+    seen_projectiles.update(projectile_keys)
+
+    contact_effect_keys: set[str] = set()
+    display_keys: set[str] = set()
+    impact_keys: set[str] = set()
+    for row in tables.get("projectiles", []):
+        projectile_key = str(row.get("key") or "")
+        if projectile_key not in projectile_keys:
+            continue
+        for field in ("contact_stat_effect", "contact_phase"):
+            contact_key = str(row.get(field) or "")
+            if contact_key:
+                contact_effect_keys.add(contact_key)
+        for field in ("projectile_display", "projectile_audio"):
+            display_key = str(row.get(field) or "")
+            if display_key:
+                display_keys.add(display_key)
+        for field in ("projectile_impact", "impact", "detonation_impact", "collision_impact"):
+            impact_key = str(row.get(field) or "")
+            if impact_key:
+                impact_keys.add(impact_key)
+        table_path = row.get("_sourceTablePath") or table_names.get("projectiles")
+        if table_path:
+            _upsert_delta_row_once(rows_by_table, table_path, "key", _clean_source_row(row))
+
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "projectile_displays",
+        lambda row, keys=display_keys: _generic_key_or_id(row) in keys,
+        _generic_key_or_id,
+    )
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "projectile_impacts",
+        lambda row, keys=impact_keys: _generic_key_or_id(row) in keys,
+        _generic_key_or_id,
+    )
+    if contact_effect_keys:
+        _copy_unit_ability_dependencies(
+            tables,
+            table_names,
+            rows_by_table,
+            contact_effect_keys,
+            seen_special_abilities,
+            seen_projectiles,
+        )
+        _copy_special_ability_dependencies(
+            tables,
+            table_names,
+            rows_by_table,
+            contact_effect_keys,
+            seen_special_abilities,
+            seen_projectiles,
         )
 
 
@@ -3176,6 +3824,25 @@ def _copy_matching_rows(
                 continue
             clean_row = _clean_source_row(row)
             _upsert_delta_row(rows_by_table, table_path, key_field, clean_row)
+
+
+def _copy_matching_rows_once(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    alias: str,
+    predicate: Any,
+    key_field: str | Any,
+) -> None:
+    if alias not in tables:
+        return
+    for row in tables[alias]:
+        if not predicate(row):
+            continue
+        table_path = row.get("_sourceTablePath") or table_names.get(alias)
+        if not table_path:
+            continue
+        _upsert_delta_row_once(rows_by_table, table_path, key_field, _clean_source_row(row))
 
 
 def _optional_table_names(session: RpfmPackSession, aliases: dict[str, list[str]]) -> dict[str, str]:
@@ -3419,6 +4086,10 @@ def _dependency_key_for_alias(alias: str) -> str | Any:
         return _skill_link_key
     if alias == "character_skill_level_to_effects_junctions":
         return _skill_effect_key
+    if alias == "effect_bonus_value_ids_unit_sets":
+        return _effect_bonus_value_unit_set_key
+    if alias == "effect_bonus_value_unit_ability_junctions":
+        return _effect_bonus_value_unit_ability_key
     if alias == "frontend_character_ceos":
         return _frontend_character_ceo_key
     if alias == "ceo_initial_data_to_stages":
@@ -3433,10 +4104,28 @@ def _dependency_key_for_alias(alias: str) -> str | Any:
         return _retinue_aspect_key
     if alias == "land_units_to_unit_abilites_junctions":
         return _land_unit_ability_key
+    if alias == "special_ability_to_special_ability_phase_junctions":
+        return _special_ability_phase_link_key
+    if alias == "special_ability_phase_stat_effects":
+        return _special_ability_phase_stat_effect_key
+    if alias == "special_ability_phase_attribute_effects":
+        return _special_ability_phase_attribute_effect_key
+    if alias == "special_ability_phase_displays":
+        return _generic_key_or_id
+    if alias == "special_ability_to_auto_deactivate_flags":
+        return _special_ability_auto_deactivate_flag_key
+    if alias == "special_ability_to_invalid_target_flags":
+        return _special_ability_invalid_target_flag_key
+    if alias == "special_ability_to_invalid_usage_flags":
+        return _special_ability_invalid_usage_flag_key
+    if alias in {"projectile_bombardments", "projectile_displays", "projectile_impacts"}:
+        return _generic_key_or_id
     if alias == "main_units":
         return _main_unit_key
     if alias == "effects":
         return _effect_key
+    if alias == "special_ability_phases":
+        return "id"
     return "key"
 
 
@@ -3588,6 +4277,14 @@ def _table_key_for_path(path: str, source_db: dict[str, Any]) -> str | Any | Non
         "cai_retinues_to_aspects_tables": "cai_retinues_to_aspects",
         "land_units_tables": "land_units",
         "land_units_to_unit_abilites_junctions_tables": "land_units_to_unit_abilites_junctions",
+        "unit_abilities_tables": "unit_abilities",
+        "unit_special_abilities_tables": "unit_special_abilities",
+        "special_ability_to_special_ability_phase_junctions_tables": "special_ability_to_special_ability_phase_junctions",
+        "special_ability_phases_tables": "special_ability_phases",
+        "special_ability_phase_stat_effects_tables": "special_ability_phase_stat_effects",
+        "special_ability_phase_attribute_effects_tables": "special_ability_phase_attribute_effects",
+        "special_ability_to_invalid_usage_flags_tables": "special_ability_to_invalid_usage_flags",
+        "projectiles_tables": "projectiles",
         "main_units_tables": "main_units",
         "effects_tables": "effects",
         "frontend_character_ceos_tables": "frontend_character_ceos",
@@ -5091,6 +5788,33 @@ def _upsert_delta_row(
     rows.append(row)
 
 
+def _upsert_delta_row_once(
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    table_name: str,
+    key_field: str | Any,
+    row: dict[str, Any],
+) -> bool:
+    row_key = key_field(row) if callable(key_field) else row.get(key_field)
+    target_family = _delta_table_family(table_name)
+    for existing_table, rows in rows_by_table.items():
+        if _delta_table_family(existing_table) != target_family:
+            continue
+        for existing in rows:
+            existing_key = key_field(existing) if callable(key_field) else existing.get(key_field)
+            if existing_key == row_key:
+                return False
+    _upsert_delta_row(rows_by_table, table_name, key_field, row)
+    return True
+
+
+def _delta_table_family(table_name: str) -> str:
+    normalized = _normalize_pack_path(str(table_name or ""))
+    if "/" not in normalized:
+        return normalized
+    folder = normalized.rsplit("/", 1)[0]
+    return folder.rsplit("/", 1)[-1]
+
+
 def _find_delta_row(
     rows_by_table: dict[str, list[dict[str, Any]]],
     key_field: str | Any,
@@ -5282,6 +6006,33 @@ def _skill_effect_key(row: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
     )
 
 
+def _effect_bonus_value_id(row: dict[str, Any]) -> str:
+    return str(
+        row.get("bonus_value_id")
+        or row.get("effect_bonus_value_id")
+        or row.get("bonus_value")
+        or ""
+    )
+
+
+def _effect_bonus_unit_ability(row: dict[str, Any]) -> str:
+    return str(
+        row.get("unit_ability")
+        or row.get("ability")
+        or row.get("unit_abilities")
+        or row.get("unit_ability_key")
+        or ""
+    )
+
+
+def _effect_bonus_value_unit_set_key(row: dict[str, Any]) -> tuple[Any, Any, Any]:
+    return _effect_bonus_value_id(row), row.get("effect") or row.get("effect_key"), row.get("unit_set")
+
+
+def _effect_bonus_value_unit_ability_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return _effect_bonus_value_id(row), _effect_bonus_unit_ability(row)
+
+
 def _retinue_aspect_key(row: dict[str, Any]) -> tuple[Any, Any]:
     return row.get("retinue"), row.get("aspect")
 
@@ -5292,6 +6043,34 @@ def _retinue_slot_key(row: dict[str, Any]) -> tuple[Any, Any]:
 
 def _land_unit_ability_key(row: dict[str, Any]) -> tuple[Any, Any]:
     return row.get("land_unit"), row.get("ability")
+
+
+def _special_ability_phase_link_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return row.get("special_ability"), row.get("order")
+
+
+def _special_ability_phase_stat_effect_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return row.get("phase"), row.get("stat")
+
+
+def _special_ability_phase_attribute_effect_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return row.get("phase"), row.get("attribute")
+
+
+def _special_ability_auto_deactivate_flag_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return row.get("special_ability"), row.get("auto_deactivate_flag") or row.get("flag")
+
+
+def _special_ability_invalid_target_flag_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return row.get("special_ability"), row.get("invalid_target_flag") or row.get("invalid_target") or row.get("flag")
+
+
+def _special_ability_invalid_usage_flag_key(row: dict[str, Any]) -> tuple[Any, Any]:
+    return row.get("special_ability"), row.get("invalid_usage_flag")
+
+
+def _generic_key_or_id(row: dict[str, Any]) -> str:
+    return str(row.get("key") or row.get("id") or row.get("name") or "")
 
 
 def _main_unit_key(row: dict[str, Any]) -> Any:
