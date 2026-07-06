@@ -477,8 +477,8 @@ function recipeFromQueue() {
         detailOverridesWithSkill[mode] = compactObject({
           ...detailOverridesWithSkill[mode],
           initial_ceos: cloneInitialCeoForMode(mode),
-          min_rank: 4,
-          max_rank: 4,
+          min_rank: 3,
+          max_rank: 3,
         });
       }
       const clonedSkillSetOverride = skillSetCloneFromPayload(recipe, payload.skillTree, customTemplateKey, itemNumber);

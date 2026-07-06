@@ -13,7 +13,7 @@ from .recipe import CharacterClone, CharacterPatch
 
 PLAYER_SPAWN_EVENTS = {"campaign_start", "delayed_join"}
 CHARACTER_GAME_MODES = ("historical", "romance")
-GENERATED_CHARACTER_START_RANK = 4
+GENERATED_CHARACTER_START_RANK = 3
 
 CHARACTER_TABLE_ALIASES = {
     "character_generation_templates": [

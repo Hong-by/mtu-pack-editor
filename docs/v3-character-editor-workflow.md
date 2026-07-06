@@ -39,7 +39,7 @@ These rules are the baseline contract, not optimization details. If code changes
   Reason: first-turn listeners and dual campaign script paths can race. The Lua side must lock both already-created templates and in-progress spawn attempts, so double triggers do not become double characters.
 - Spawn age is not silently normalized. If the user enters a birth year, clone a spawn-age row with that value; if the field is blank, preserve the base/source character's `spawn_age_range`.
   Reason: the editor must not reinterpret user intent. Child-chain risk is real for young sources, but changing it is an explicit UI choice, not a hidden builder correction.
-- Generated characters always write `min_rank = 4` and `max_rank = 4` in both historical and romance detail rows.
+- Generated characters always write `min_rank = 3` and `max_rank = 3` in both historical and romance detail rows. The game displays this as starting rank 4.
   Reason: the created general should enter the campaign at a fixed usable rank instead of inheriting a low or variable source rank.
 - The generated Lua is packed at both `script/campaign/3k_main_campaign_map/mod/hby_mtu_pack_editor_player_spawn.lua` and `script/campaign/3k_main_campaign_map/hby_mtu_pack_editor_player_spawn.lua`.
   Reason: local 3K/Korea extracted scripts differ on campaign-map subfolder loading. The shared `attempt_key` prevents the dual write from creating duplicate characters if both paths load.

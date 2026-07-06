@@ -2653,7 +2653,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         details = rows_by_table["db/character_generation_template_game_mode_details_tables/_mtu_characters"]
         self.assertEqual({row["game_mode"] for row in details}, {"historical", "romance"})
         self.assertTrue(all(row["retinue"] == "hby_retinue_new" for row in details))
-        self.assertTrue(all(row["min_rank"] == 4 and row["max_rank"] == 4 for row in details))
+        self.assertTrue(all(row["min_rank"] == 3 and row["max_rank"] == 3 for row in details))
         art = rows_by_table["db/campaign_character_arts_tables/_mtu_characters"][0]
         self.assertEqual(art["art_set_id"], "hby_art_new")
         self.assertEqual(art["portrait"], "hby_template_new/")

@@ -37,7 +37,7 @@ CAMPAIGN_SPAWN_SCRIPT_PATHS = (
     "script/campaign/3k_main_campaign_map/hby_mtu_pack_editor_player_spawn.lua",
 )
 SPAWN_EVENT_TEMPLATE_WEIGHT = 19.5
-GENERATED_CHARACTER_START_RANK = 4
+GENERATED_CHARACTER_START_RANK = 3
 SPAWN_INCIDENT_EVENT_CATEGORY = "historical"
 CHARACTER_GAME_MODES = ("historical", "romance")
 MTU_CHARACTER_ART_SETS_TABLE = "db/campaign_character_art_sets_tables/_mtu_characters"
