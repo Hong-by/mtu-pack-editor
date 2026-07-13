@@ -188,7 +188,7 @@ class WebAppConfigTest(unittest.TestCase):
         normalize_js = read_web_script("app-normalize.js")
         server_js = read_web_script("app-server.js")
 
-        self.assertIn("OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 21", web_py)
+        self.assertIn("OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 23", web_py)
         self.assertIn('json.dumps(payload, ensure_ascii=False, separators=(",", ":"))', web_py)
         self.assertIn('"assetCacheToken": asset_cache_token', web_py)
         self.assertIn('cached["assetCacheToken"] = asset_cache_token', web_py)
@@ -332,6 +332,31 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertNotIn("id=\"${prefix}ArmourValue\"", helpers_js)
         self.assertNotIn("id=\"${prefix}ArmourAudioType\"", helpers_js)
         self.assertNotIn("unit_armour_types row patch", helpers_js)
+
+    def test_equipment_sets_grant_ceos_without_removal_filters(self) -> None:
+        helpers_js = read_web_script("app-form-helpers.js")
+        recipe_js = read_web_script("app-recipe.js")
+        queue_js = read_web_script("app-queue.js")
+
+        self.assertIn("ceoSetRuntimeKeys(kind, set.ceoKeys)", helpers_js)
+        self.assertIn("ceoSetRuntimeKeys(kind, keys)", helpers_js)
+        self.assertIn("removeCeos: kind === 'equipment' ? [] : ceoSetKnownNodeKeys(kind)", helpers_js)
+        self.assertIn("function defaultCharacterEquipmentCeos(character, equipmentSet = null)", helpers_js)
+        self.assertIn("return uniqueCeoKeys([character?.weaponCeo, character?.missileWeaponCeo, character?.armourCeo]);", helpers_js)
+        self.assertNotIn("function runtimeEquipmentCeoKey", helpers_js)
+        self.assertIn("defaultEquipmentCeos: defaultCharacterEquipmentCeos(combat, equipmentSet)", queue_js)
+        self.assertIn("function runtimeArmourCeoKey(value)", read_web_script("app-normalize.js"))
+        self.assertNotIn("return key.replace('_ancillary_armour_', '_ancillary_');", read_web_script("app-normalize.js"))
+        self.assertIn("weaponCeo: combatStats.weaponCeo || ''", read_web_script("app-normalize.js"))
+        self.assertIn("const defaultEquipmentCeos = uniqueCeoKeys(payload?.defaultEquipmentCeos || [])", recipe_js)
+        self.assertIn("fields.defaultEquipmentCeoKeys = defaultEquipmentCeos", recipe_js)
+        self.assertIn("fields.traitCeoKeys = characterAddCeos", recipe_js)
+        self.assertIn("function inventoryEquipmentSetCeos(addCeos, defaultEquipmentCeos = [])", recipe_js)
+        self.assertIn("const equipmentAddCeos = inventoryEquipmentSetCeos(payload.equipmentSet.addCeos, defaultEquipmentCeos)", recipe_js)
+        self.assertIn("function characterEquipmentSlotFromCeoKey(ceoKey)", recipe_js)
+        self.assertIn("key.includes('_ancillary_') && (key.includes('_armour_') || key.includes('_armor_'))", recipe_js)
+        self.assertIn("fields.removableEquipmentCeoKeys = []", recipe_js)
+        self.assertNotIn("isArmourCeoKey", helpers_js)
 
     def test_roster_selection_avoids_full_list_and_queue_rerender(self) -> None:
         render_js = read_web_script("app-render.js")
@@ -497,6 +522,10 @@ class WebAppConfigTest(unittest.TestCase):
         catalog_js = read_web_script("app-catalog.js")
 
         self.assertIn("function isTemplateVariantPoolCharacter", catalog_js)
+        self.assertIn("function usesSharedPuzzleModel(character)", catalog_js)
+        self.assertIn("^sad_[mf]_(earth|fire|metal|water|wood)$", catalog_js)
+        self.assertIn("sad_artsets", catalog_js)
+        self.assertIn("if (usesSharedPuzzleModel(character)) return true;", catalog_js)
         self.assertIn("function selectableFallbackCharacters()", catalog_js)
         self.assertIn("function isLowQualityGeneratedCharacter(character)", catalog_js)
         self.assertIn("function isLowInformationGeneratedName(value)", catalog_js)
@@ -609,6 +638,24 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("hasRealTemplateRow(character)", catalog_js)
         self.assertIn("&& hasCharacterDetails(character)", catalog_js)
         self.assertIn("function selectableFallbackCharacters()", catalog_js)
+
+    def test_female_fire_and_wood_remain_selectable_with_warning_only(self) -> None:
+        editor_js = read_web_script("app-editor.js")
+        server_js = read_web_script("app-server.js")
+        index_html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        app_css = (ROOT / "web" / "app.css").read_text(encoding="utf-8")
+
+        self.assertIn("function createSubtypeOptions(gender)", editor_js)
+        self.assertIn("new Set(['fire', 'wood'])", editor_js)
+        self.assertIn("⚠ 공용 여성 모델 없음", editor_js)
+        self.assertNotIn(".filter(([key]) => gender !== 'female'", editor_js)
+        self.assertIn("return Object.entries(ELEMENTS).map", editor_js)
+        self.assertIn('id="createSubtypeWarning"', index_html)
+        self.assertIn('aria-live="polite"', index_html)
+        self.assertIn("function syncCreateSubtypeWarning()", editor_js)
+        self.assertIn("바닐라에는 이 오행의 공용 여성 3D 모델이 없습니다", editor_js)
+        self.assertIn("syncCreateSubtypeWarning();", server_js)
+        self.assertIn(".create-subtype-warning", app_css)
 
 
 if __name__ == "__main__":

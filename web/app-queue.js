@@ -189,6 +189,7 @@ function stageCreate() {
     traitSet,
     attributeSetClone,
     equipmentSet,
+    defaultEquipmentCeos: defaultCharacterEquipmentCeos(combat, equipmentSet),
     unitStatClone,
     spawn: {
       ageRange: createAgeRange?.newKey || spawnAgeSourceKey,

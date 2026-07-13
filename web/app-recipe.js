@@ -79,17 +79,40 @@ function skillSetCloneFromPayload(recipe, snapshot, ownerKey, index, options = {
 
 function ceoSetRecipeFields(payload) {
   const fields = {};
-  if (payload?.traitSet?.addCeos?.length) {
-    fields.traitSetKey = payload.traitSet.setKey;
-    fields.traitCeoKeys = payload.traitSet.addCeos;
-    fields.removableTraitCeoKeys = payload.traitSet.removeCeos || [];
+  const characterAddCeos = uniqueCeoKeys(payload?.traitSet?.addCeos || []);
+  if (characterAddCeos.length) {
+    fields.traitSetKey = payload.traitSet?.setKey;
+    fields.traitCeoKeys = characterAddCeos;
+    fields.removableTraitCeoKeys = payload.traitSet?.removeCeos || [];
+  }
+  const defaultEquipmentCeos = uniqueCeoKeys(payload?.defaultEquipmentCeos || []);
+  if (defaultEquipmentCeos.length) {
+    fields.defaultEquipmentCeoKeys = defaultEquipmentCeos;
   }
   if (payload?.equipmentSet?.addCeos?.length) {
+    const equipmentAddCeos = inventoryEquipmentSetCeos(payload.equipmentSet.addCeos, defaultEquipmentCeos);
+    if (!equipmentAddCeos.length) return fields;
     fields.equipmentSetKey = payload.equipmentSet.setKey;
-    fields.equipmentCeoKeys = payload.equipmentSet.addCeos;
-    fields.removableEquipmentCeoKeys = payload.equipmentSet.removeCeos || [];
+    fields.equipmentCeoKeys = equipmentAddCeos;
+    fields.removableEquipmentCeoKeys = [];
   }
   return fields;
+}
+
+function inventoryEquipmentSetCeos(addCeos, defaultEquipmentCeos = []) {
+  const defaultSlots = new Set(uniqueCeoKeys(defaultEquipmentCeos).map(characterEquipmentSlotFromCeoKey).filter(Boolean));
+  return uniqueCeoKeys(addCeos).filter((ceoKey) => {
+    const slot = characterEquipmentSlotFromCeoKey(ceoKey);
+    return !slot || !defaultSlots.has(slot);
+  });
+}
+
+function characterEquipmentSlotFromCeoKey(ceoKey) {
+  const key = String(ceoKey || '').toLowerCase();
+  if (key.includes('_ancillary_weapon_') || key.includes('_ancilliary_weapon_') || key.includes('_ancillary_bow_')) return 'weapon';
+  if (key.includes('_ancillary_armour_') || key.includes('_ancilliary_armour_')) return 'armour';
+  if (key.includes('_ancillary_') && (key.includes('_armour_') || key.includes('_armor_'))) return 'armour';
+  return '';
 }
 
 function pushEquipmentStatPatch(recipe, patch) {

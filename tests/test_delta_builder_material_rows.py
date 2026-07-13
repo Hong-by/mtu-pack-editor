@@ -32,6 +32,185 @@ from tk_pack_builder.recipe import ArmourTypeClone, AttributeSetClone, Character
 
 
 class DeltaBuilderMaterialRowsTest(unittest.TestCase):
+    def test_custom_image_uses_generic_female_metal_art_compatibility(self) -> None:
+        image_assets = []
+        for panel in ("large_panel", "small_panel"):
+            for emotion in ("angry", "happy", "norm"):
+                image_assets.append({
+                    "path": f"source/composites/{panel}/{emotion}/{emotion}.png",
+                    "targetPath": (
+                        "ui/characters/hby_clone_lady_ma_yunlu_metal_1/"
+                        f"composites/{panel}/{emotion}/{emotion}.png"
+                    ),
+                })
+        for still in ("bobbleheads", "halfbody_large", "halfbody_small", "mini", "unitcards"):
+            image_assets.extend([
+                {
+                    "path": f"source/stills/{still}/source.png",
+                    "targetPath": f"ui/characters/hby_clone_lady_ma_yunlu_metal_1/stills/{still}/target.png",
+                },
+                {
+                    "path": f"source/stills/{still}/large/source.png",
+                    "targetPath": f"ui/characters/hby_clone_lady_ma_yunlu_metal_1/stills/{still}/large/target.png",
+                },
+            ])
+        clone = CharacterClone(
+            new_template_key="hby_template_ma_yunlu_clone",
+            source_template_key="3k_mtu_template_historical_lady_ma_yunlu_hero_metal",
+            detail_source_template_key="3k_mtu_template_historical_lady_ma_yunlu_hero_metal",
+            new_art_set_id="hby_art_ma_yunlu_clone",
+            art_set_source_id="3k_mtu_art_set_historical_lady_ma_yunlu_general",
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={"is_male": False, "subtype": "3k_general_metal"},
+            detail_overrides={
+                "historical": {"initial_ceos": "3k_mtu_ceo_initial_data_character_historical_lady_ma_yunlu"},
+                "romance": {"initial_ceos": "3k_mtu_ceo_initial_data_character_historical_lady_ma_yunlu"},
+            },
+            art_set_overrides={},
+            art_overrides={
+                "portrait": "hby_clone_lady_ma_yunlu_metal_1/",
+                "card": "hby_clone_lady_ma_yunlu_metal_1",
+                "fallback_composite_display": "EMPTY",
+            },
+            age_range_overrides={},
+            image_assets=image_assets,
+        )
+
+        compatible = delta_builder._with_generic_female_art_compatibility(
+            clone,
+            {"is_male": False, "subtype": "3k_general_metal"},
+        )
+
+        self.assertEqual(compatible.art_overrides["portrait"], clone.art_overrides["portrait"])
+        self.assertEqual(compatible.art_overrides["card"], clone.art_overrides["card"])
+        self.assertEqual(
+            compatible.art_overrides["uniform"],
+            delta_builder.GENERIC_FEMALE_UNIFORM,
+        )
+        self.assertEqual(
+            compatible.art_overrides["fallback_composite_display"],
+            delta_builder.GENERIC_FEMALE_COMPATIBILITY["metal"]["fallback"],
+        )
+        self.assertEqual(
+            compatible.detail_overrides["historical"]["initial_ceos"],
+            delta_builder.GENERIC_FEMALE_COMPATIBILITY["metal"]["initial_ceo"],
+        )
+        self.assertEqual(
+            compatible.detail_overrides["romance"]["initial_ceos"],
+            delta_builder.GENERIC_FEMALE_COMPATIBILITY["metal"]["initial_ceo"],
+        )
+        self.assertEqual(len(compatible.image_assets or []), len(image_assets) + 192)
+        self.assertTrue(any(
+            asset.get("targetPath") == (
+                "ui/characters/hby_clone_lady_ma_yunlu_metal_1/composites/"
+                "3k_main_ancillary_armour_medium_leather_common_shared_female/"
+                "large_panel/norm/norm.png"
+            )
+            for asset in compatible.image_assets or []
+        ))
+
+    def test_custom_female_art_uses_matching_earth_and_water_compatibility(self) -> None:
+        def make_clone(subtype: str) -> CharacterClone:
+            return CharacterClone(
+                new_template_key=f"hby_template_{subtype}",
+                source_template_key="source_unique_female",
+                detail_source_template_key="source_unique_female",
+                new_art_set_id=f"hby_art_{subtype}",
+                art_set_source_id="source_art",
+                new_age_range_key=None,
+                age_range_source_key=None,
+                new_initial_ceo_key=None,
+                initial_ceo_source_key="source_unique_initial_ceo",
+                template_overrides={"is_male": False, "subtype": subtype},
+                detail_overrides={},
+                art_set_overrides={},
+                art_overrides={"portrait": "hby_custom/", "card": "hby_custom"},
+                age_range_overrides={},
+                default_equipment_ceo_keys=("3k_test_ancillary_armour_source_unique",),
+                image_assets=[
+                    {
+                        "path": "source/composites/large_panel/norm/norm.png",
+                        "targetPath": "ui/characters/hby_custom/composites/large_panel/norm/norm.png",
+                    },
+                    {
+                        "path": "source/stills/halfbody_large/source.png",
+                        "targetPath": "ui/characters/hby_custom/stills/halfbody_large/source.png",
+                    },
+                ],
+            )
+
+        for element in ("earth", "water"):
+            clone = make_clone(f"3k_general_{element}")
+            compatible = delta_builder._with_generic_female_art_compatibility(
+                clone,
+                clone.template_overrides,
+            )
+            settings = delta_builder.GENERIC_FEMALE_COMPATIBILITY[element]
+            self.assertEqual(
+                compatible.detail_overrides["historical"]["initial_ceos"],
+                settings["initial_ceo"],
+            )
+            self.assertEqual(
+                compatible.art_overrides["fallback_composite_display"],
+                settings["fallback"],
+            )
+            self.assertEqual(compatible.default_equipment_ceo_keys, ())
+            self.assertEqual(
+                len(compatible.image_assets or []),
+                2 + 2 * len(settings["armour_displays"]),
+            )
+
+    def test_custom_female_fire_and_wood_are_not_given_nonexistent_generic_art(self) -> None:
+        for element in ("fire", "wood"):
+            clone = CharacterClone(
+                new_template_key=f"hby_template_{element}",
+                source_template_key="source_unique_female",
+                detail_source_template_key="source_unique_female",
+                new_art_set_id=f"hby_art_{element}",
+                art_set_source_id="source_art",
+                new_age_range_key=None,
+                age_range_source_key=None,
+                new_initial_ceo_key=None,
+                initial_ceo_source_key="source_unique_initial_ceo",
+                template_overrides={"is_male": False, "subtype": f"3k_general_{element}"},
+                detail_overrides={},
+                art_set_overrides={},
+                art_overrides={"portrait": "hby_custom/", "card": "hby_custom"},
+                age_range_overrides={},
+            )
+            compatible = delta_builder._with_generic_female_art_compatibility(
+                clone,
+                clone.template_overrides,
+            )
+            self.assertIs(compatible, clone)
+
+    def test_new_delta_pack_uses_mod_type(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+
+            def send(self, command: object) -> dict[str, object]:
+                self.commands.append(command)
+                if command == "NewPack":
+                    return {"data": {"String": "new_pack.pack"}}
+                return {}
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.client = FakeClient()
+
+        session = FakeSession()
+        target = delta_builder._new_delta_pack(session)  # type: ignore[arg-type]
+
+        self.assertEqual(target, "new_pack.pack")
+        self.assertEqual(
+            session.client.commands,
+            ["NewPack", {"SetPackFileType": ["new_pack.pack", "Mod"]}],
+        )
+
     def test_write_db_file_uses_schema_table_folder_for_custom_leaf(self) -> None:
         class FakeClient:
             def __init__(self) -> None:
@@ -459,8 +638,8 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertEqual(len(spawn_entries), 2)
         self.assertEqual({entry["template"] for entry in spawn_entries}, {"hby_template_a", "hby_template_b"})
         self.assertEqual({entry["turn"] for entry in spawn_entries}, {0, 4})
-        self.assertTrue(all(str(entry["saveKey"]).startswith("hby_mtu_pack_editor_player_spawn_v7_") for entry in spawn_entries))
-        self.assertTrue(all(str(entry["attemptKey"]).startswith("hby_mtu_pack_editor_player_spawn_attempt_v7_") for entry in spawn_entries))
+        self.assertTrue(all(str(entry["saveKey"]).startswith("hby_mtu_pack_editor_player_spawn_v8_") for entry in spawn_entries))
+        self.assertTrue(all(str(entry["attemptKey"]).startswith("hby_mtu_pack_editor_player_spawn_attempt_v8_") for entry in spawn_entries))
 
     def test_loc_writer_skips_empty_loc_template_rows(self) -> None:
         class FakeClient:
@@ -785,9 +964,9 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             delta_builder.CAMPAIGN_SPAWN_SCRIPT_PATH,
             "script/campaign/3k_main_campaign_map/mod/hby_mtu_pack_editor_player_spawn.lua",
         )
-        self.assertIn(
-            "script/campaign/3k_main_campaign_map/hby_mtu_pack_editor_player_spawn.lua",
+        self.assertEqual(
             delta_builder.CAMPAIGN_SPAWN_SCRIPT_PATHS,
+            (delta_builder.CAMPAIGN_SPAWN_SCRIPT_PATH,),
         )
         self.assertNotIn("/script/campaign/mod/", f"/{delta_builder.CAMPAIGN_SPAWN_SCRIPT_PATH}")
 
@@ -812,35 +991,421 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         script = _campaign_start_spawn_script([clone])
         self.assertIsNotNone(script)
         self.assertIn("hby_template_test", script or "")
-        self.assertIn('turn_number >= item.turn', script or "")
-        self.assertIn("local function hby_mtu_character_exists(template_key)", script or "")
-        self.assertIn("pcall(function() return cm:query_model():character_for_template(template_key) end)", script or "")
+        self.assertIn('item.event ~= "campaign_start" and turn_number < item.turn', script or "")
+        self.assertIn("local function hby_character(template_key)", script or "")
+        self.assertIn("return cm:query_model():character_for_template(template_key)", script or "")
         self.assertNotIn("trigger_incident", script or "")
-        self.assertIn("local function hby_mtu_direct_spawn_character", script or "")
-        self.assertIn("spawn_character_subtype_template_in_faction", script or "")
-        self.assertNotIn("create_character_from_template", script or "")
-        self.assertIn("local function hby_mtu_prepare_spawned_character", script or "")
-        self.assertIn("local function hby_mtu_preflight_spawn_state(faction_key)", script or "")
-        self.assertIn("preflight locked generated character", script or "")
-        self.assertIn("hby_mtu_preflight_spawn_state(faction_key)", script or "")
+        self.assertNotIn("spawn_character_subtype_template_in_faction", script or "")
+        self.assertIn("cm:modify_faction(faction_key):create_character_from_template(", script or "")
+        self.assertIn('"general", item.subtype, item.template, true', script or "")
+        self.assertIn("local function hby_prepare_character", script or "")
         self.assertIn("item.attempt_key", script or "")
-        self.assertIn("generated character created", script or "")
-        self.assertNotIn("waiting for DB spawn before fallback", script or "")
-        self.assertNotIn("waiting for DB event spawn", script or "")
-        self.assertIn("generated character spawn pending", script or "")
-        self.assertIn("generated character spawn already attempted this turn", script or "")
         self.assertIn("move_to_faction_and_make_recruited", script or "")
-        self.assertIn("generated character observed", script or "")
-        self.assertIn("generated character spawn failed", script or "")
-        self.assertIn("local function hby_mtu_faction_key(value)", script or "")
-        self.assertIn("local faction_key = cm:get_local_faction()", script or "")
-        self.assertNotIn("ok = true", script or "")
-        self.assertIn("pcall(function() return cm:query_model():character_for_template(template_key) end)", script or "")
+        self.assertIn("character spawn failed", script or "")
+        self.assertIn("local function hby_faction_key(value)", script or "")
+        self.assertNotIn("ancillaries.char_start_ancillaries_banned_character_templates", script or "")
+        self.assertIn("hby_faction_key(cm:get_local_faction())", script or "")
+        self.assertIn("if cm and cm.add_first_tick_callback then", script or "")
+        self.assertIn("if not core or not core.add_listener then return end", script or "")
+        self.assertIn("MTU Pack Editor: first tick error:", script or "")
+        self.assertIn("MTU Pack Editor: retry error:", script or "")
         self.assertNotIn("spawn_character_to_pool", script or "")
         self.assertNotIn("spawn_character_to_faction", script or "")
         self.assertNotIn("cm:spawn_character", script or "")
-        self.assertIn("function hby_mtu_pack_editor_player_spawn", script or "")
-        self.assertIn("hby_mtu_player_spawn_listener_registered", script or "")
+        self.assertNotIn("function hby_mtu_pack_editor_player_spawn", script or "")
+        self.assertNotIn("hby_mtu_player_spawn_listener_registered", script or "")
+
+    def test_campaign_start_spawn_keeps_generated_metal_subtype(self) -> None:
+        clone = CharacterClone(
+            new_template_key="hby_template_metal",
+            source_template_key="source",
+            detail_source_template_key="source",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={"subtype": "3k_general_metal"},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            spawn_event="campaign_start",
+        )
+
+        entries = _spawn_entries_for_clones([clone])
+        script = _campaign_start_spawn_script([clone])
+
+        self.assertEqual(entries[0]["subtype"], "3k_general_metal")
+        self.assertIn('subtype = "3k_general_metal"', script or "")
+        self.assertNotIn('subtype = "3k_general_wood"', script or "")
+
+    def test_campaign_start_spawn_keeps_generated_metal_spawn_subtype_for_image_clone(self) -> None:
+        clone = CharacterClone(
+            new_template_key="hby_template_metal",
+            source_template_key="source",
+            detail_source_template_key="source",
+            new_art_set_id="hby_art_metal",
+            art_set_source_id="source_art",
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={"subtype": "3k_general_metal"},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            spawn_event="campaign_start",
+        )
+
+        entries = _spawn_entries_for_clones([clone])
+        script = _campaign_start_spawn_script([clone])
+
+        self.assertEqual(entries[0]["subtype"], "3k_general_metal")
+        self.assertIn('subtype = "3k_general_metal"', script or "")
+        self.assertNotIn('subtype = "hby_general_metal"', script or "")
+
+    def test_material_event_spawn_generated_metal_preserves_metal_template_subtype(self) -> None:
+        payload = {
+            "tables": {
+                "db/character_generation_templates_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "key": "source_template",
+                        "art_set_override": "source_art",
+                        "forename": "1",
+                        "is_male": False,
+                        "spawn_age_range": "source_age",
+                        "subtype": "3k_general_metal",
+                    }],
+                },
+                "db/character_generation_template_game_mode_details_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "character_generation_template": "source_template",
+                        "game_mode": "historical",
+                        "initial_ceos": "source_initial",
+                    }],
+                },
+                "db/campaign_character_art_sets_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "art_set_id": "source_art",
+                        "culture": "3k_main_chinese",
+                        "subculture": "",
+                        "agent_subtype": "",
+                    }],
+                },
+                "db/campaign_character_arts_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"art_set_id": "source_art", "age": 16, "has_come_of_age": True}],
+                },
+                "db/character_generation_spawn_age_ranges_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"key": "source_age"}],
+                },
+                "db/ceo_initial_datas_tables/data__": {
+                    "db": {"table": {"definition": {"fields": [{"name": "key"}]}, "table_data": []}},
+                    "rows": [{"key": "source_initial"}],
+                },
+                "db/names_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"id": "1"}],
+                },
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+
+        rows_by_table = {}
+        _collect_character_clone_rows(
+            session,
+            [CharacterClone(
+                new_template_key="hby_template_metal",
+                source_template_key="source_template",
+                detail_source_template_key="source_template",
+                new_art_set_id="hby_art_metal",
+                art_set_source_id=None,
+                new_age_range_key=None,
+                age_range_source_key=None,
+                new_initial_ceo_key=None,
+                initial_ceo_source_key=None,
+                template_overrides={"subtype": "3k_general_metal"},
+                detail_overrides={},
+                art_set_overrides={},
+                art_overrides={},
+                age_range_overrides={},
+                spawn_event="campaign_start",
+            )],
+            {},
+            rows_by_table,
+            {},
+        )
+
+        templates = rows_by_table["db/character_generation_templates_tables/_mtu_characters"]
+        self.assertEqual(templates[0]["subtype"], "3k_general_metal")
+        details = rows_by_table["db/character_generation_template_game_mode_details_tables/_mtu_characters"]
+        self.assertEqual(details[0]["initial_ceos"], "source_initial")
+        art_sets = rows_by_table["db/campaign_character_art_sets_tables/_mtu_characters"]
+        self.assertEqual(art_sets[0]["art_set_id"], "hby_art_metal")
+        self.assertEqual(art_sets[0]["subculture"], "")
+        self.assertEqual(art_sets[0]["agent_subtype"], "")
+        self.assertFalse(any("hby_general_metal" in str(row) for rows in rows_by_table.values() for row in rows))
+
+    def test_material_metal_spawn_does_not_patch_other_mod_pool_art_sets(self) -> None:
+        payload = {
+            "tables": {
+                "db/character_generation_templates_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "key": "source_template",
+                        "art_set_override": "source_art",
+                        "forename": "1",
+                        "is_male": False,
+                        "spawn_age_range": "source_age",
+                        "subtype": "3k_general_metal",
+                    }],
+                },
+                "db/character_generation_template_game_mode_details_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "character_generation_template": "source_template",
+                        "game_mode": "historical",
+                        "initial_ceos": "source_initial",
+                    }],
+                },
+                "db/campaign_character_art_sets_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "art_set_id": "source_art",
+                        "culture": "3k_main_chinese",
+                        "subculture": "",
+                        "agent_subtype": "",
+                        "is_custom": True,
+                    }],
+                },
+                "db/campaign_character_art_sets_tables/barbarians": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [
+                        {
+                            "art_set_id": "ironic_barbarian_generic_xianbei_f_general",
+                            "culture": "3k_main_chinese",
+                            "subculture": "3k_dlc05_subculture_bandits",
+                            "agent_subtype": "3k_general_metal",
+                            "is_custom": True,
+                            "is_male": False,
+                        },
+                        {
+                            "art_set_id": "vanilla_pool_female_metal",
+                            "culture": "3k_main_chinese",
+                            "subculture": "3k_main_chinese",
+                            "agent_subtype": "3k_general_metal",
+                            "is_custom": False,
+                            "is_male": False,
+                        },
+                    ],
+                },
+                "db/campaign_character_arts_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"art_set_id": "source_art", "age": 16, "has_come_of_age": True}],
+                },
+                "db/character_generation_spawn_age_ranges_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"key": "source_age"}],
+                },
+                "db/ceo_initial_datas_tables/data__": {
+                    "db": {"table": {"definition": {"fields": [{"name": "key"}]}, "table_data": []}},
+                    "rows": [{"key": "source_initial"}],
+                },
+                "db/names_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"id": "1"}],
+                },
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+
+        rows_by_table = {}
+        _collect_character_clone_rows(
+            session,
+            [CharacterClone(
+                new_template_key="hby_template_metal",
+                source_template_key="source_template",
+                detail_source_template_key="source_template",
+                new_art_set_id="hby_art_metal",
+                art_set_source_id=None,
+                new_age_range_key=None,
+                age_range_source_key=None,
+                new_initial_ceo_key=None,
+                initial_ceo_source_key=None,
+                template_overrides={"subtype": "3k_general_metal"},
+                detail_overrides={},
+                art_set_overrides={},
+                art_overrides={},
+                age_range_overrides={},
+                spawn_event="campaign_start",
+            )],
+            {},
+            rows_by_table,
+            {},
+        )
+
+        # Character generation must not rewrite another mod's generic art pool.
+        # Doing so leaks into sandbox mode and unrelated campaigns.
+        self.assertNotIn("db/campaign_character_art_sets_tables/barbarians", rows_by_table)
+        # the clone's own art set keeps its blank agent_subtype
+        art_sets = rows_by_table["db/campaign_character_art_sets_tables/_mtu_characters"]
+        clone_rows = [row for row in art_sets if row.get("art_set_id") == "hby_art_metal"]
+        self.assertEqual(clone_rows[0]["agent_subtype"], "")
+
+    def test_material_clone_keeps_source_unique_armour_over_generic_pick(self) -> None:
+        payload = {
+            "tables": {
+                "db/character_generation_templates_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "key": "3k_mtu_template_historical_lady_ma_yunlu_hero_metal",
+                        "art_set_override": "source_art",
+                        "forename": "1",
+                        "is_male": False,
+                        "spawn_age_range": "source_age",
+                        "subtype": "3k_general_metal",
+                    }],
+                },
+                "db/character_generation_template_game_mode_details_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "character_generation_template": "3k_mtu_template_historical_lady_ma_yunlu_hero_metal",
+                        "game_mode": "historical",
+                        "initial_ceos": "source_initial",
+                    }],
+                },
+                "db/campaign_character_art_sets_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "art_set_id": "source_art",
+                        "culture": "3k_main_chinese",
+                        "subculture": "",
+                        "agent_subtype": "",
+                    }],
+                },
+                "db/campaign_character_arts_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"art_set_id": "source_art", "age": 16, "has_come_of_age": True}],
+                },
+                "db/ceos_to_equipment_variants_tables/_mtu_characters_ceo_armours": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "ceos_key": "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+                        "armour": "3k_mtu_hero_lady_ma_yunlu_unique",
+                        "female_vmd": "",
+                        "male_vmd": "",
+                    }],
+                },
+                "db/character_generation_spawn_age_ranges_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"key": "source_age"}],
+                },
+                "db/ceo_initial_datas_tables/data__": {
+                    "db": {"table": {"definition": {"fields": [{"name": "key"}]}, "table_data": []}},
+                    "rows": [{"key": "source_initial"}],
+                },
+                "db/names_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"id": "1"}],
+                },
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+
+        clones = [CharacterClone(
+            new_template_key="hby_template_metal",
+            source_template_key="3k_mtu_template_historical_lady_ma_yunlu_hero_metal",
+            detail_source_template_key="3k_mtu_template_historical_lady_ma_yunlu_hero_metal",
+            new_art_set_id="hby_art_metal",
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={"subtype": "3k_general_metal"},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            spawn_event="campaign_start",
+            equipment_set_key="custom",
+            equipment_ceo_keys=(
+                "3k_main_ancillary_weapon_double_edged_sword_exceptional",
+                "3k_main_ancillary_armour_medium_armour_metal_extraordinary",
+            ),
+            default_equipment_ceo_keys=(
+                "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+            ),
+        )]
+        rows_by_table = {}
+        _collect_character_clone_rows(session, clones, {}, rows_by_table, {})
+
+        adjusted = clones[0]
+        self.assertNotIn(
+            "3k_main_ancillary_armour_medium_armour_metal_extraordinary",
+            adjusted.equipment_ceo_keys,
+        )
+        self.assertNotIn(
+            "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+            adjusted.equipment_ceo_keys,
+        )
+        # the weapon pick is untouched, and the displaced generic armour is removable
+        self.assertIn(
+            "3k_main_ancillary_weapon_double_edged_sword_exceptional",
+            adjusted.equipment_ceo_keys,
+        )
+        self.assertEqual(
+            adjusted.default_equipment_ceo_keys,
+            ("3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",),
+        )
+        self.assertIn(
+            "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+            adjusted.default_equipment_ceo_keys,
+        )
+        self.assertIn(
+            "3k_main_ancillary_armour_medium_armour_metal_extraordinary",
+            adjusted.removable_equipment_ceo_keys,
+        )
+        # Source-bound equipment remains on the initial CEO chain, with a
+        # non-equipping inventory fallback using the actual MTU CEO key.
+        entries = delta_builder._equipment_entries_for_characters(clones, [])
+        script = _campaign_start_spawn_script(clones)
+        self.assertEqual(
+            entries[0]["grantEquipmentCeos"],
+            [
+                "3k_main_ancillary_weapon_double_edged_sword_exceptional",
+                "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+            ],
+        )
+        self.assertIn(
+            'ceos = { "3k_main_ancillary_weapon_double_edged_sword_exceptional", "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique" }',
+            script or "",
+        )
+        self.assertNotIn("cleanup_equipment_ceos", script or "")
+        self.assertNotIn("cm:force_add_ancillary", script or "")
+        self.assertNotIn("cm:force_remove_ancillary", script or "")
 
     def test_campaign_script_applies_ceo_sets_after_spawn(self) -> None:
         clone = CharacterClone(
@@ -881,40 +1446,292 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             'add_ceos = { "trait_a" }',
             script or "",
         )
-        self.assertIn("hby_mtu_remove_ceo(ceo_manager, ceo_key)", script or "")
-        self.assertIn("hby_mtu_add_ceo(ceo_manager, ceo_key)", script or "")
-        self.assertIn("ceo_manager:add_ceos(ceo_key)", script or "")
-        self.assertIn("ceo_manager:add_ceo(ceo_key)", script or "")
-        self.assertIn("hby_mtu_set_character_title(character, modify_character, ceo_manager, item.title_ceo)", script or "")
-        self.assertIn('local category_key = "3k_main_ceo_category_career"', script or "")
-        self.assertIn("query_ceo_manager:all_ceos_for_category(category_key)", script or "")
-        self.assertIn("if not applied then", script or "")
+        self.assertIn("manager:remove_ceos(item.remove_ceos[i])", script or "")
+        self.assertIn("manager:add_ceo(item.title_ceo)", script or "")
+        self.assertIn("manager:add_ceo(item.add_ceos[i])", script or "")
+        self.assertNotIn("manager:add_ceos(", script or "")
         self.assertIn("hby_mtu_pack_editor_ceo_sets_v6_", script or "")
-        self.assertIn("hby_mtu_apply_ceo_sets()", script or "")
-        self.assertIn("cm:force_add_ceo(cqi, ceo_key)", script or "")
+        self.assertIn("hby_apply_ceos(hby_ceo_items[i])", script or "")
+        self.assertNotIn("force_add_ceo", script or "")
         self.assertNotIn("force_add_trait", script or "")
-        self.assertIn('equipment_ceos = { "equipment_a" }', script or "")
-        self.assertIn('remove_ceos = { "equipment_old" }', script or "")
-        self.assertIn("hby_mtu_add_ancillary_to_faction(faction_key, ceo_key)", script or "")
-        self.assertIn("hby_mtu_force_equip_ancillary(character, modify_character, ceo_key)", script or "")
-        self.assertIn("hby_mtu_pack_editor_equipment_v7_", script or "")
-        self.assertIn("hby_mtu_pack_editor_equipment_grant_v7_", script or "")
-        self.assertIn('grant_key = "hby_mtu_pack_editor_equipment_grant_v7_', script or "")
-        self.assertIn("hby_mtu_apply_equipment_sets", script or "")
-        self.assertIn("return #hby_mtu_equipment_characters == 0", script or "")
-        self.assertIn("local grant_done = item.grant_key and cm:get_saved_value(item.grant_key)", script or "")
-        self.assertIn("cm:set_saved_value(item.grant_key, true)", script or "")
-        self.assertIn('output("MTU Pack Editor: enforced equipment set:', script or "")
-        self.assertIn("cm:modify_character(character)", script or "")
-        self.assertIn("cm:char_lookup_str(character)", script or "")
-        self.assertIn("local function hby_mtu_character_lookup(character)", script or "")
-        self.assertIn("cm:force_add_ancillary(lookup, ancillary_key, false, true)", script or "")
-        self.assertIn("cm:force_equip_ancillary(lookup, ancillary_key, true)", script or "")
-        self.assertIn("local function hby_mtu_modify_faction(faction_key)", script or "")
-        self.assertIn("modify_faction:ceo_management()", script or "")
-        self.assertIn("result ~= false", script or "")
+        self.assertIn('ceos = { "equipment_a" }', script or "")
+        self.assertNotIn('"equipment_old"', script or "")
+        self.assertIn("hby_mtu_pack_editor_equipment_v21_", script or "")
+        self.assertIn("hby_mtu_pack_editor_equipment_grant_v21_", script or "")
+        self.assertIn('grant_key = "hby_mtu_pack_editor_equipment_grant_v21_', script or "")
+        self.assertIn("local function hby_grant_equipment", script or "")
+        self.assertIn('local item_save_key = item.grant_key .. "_" .. tostring(i)', script or "")
+        self.assertIn("cm:set_saved_value(item_save_key, true)", script or "")
+        self.assertIn('output("MTU Pack Editor: equipment granted to faction inventory:', script or "")
+        self.assertNotIn("cm:force_add_ancillary", script or "")
+        self.assertNotIn("cm:force_remove_ancillary", script or "")
+        self.assertIn("cm:modify_character(character):ceo_management()", script or "")
+        self.assertIn("cm:modify_faction(faction_key):ceo_management():add_ceo(ceo_key)", script or "")
+        self.assertNotIn("add_ceos(", script or "")
+        self.assertNotIn("cm:add_ancillary_to_faction", script or "")
+        self.assertNotIn("cm:modify_faction(faction)", script or "")
 
-    def test_equipment_set_materializes_custom_initial_ceo_chain(self) -> None:
+    def test_generic_initial_ceo_does_not_restore_source_unique_armour(self) -> None:
+        clone = CharacterClone(
+            new_template_key="hby_template_generic_ma_yunlu",
+            source_template_key="3k_mtu_template_historical_lady_ma_yunlu_hero_metal",
+            detail_source_template_key="3k_mtu_template_historical_lady_ma_yunlu_hero_metal",
+            new_art_set_id="hby_art_generic_ma_yunlu",
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={"subtype": "3k_general_metal", "is_male": False},
+            detail_overrides={
+                "historical": {"initial_ceos": delta_builder.GENERIC_FEMALE_COMPATIBILITY["metal"]["initial_ceo"]},
+                "romance": {"initial_ceos": delta_builder.GENERIC_FEMALE_COMPATIBILITY["metal"]["initial_ceo"]},
+            },
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            equipment_ceo_keys=("3k_main_ancillary_weapon_double_edged_sword_exceptional",),
+        )
+        clones = [clone]
+        delta_builder._preserve_unique_armour_equipment(
+            {
+                "equipment_variants_armours": [{
+                    "ceos_key": "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+                    "armour": "3k_mtu_hero_lady_ma_yunlu_unique",
+                }],
+            },
+            clones,
+        )
+
+        self.assertEqual(clones[0].default_equipment_ceo_keys, ())
+        self.assertEqual(
+            clones[0].equipment_ceo_keys,
+            ("3k_main_ancillary_weapon_double_edged_sword_exceptional",),
+        )
+
+    def test_campaign_script_grants_source_default_equipment_as_inventory_fallback(self) -> None:
+        clone = CharacterClone(
+            new_template_key="hby_template_test",
+            source_template_key="source",
+            detail_source_template_key="source",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={"subtype": "3k_general_metal"},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            spawn_event="campaign_start",
+            default_equipment_ceo_keys=(
+                "3k_mtu_ancillary_weapon_mothers_bow",
+                "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+            ),
+        )
+
+        entries = delta_builder._equipment_entries_for_characters([clone], [])
+        script = _campaign_start_spawn_script([clone])
+
+        self.assertEqual(
+            entries[0]["grantEquipmentCeos"],
+            [
+                "3k_mtu_ancillary_weapon_mothers_bow",
+                "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+            ],
+        )
+        self.assertIn("3k_mtu_ancillary_weapon_mothers_bow", script or "")
+        self.assertIn("3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique", script or "")
+        self.assertNotIn("3k_mtu_ancillary_lady_ma_yunlus_armour_unique", script or "")
+        self.assertIn("local function hby_grant_equipment", script or "")
+        self.assertNotIn("hby_mtu_remove_current_ancillary_slot", script or "")
+        self.assertNotIn("hby_mtu_try_equip_default_ancillary_candidate", script or "")
+        self.assertNotIn("hby_mtu_character_ceos_for_category(character, category_key)", script or "")
+        self.assertNotIn("hby_mtu_ancillary_key_candidates", script or "")
+        self.assertNotIn("hby_mtu_default_ancillary_is_equipped", script or "")
+        self.assertNotIn("cm:force_add_ancillary", script or "")
+        self.assertNotIn("cm:force_remove_ancillary", script or "")
+        self.assertNotIn('prefix .. "_ancillary_" .. weapon_type .. "_" .. suffix', script or "")
+        self.assertNotIn('prefix .. "_ancillary_" .. suffix', script or "")
+
+    def test_equipment_ceo_raw_assets_copy_ancillary_icons_without_source_ceo_blob(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+
+            def send(self, command: object) -> dict[str, object]:
+                self.commands.append(command)
+                return {}
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.client = FakeClient()
+                self.pack_key = "source_pack"
+                self.pack_path = Path("source.pack")
+
+        class Entry:
+            def __init__(self, path: str) -> None:
+                self.path = path
+
+        fake_index = type("FakeIndex", (), {
+            "entries": [
+                Entry("campaigns/ceo_data.ccd"),
+                Entry("ui/ancillaries/armours/3k_mtu_ancillary_lady_ma_yunlus_armour_unique.png"),
+                Entry("ui/ancillaries/armours/large/3k_mtu_ancillary_lady_ma_yunlus_armour_unique.png"),
+                Entry("ui/ancillaries/weapons/3k_mtu_ancillary_bow_mothers_bow.png"),
+                Entry("ui/characters/3k_mtu_historical_lady_ma_yunlu/large_panel/norm/norm.png"),
+            ]
+        })()
+        clone = CharacterClone(
+            new_template_key="hby_template_test",
+            source_template_key="source",
+            detail_source_template_key="source",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            spawn_event="campaign_start",
+            equipment_ceo_keys=("3k_mtu_ancillary_weapon_mothers_bow",),
+            default_equipment_ceo_keys=("3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",),
+        )
+        session = FakeSession()
+
+        with patch.object(delta_builder, "read_pfh_index", return_value=fake_index):
+            copied = delta_builder._copy_equipment_ceo_raw_assets(
+                session,  # type: ignore[arg-type]
+                "target_pack",
+                [clone],
+            )
+
+        self.assertEqual(copied, 3)
+        self.assertEqual(len(session.client.commands), 1)
+        command = session.client.commands[0]
+        self.assertIsInstance(command, dict)
+        payload = command["AddPackedFilesFromPackFile"]  # type: ignore[index]
+        self.assertEqual(payload[0], "target_pack")
+        self.assertEqual(payload[1], "source_pack")
+        copied_files = {entry["File"] for entry in payload[2]}  # type: ignore[index]
+        self.assertEqual(
+            copied_files,
+            {
+                "ui/ancillaries/armours/3k_mtu_ancillary_lady_ma_yunlus_armour_unique.png",
+                "ui/ancillaries/armours/large/3k_mtu_ancillary_lady_ma_yunlus_armour_unique.png",
+                "ui/ancillaries/weapons/3k_mtu_ancillary_bow_mothers_bow.png",
+            },
+        )
+        self.assertNotIn("campaigns/ceo_data.ccd", copied_files)
+
+    def test_equipment_ceo_raw_assets_skip_source_ceo_blob_for_vanilla_equipment(self) -> None:
+        class Entry:
+            def __init__(self, path: str) -> None:
+                self.path = path
+
+        fake_index = type("FakeIndex", (), {
+            "entries": [
+                Entry("campaigns/ceo_data.ccd"),
+                Entry("ui/ancillaries/armours/3k_main_ancillary_medium_armour_metal_extraordinary.png"),
+            ]
+        })()
+
+        with patch.object(delta_builder, "read_pfh_index", return_value=fake_index):
+            paths = delta_builder._equipment_raw_asset_paths_from_source(
+                Path("source.pack"),
+                ["3k_main_ancillary_armour_medium_armour_metal_extraordinary"],
+            )
+
+        self.assertNotIn("campaigns/ceo_data.ccd", paths)
+
+    def test_equipment_ceo_raw_assets_skip_when_no_equipment_is_selected(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+
+            def send(self, command: object) -> dict[str, object]:
+                self.commands.append(command)
+                return {}
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.client = FakeClient()
+                self.pack_key = "source_pack"
+                self.pack_path = Path("source.pack")
+
+        clone = CharacterClone(
+            new_template_key="hby_template_test",
+            source_template_key="source",
+            detail_source_template_key="source",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+        )
+        session = FakeSession()
+
+        with patch.object(delta_builder, "read_pfh_index") as read_index:
+            copied = delta_builder._copy_equipment_ceo_raw_assets(
+                session,  # type: ignore[arg-type]
+                "target_pack",
+                [clone],
+            )
+
+        self.assertEqual(copied, 0)
+        self.assertEqual(session.client.commands, [])
+        read_index.assert_not_called()
+
+    def test_equipment_entries_grant_all_ceos_without_removing_existing_equipment(self) -> None:
+        clone = CharacterClone(
+            new_template_key="hby_template_test",
+            source_template_key="source",
+            detail_source_template_key="source",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            equipment_ceo_keys=(
+                "3k_main_ancillary_weapon_halberd_exceptional",
+                "3k_main_ancillary_armour_medium_armour_metal_extraordinary",
+            ),
+            removable_equipment_ceo_keys=(
+                "3k_main_ancillary_weapon_old",
+                "3k_main_ancillary_armour_old",
+            ),
+        )
+
+        entries = delta_builder._equipment_entries_for_characters([clone], [])
+
+        self.assertEqual(
+            entries[0]["equipmentCeos"],
+            [
+                "3k_main_ancillary_weapon_halberd_exceptional",
+                "3k_main_ancillary_armour_medium_armour_metal_extraordinary",
+            ],
+        )
+        self.assertEqual(entries[0]["removeCeos"], [])
+
+    def test_equipment_set_does_not_materialize_custom_initial_ceo_chain(self) -> None:
         tables = {
             "ceo_initial_datas": [
                 {"key": "source_initial", "_sourceTablePath": "db/ceo_initial_datas_tables/data__"},
@@ -980,17 +1797,10 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             ("old_weapon", "old_armour"),
         )
 
-        self.assertTrue(str(new_initial).startswith("hby_mtu_ceo_initial_data_hby_template_test_"))
-        detail_initials = rows_by_table["db/ceo_initial_datas_tables/data__"]
-        self.assertEqual(detail_initials[0]["key"], new_initial)
-        equipment_rows = rows_by_table["db/ceo_initial_data_equipments_tables/data__"]
-        self.assertEqual({row["equipped_ceo"] for row in equipment_rows}, {"new_weapon", "new_armour"})
-        self.assertTrue(all(row["initial_data_stage"] != "source_stage" for row in equipment_rows))
-        active_rows = rows_by_table["db/ceo_initial_data_active_ceos_tables/data__"]
-        self.assertEqual({row["active_ceo"] for row in active_rows}, {"new_weapon", "new_armour"})
-        self.assertNotIn("old_weapon", {row["active_ceo"] for row in active_rows})
+        self.assertEqual(new_initial, "source_initial")
+        self.assertEqual(rows_by_table, {})
 
-    def test_initial_ceo_materialization_keeps_copied_equipment_and_adds_selected_ceos(self) -> None:
+    def test_initial_ceo_materialization_keeps_initial_key_without_stage_tables(self) -> None:
         tables = {
             "ceo_initial_datas": [
                 {"key": "source_initial", "_sourceTablePath": "db/ceo_initial_datas_tables/data__"},
@@ -1059,7 +1869,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         }
         rows_by_table: dict[str, list[dict[str, object]]] = {}
 
-        delta_builder._materialize_equipment_initial_ceo(
+        new_initial = delta_builder._materialize_equipment_initial_ceo(
             tables,
             {},
             {},
@@ -1072,13 +1882,8 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             ("old_title", "old_trait"),
         )
 
-        equipment_rows = rows_by_table["db/ceo_initial_data_equipments_tables/data__"]
-        self.assertEqual({row["equipped_ceo"] for row in equipment_rows}, {"new_weapon", "old_armour"})
-        active_rows = rows_by_table["db/ceo_initial_data_active_ceos_tables/data__"]
-        self.assertEqual(
-            {row["active_ceo"] for row in active_rows},
-            {"new_weapon", "old_armour", "new_title", "new_trait"},
-        )
+        self.assertEqual(new_initial, "source_initial")
+        self.assertEqual(rows_by_table, {})
 
     def test_equipment_set_keeps_source_initial_when_stage_rows_are_missing(self) -> None:
         tables = {
@@ -1118,7 +1923,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             "mount",
         )
 
-    def test_equipment_materialization_does_not_reuse_wrong_slot_category(self) -> None:
+    def test_equipment_materialization_ignores_legacy_stage_rows(self) -> None:
         tables = {
             "ceo_initial_datas": [
                 {"key": "source_initial", "_sourceTablePath": "db/ceo_initial_datas_tables/data__"},
@@ -1157,7 +1962,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         }
         rows_by_table: dict[str, list[dict[str, object]]] = {}
 
-        delta_builder._materialize_equipment_initial_ceo(
+        new_initial = delta_builder._materialize_equipment_initial_ceo(
             tables,
             {},
             {},
@@ -1171,15 +1976,10 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             ("old_mount",),
         )
 
-        equipment_rows = rows_by_table["db/ceo_initial_data_equipments_tables/data__"]
-        by_ceo = {row["equipped_ceo"]: row for row in equipment_rows}
-        self.assertNotIn("3k_main_ancillary_accessory_book_of_mountains_and_seas", by_ceo)
-        self.assertEqual(
-            by_ceo["3k_main_ancillary_mount_red_stallion"]["category"],
-            "3k_main_ceo_category_ancillary_mount",
-        )
+        self.assertEqual(new_initial, "source_initial")
+        self.assertEqual(rows_by_table, {})
 
-    def test_dependency_collection_accepts_materialized_equipment_initial_ceo(self) -> None:
+    def test_dependency_collection_keeps_selected_equipment_out_of_initial_ceo(self) -> None:
         payload = {
             "tables": {
                 "db/character_generation_templates_tables/_mtu_characters": {
@@ -1292,11 +2092,10 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
 
         details = rows_by_table["db/character_generation_template_game_mode_details_tables/_mtu_characters"]
         generated_initial = str(details[0]["initial_ceos"])
-        self.assertTrue(generated_initial.startswith("hby_mtu_ceo_initial_data_"))
+        self.assertEqual(generated_initial, "source_initial")
 
         _collect_character_dependency_rows(session, [clone], source_dbs, rows_by_table, [], opened_pack_keys)
-        equipment_rows = rows_by_table["db/ceo_initial_data_equipments_tables/data__"]
-        self.assertIn("new_weapon", {row["equipped_ceo"] for row in equipment_rows})
+        self.assertNotIn("db/ceo_initial_data_equipments_tables/data__", rows_by_table)
 
     def test_campaign_script_can_apply_ceo_sets_without_spawn_entries(self) -> None:
         patch = CharacterPatch(
@@ -1314,7 +2113,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertIn('template = "patch_template"', script or "")
         self.assertIn('title_ceo = "3k_main_ceo_career_historical_lu_bu"', script or "")
         self.assertIn('add_ceos = { "trait_a" }', script or "")
-        self.assertIn("not hby_mtu_all_ceo_sets_done()", script or "")
+        self.assertIn("hby_apply_ceos(hby_ceo_items[i])", script or "")
 
     def test_campaign_script_keeps_background_ceos_out_of_runtime_title_slot(self) -> None:
         patch = CharacterPatch(
@@ -1343,18 +2142,15 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         script = _campaign_start_spawn_script([], [patch])
 
         self.assertIsNotNone(script)
-        self.assertIn('equipment_ceos = { "new_weapon", "new_mount" }', script or "")
-        self.assertIn('remove_ceos = { "old_weapon" }', script or "")
-        self.assertIn("not hby_mtu_all_equipment_sets_done()", script or "")
-        self.assertIn("hby_mtu_apply_equipment_sets", script or "")
-        self.assertIn("cm:force_equip_ancillary", script or "")
-        self.assertIn("cm:force_add_ancillary", script or "")
-        self.assertIn("local equipped = false", script or "")
-        self.assertNotIn("local ceo_added = false", script or "")
-        self.assertIn("return equipped", script or "")
-        self.assertIn("return #hby_mtu_equipment_characters == 0", script or "")
-        self.assertNotIn("if not cm:get_saved_value(item.save_key) then\n            hby_mtu_apply_equipment_set(item, faction_key)", script or "")
-        self.assertNotIn("hby_mtu_force_add_character_ceo(character, modify_character, ceo_manager, ancillary_key)", script or "")
+        self.assertIn('ceos = { "new_weapon", "new_mount" }', script or "")
+        self.assertNotIn('"old_weapon"', script or "")
+        self.assertIn("hby_grant_equipment(hby_equipment_items[i], faction_key)", script or "")
+        self.assertIn("cm:modify_faction(faction_key):ceo_management():add_ceo(ceo_key)", script or "")
+        self.assertNotIn("add_ceos(", script or "")
+        self.assertIn('output("MTU Pack Editor: equipment granted to faction inventory:', script or "")
+        self.assertNotIn("cm:force_add_ancillary", script or "")
+        self.assertNotIn("cm:force_remove_ancillary", script or "")
+        self.assertNotIn("force_add_ceo", script or "")
 
     def test_lua_ceo_key_list_rejects_object_sentinel_values(self) -> None:
         self.assertEqual(
@@ -1433,8 +2229,8 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         for entry in entries:
             self.assertEqual({item["category"] for item in entry["incidents"]}, {"historical"})
             self.assertEqual(len(entry["incidents"]), 1)
-        self.assertTrue(all(str(entry["saveKey"]).startswith("hby_mtu_pack_editor_player_spawn_v7_") for entry in entries))
-        self.assertTrue(all(str(entry["attemptKey"]).startswith("hby_mtu_pack_editor_player_spawn_attempt_v7_") for entry in entries))
+        self.assertTrue(all(str(entry["saveKey"]).startswith("hby_mtu_pack_editor_player_spawn_v8_") for entry in entries))
+        self.assertTrue(all(str(entry["attemptKey"]).startswith("hby_mtu_pack_editor_player_spawn_attempt_v8_") for entry in entries))
         self.assertEqual(entries[1]["turn"], 5)
 
     def test_spawn_entries_share_incident_for_same_turn_group(self) -> None:
@@ -1812,7 +2608,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertEqual(spawn_entry["incident"], next(item["key"] for item in spawn_entry["incidents"] if item["category"] == "historical"))
         for incident in incident_rows:
             self.assertIs(incident["generate"], True)
-            self.assertEqual(incident["ui_image"], "3k_event_ready_for_duty")
+            self.assertEqual(incident["ui_image"], "3k_event_giving_jobs")
         option_rows = written_tables["db/cdir_events_incident_option_junctions_tables/event"]
         self.assertEqual(len(option_rows), 6)
         for incident_key in incident_keys:
@@ -1843,7 +2639,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                 )
             )
 
-    def test_build_delta_pack_emits_incident_spawn_tables_and_observer_lua(self) -> None:
+    def test_build_delta_pack_emits_observer_lua_without_db_spawn(self) -> None:
         payload = {
             "tables": {
                 "db/character_generation_templates_tables/_mtu_characters": {
@@ -1944,11 +2740,11 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                     [],
                 )
 
-        write_incidents.assert_called_once()
+        write_incidents.assert_not_called()
         self.assertEqual(write_lua.call_count, len(delta_builder.CAMPAIGN_SPAWN_SCRIPT_PATHS))
         written_lua_paths = {call.args[2] for call in write_lua.call_args_list}
         self.assertEqual(written_lua_paths, set(delta_builder.CAMPAIGN_SPAWN_SCRIPT_PATHS))
-        self.assertIn("3 spawn incident table(s)", str(messages[-1]["message"]))
+        self.assertIn("0 spawn incident table(s)", str(messages[-1]["message"]))
 
     def test_material_land_unit_clone_uses_source_table_path(self) -> None:
         payload = {
@@ -2706,11 +3502,108 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertEqual({row["game_mode"] for row in details}, {"historical", "romance"})
         self.assertTrue(all(row["retinue"] == "hby_retinue_new" for row in details))
         self.assertTrue(all(row["min_rank"] == 3 and row["max_rank"] == 3 for row in details))
-        art = rows_by_table["db/campaign_character_arts_tables/_mtu_characters"][0]
+        art_rows = rows_by_table["db/campaign_character_arts_tables/_mtu_characters"]
+        art = art_rows[0]
         self.assertEqual(art["art_set_id"], "hby_art_new")
         self.assertEqual(art["portrait"], "hby_template_new/")
         self.assertEqual(art["card"], "hby_template_new")
         self.assertEqual(art["uniform"], "new_uniform")
+        self.assertEqual({row["age"] for row in art_rows}, {"adult", 999})
+        fallback = next(row for row in art_rows if row["age"] == 999)
+        self.assertEqual(fallback["portrait"], "hby_template_new/")
+        self.assertEqual(fallback["card"], "hby_template_new")
+        self.assertEqual(fallback["uniform"], "new_uniform")
+
+    def test_material_character_clone_copies_agent_uniform_for_custom_model(self) -> None:
+        payload = {
+            "tables": {
+                "db/character_generation_templates_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "key": "source_template",
+                        "art_set_override": "source_art",
+                        "spawn_age_range": "age",
+                        "forename": "1",
+                    }],
+                },
+                "db/character_generation_template_game_mode_details_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"character_generation_template": "source_template", "game_mode": "historical"}],
+                },
+                "db/campaign_character_art_sets_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"art_set_id": "source_art", "is_male": False}],
+                },
+                "db/campaign_character_arts_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "art_set_id": "source_art",
+                        "age": 16,
+                        "has_come_of_age": True,
+                        "portrait": "zou_yuan/",
+                        "card": "zou_yuan",
+                        "uniform": "3k_mtu_lady_zou_yuan",
+                    }],
+                },
+                "db/agent_uniforms_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "uniform_name": "3k_mtu_lady_zou_yuan",
+                        "filename": "3k_mtu_hero_water_lady_zou_yuan",
+                        "battle_filename": "3k_mtu_hero_water_lady_zou_yuan",
+                        "campaign_porthole_filename": "3k_mtu_lady_zou_yuan",
+                        "campaign_politician_filename": "3k_mtu_lady_zou_yuan",
+                    }],
+                },
+                "db/character_generation_spawn_age_ranges_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"key": "age"}],
+                },
+                "db/names_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"id": "1"}],
+                },
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+
+        rows_by_table = {}
+        source_dbs = {}
+        _collect_character_clone_rows(
+            session,
+            [CharacterClone(
+                new_template_key="hby_template_zou_yuan",
+                source_template_key="source_template",
+                detail_source_template_key="source_template",
+                new_art_set_id="hby_art_zou_yuan",
+                art_set_source_id="source_art",
+                new_age_range_key=None,
+                age_range_source_key=None,
+                new_initial_ceo_key=None,
+                initial_ceo_source_key=None,
+                template_overrides={},
+                detail_overrides={},
+                art_set_overrides={},
+                art_overrides={"portrait": "hby_zou_yuan/", "card": "hby_zou_yuan"},
+                age_range_overrides={},
+                image_assets=[],
+            )],
+            source_dbs,
+            rows_by_table,
+            {},
+        )
+
+        art = rows_by_table["db/campaign_character_arts_tables/_mtu_characters"][0]
+        self.assertEqual(art["uniform"], "3k_mtu_lady_zou_yuan")
+        uniform_rows = rows_by_table["db/agent_uniforms_tables/_mtu_characters"]
+        self.assertEqual(len(uniform_rows), 1)
+        self.assertEqual(uniform_rows[0]["uniform_name"], "3k_mtu_lady_zou_yuan")
+        self.assertEqual(uniform_rows[0]["campaign_porthole_filename"], "3k_mtu_lady_zou_yuan")
 
     def test_material_character_clone_fills_missing_romance_detail_from_historical(self) -> None:
         payload = {
@@ -2863,10 +3756,11 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         )
 
         art_rows = rows_by_table["db/campaign_character_arts_tables/_mtu_characters"]
-        self.assertEqual(1, len(art_rows))
-        self.assertEqual("hby_art_new", art_rows[0]["art_set_id"])
-        self.assertEqual("hby_adult/", art_rows[0]["portrait"])
-        self.assertEqual("hby_adult", art_rows[0]["card"])
+        self.assertEqual(2, len(art_rows))
+        self.assertEqual({16, 999}, {row["age"] for row in art_rows})
+        self.assertEqual({"hby_art_new"}, {row["art_set_id"] for row in art_rows})
+        self.assertEqual({"hby_adult/"}, {row["portrait"] for row in art_rows})
+        self.assertEqual({"hby_adult"}, {row["card"] for row in art_rows})
         self.assertNotIn("baby", {row.get("card") for row in art_rows})
         self.assertNotIn("child_03_male", {row.get("card") for row in art_rows})
 
@@ -3576,14 +4470,9 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         )
 
         details = rows_by_table["db/character_generation_template_game_mode_details_tables/_mtu_characters"]
-        self.assertTrue(all(str(row["initial_ceos"]).startswith("hby_mtu_ceo_initial_data_") for row in details))
-        equipment_rows = rows_by_table["db/ceo_initial_data_equipments_tables/data__"]
-        self.assertEqual({row["equipped_ceo"] for row in equipment_rows}, {"new_weapon", "old_armour"})
-        active_rows = rows_by_table["db/ceo_initial_data_active_ceos_tables/data__"]
-        self.assertEqual(
-            {row["active_ceo"] for row in active_rows},
-            {"new_weapon", "old_armour", "old_title", "new_trait"},
-        )
+        self.assertEqual({row["initial_ceos"] for row in details}, {selected_initial})
+        self.assertNotIn("db/ceo_initial_data_equipments_tables/data__", rows_by_table)
+        self.assertNotIn("db/ceo_initial_data_active_ceos_tables/data__", rows_by_table)
 
     def test_material_character_clone_derives_named_initial_ceo_from_base_template_when_source_is_generic(self) -> None:
         payload = {
@@ -3820,6 +4709,74 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertEqual(
             rows_by_table["db/ceo_initial_datas_tables/data__"][0]["key"],
             material_key,
+        )
+
+    def test_initial_ceo_dependency_copy_does_not_synthesize_legacy_equipment_chain(self) -> None:
+        initial_key = "3k_mtu_ceo_initial_data_character_historical_lady_ma_yunlu"
+        armour_key = "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique"
+        weapon_key = "3k_mtu_ancillary_weapon_mothers_bow"
+        tables = {
+            "ceo_initial_datas": [
+                {
+                    "key": initial_key,
+                    "_sourceTablePath": "db/ceo_initial_datas_tables/_mtu_characters_ceo",
+                },
+            ],
+            "equipment_variants_armours": [
+                {
+                    "ceos_key": armour_key,
+                    "armour": "3k_mtu_hero_lady_ma_yunlu_unique",
+                    "_sourceTablePath": "db/ceos_to_equipment_variants_tables/_mtu_characters_ceo_armours",
+                },
+            ],
+            "equipment_variants_weapons": [
+                {
+                    "ceos_key": weapon_key,
+                    "primary_missile_weapon": "3k_mtu_hero_bow_lady_ma_yunlu_unique",
+                    "_sourceTablePath": "db/ceos_to_equipment_variants_tables/_mtu_characters_ceo_weapons",
+                },
+            ],
+            "unit_armour_types": [
+                {
+                    "key": "3k_mtu_hero_lady_ma_yunlu_unique",
+                    "armour_value": 45,
+                    "audio_type": "Leather",
+                    "_sourceTablePath": "db/unit_armour_types_tables/_mtu_characters_skills_abilities",
+                },
+            ],
+        }
+        table_names = {"ceo_initial_datas": "db/ceo_initial_datas_tables/_mtu_characters_ceo"}
+        source_dbs: dict[str, dict[str, object]] = {}
+        rows_by_table: dict[str, list[dict[str, object]]] = {}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(delta_builder, "INTERNAL_MATERIALS_PATH", Path(tmp) / "missing.json"):
+                delta_builder._copy_initial_ceo_dependency(
+                    tables,
+                    table_names,
+                    source_dbs,
+                    rows_by_table,
+                    initial_key,
+                )
+
+        self.assertEqual(
+            rows_by_table["db/ceo_initial_datas_tables/_mtu_characters_ceo"][0]["key"],
+            initial_key,
+        )
+        self.assertFalse(
+            any("/ceo_initial_data_" in table_path for table_path in rows_by_table if "ceo_initial_datas_tables" not in table_path)
+        )
+        self.assertEqual(
+            rows_by_table["db/ceos_to_equipment_variants_tables/_mtu_characters_ceo_armours"][0]["ceos_key"],
+            armour_key,
+        )
+        self.assertEqual(
+            rows_by_table["db/unit_armour_types_tables/_mtu_characters_skills_abilities"][0]["key"],
+            "3k_mtu_hero_lady_ma_yunlu_unique",
+        )
+        self.assertEqual(
+            rows_by_table["db/ceos_to_equipment_variants_tables/_mtu_characters_ceo_weapons"][0]["ceos_key"],
+            weapon_key,
         )
 
     def test_player_spawn_character_clone_preserves_source_initial_ceo(self) -> None:
@@ -4116,6 +5073,16 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                         "uniform": "old_uniform",
                     }],
                 },
+                "db/agent_uniforms_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "uniform_name": "new_uniform",
+                        "filename": "new_model",
+                        "battle_filename": "new_model",
+                        "campaign_porthole_filename": "new_porthole",
+                        "campaign_politician_filename": "new_politician",
+                    }],
+                },
                 "db/character_generation_spawn_age_ranges_tables/_mtu_characters": {
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [{"key": "age"}],
@@ -4166,6 +5133,9 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertEqual(art["portrait"], "source_image/")
         self.assertEqual(art["card"], "source_image")
         self.assertEqual(art["uniform"], "new_uniform")
+        uniform_rows = rows_by_table["db/agent_uniforms_tables/_mtu_characters"]
+        self.assertEqual(uniform_rows[0]["uniform_name"], "new_uniform")
+        self.assertEqual(uniform_rows[0]["campaign_porthole_filename"], "new_porthole")
 
     def test_material_character_patch_fills_missing_romance_detail_from_historical(self) -> None:
         payload = {

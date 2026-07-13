@@ -81,6 +81,7 @@ class CharacterClone:
     equipment_set_key: str | None = None
     equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
     removable_equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    default_equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ class CharacterPatch:
     equipment_set_key: str | None = None
     equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
     removable_equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    default_equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -211,6 +213,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             equipment_set_key=item.get("equipmentSetKey"),
             equipment_ceo_keys=_string_tuple(item.get("equipmentCeoKeys")),
             removable_equipment_ceo_keys=_string_tuple(item.get("removableEquipmentCeoKeys")),
+            default_equipment_ceo_keys=_string_tuple(item.get("defaultEquipmentCeoKeys")),
         )
         for item in data.get("characterCloneRecipes", [])
     ]
@@ -231,6 +234,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             equipment_set_key=item.get("equipmentSetKey"),
             equipment_ceo_keys=_string_tuple(item.get("equipmentCeoKeys")),
             removable_equipment_ceo_keys=_string_tuple(item.get("removableEquipmentCeoKeys")),
+            default_equipment_ceo_keys=_string_tuple(item.get("defaultEquipmentCeoKeys")),
         )
         for item in data.get("characterPatches", [])
     ]

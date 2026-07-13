@@ -54,7 +54,7 @@ function fillForms(character) {
     fillSelect('editSpawnEvent', SPAWN_EVENTS.map((item) => option(item.key, `${item.name} · ${item.note}`)));
     fillSelect('sourceSpawnEvent', SPAWN_EVENTS.map((item) => option(item.key, `${item.name} · ${item.note}`)));
     fillSelect('editSubtype', Object.entries(ELEMENTS).map(([key, item]) => option(item.subtype, `${item.label} ${item.name}`)));
-    fillSelect('createSubtype', Object.entries(ELEMENTS).map(([key, item]) => option(item.subtype, `${item.label} ${item.name}`)));
+    fillSelect('createSubtype', createSubtypeOptions(createGender));
   }
   syncTitleSelectOptions('edit', editTitleFilter, editTitleCandidates, currentTitleChoice);
   syncTitleSelectOptions('source', sourceTitleFilter, sourceTitleCandidates, selectedTitleChoice);
@@ -240,7 +240,7 @@ function prepareCreateWorkflowForms(character) {
   $('createName').value = `${character.name} 파생`;
   setupCreateLazySelects(character);
   fillSelect('sourceSpawnEvent', SPAWN_EVENTS.map((item) => option(item.key, `${item.name} · ${item.note}`)));
-  fillSelect('createSubtype', Object.entries(ELEMENTS).map(([key, item]) => option(item.subtype, `${item.label} ${item.name}`)));
+  fillSelect('createSubtype', createSubtypeOptions(createGender));
   setSelectValue('createGender', createGender);
   setSelectValue('sourceSpawnEvent', generatedSpawnEventFromRound($('createMinRound').value));
   setSelectValue('createSubtype', elementMeta(character.element).subtype);
@@ -388,6 +388,27 @@ function signatureForOptions(items, keyFunc = (item) => item?.key || '') {
 
 function option(value, label, search = '') {
   return { value, label, search };
+}
+
+function createSubtypeOptions(gender) {
+  const unsupportedGenericFemaleElements = new Set(['fire', 'wood']);
+  return Object.entries(ELEMENTS).map(([key, item]) => {
+    const warning = gender === 'female' && unsupportedGenericFemaleElements.has(key)
+      ? ' · ⚠ 공용 여성 모델 없음'
+      : '';
+    return option(item.subtype, `${item.label} ${item.name}${warning}`);
+  });
+}
+
+function syncCreateSubtypeWarning() {
+  const warning = $('createSubtypeWarning');
+  if (!warning) return;
+  const element = elementKeyFromSubtype($('createSubtype')?.value);
+  const isUnsupportedFemale = state.workflowGender === 'female' && new Set(['fire', 'wood']).has(element);
+  warning.hidden = !isUnsupportedFemale;
+  warning.innerHTML = isUnsupportedFemale
+    ? `<strong>⚠ ${escapeHtml(elementMeta(element).name)} 여성 모델 주의</strong><span>바닐라에는 이 오행의 공용 여성 3D 모델이 없습니다. 생성은 가능하지만 기준 장수의 고유 모델 및 장비 의존성이 유지될 수 있습니다.</span>`
+    : '';
 }
 
 function baseCharacterOptionLabel(character) {

@@ -30,25 +30,10 @@ MATERIAL_TABLE_ALIASES = {
         "db/frontend_character_ceos_tables/data__",
         "db/frontend_character_ceos_tables/data",
     ],
-    "ceo_initial_data_stages": [
-        "db/ceo_initial_data_stages_tables/_mtu_characters_ceo",
-        "db/ceo_initial_data_stages_tables/data__",
-        "db/ceo_initial_data_stages_tables/data",
-    ],
-    "ceo_initial_data_to_stages": [
-        "db/ceo_initial_data_to_stages_tables/_mtu_characters_ceo",
-        "db/ceo_initial_data_to_stages_tables/data__",
-        "db/ceo_initial_data_to_stages_tables/data",
-    ],
-    "ceo_initial_data_active_ceos": [
-        "db/ceo_initial_data_active_ceos_tables/_mtu_characters_ceo",
-        "db/ceo_initial_data_active_ceos_tables/data__",
-        "db/ceo_initial_data_active_ceos_tables/data",
-    ],
-    "ceo_initial_data_equipments": [
-        "db/ceo_initial_data_equipments_tables/_mtu_characters_ceo",
-        "db/ceo_initial_data_equipments_tables/data__",
-        "db/ceo_initial_data_equipments_tables/data",
+    "agent_uniforms": [
+        "db/agent_uniforms_tables/_mtu_characters",
+        "db/agent_uniforms_tables/data__",
+        "db/agent_uniforms_tables/data",
     ],
     "incidents": [
         "db/incidents_tables/event",

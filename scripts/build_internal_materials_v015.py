@@ -82,15 +82,12 @@ DEFAULT_SOURCES = [
 ) + default_game_local_pack_paths()
 
 REQUIRED_TABLE_FOLDERS = {
+    "agent_uniforms_tables",
     "campaign_character_art_sets_tables",
     "campaign_character_arts_tables",
     "cai_retinues_to_aspects_tables",
     "cdir_events_incident_option_junctions_tables",
     "cdir_events_incident_payloads_tables",
-    "ceo_initial_data_active_ceos_tables",
-    "ceo_initial_data_equipments_tables",
-    "ceo_initial_data_stages_tables",
-    "ceo_initial_data_to_stages_tables",
     "ceo_initial_datas_tables",
     "ceos_to_equipment_variants_tables",
     "character_attribute_sets_tables",

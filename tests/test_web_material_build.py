@@ -100,6 +100,79 @@ class WebMaterialBuildTest(unittest.TestCase):
             "3k_main_hero_gongsun_zan_unique",
         )
 
+    def test_combat_stats_match_named_weapon_from_variant_model_key(self) -> None:
+        tables = {
+            "ceo_initial_datas": [
+                {"key": "3k_mtu_ceo_initial_data_character_historical_lady_ma_yunlu"},
+            ],
+            "equipment_variants_weapons": [
+                {
+                    "ceos_key": "3k_mtu_ancillary_weapon_mothers_bow",
+                    "primary_missile_weapon": "3k_mtu_hero_bow_lady_ma_yunlu_unique",
+                },
+            ],
+            "equipment_variants_armours": [
+                {
+                    "ceos_key": "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+                    "armour": "3k_mtu_hero_lady_ma_yunlu_unique",
+                },
+            ],
+            "melee_weapons": [],
+            "missile_weapons": [
+                {
+                    "key": "3k_mtu_hero_bow_lady_ma_yunlu_unique",
+                    "default_projectile": "3k_mtu_arrow_lady_ma_yunlu",
+                },
+            ],
+            "projectiles": [
+                {"key": "3k_mtu_arrow_lady_ma_yunlu", "damage": 42, "ap_damage": 11, "effective_range": 250},
+            ],
+            "unit_armour_types": [
+                {"key": "3k_mtu_hero_lady_ma_yunlu_unique", "armour_value": 45, "audio_type": "Segmented_Medium"},
+            ],
+            "character_generation_template_game_mode_details": [],
+        }
+
+        stats = web._combat_stats_by_initial_ceo(tables)
+
+        self.assertEqual(
+            stats["3k_mtu_ceo_initial_data_character_historical_lady_ma_yunlu"]["weaponCeo"],
+            "3k_mtu_ancillary_weapon_mothers_bow",
+        )
+        self.assertEqual(
+            stats["3k_mtu_ceo_initial_data_character_historical_lady_ma_yunlu"]["missileWeaponStatKey"],
+            "3k_mtu_hero_bow_lady_ma_yunlu_unique",
+        )
+        self.assertEqual(
+            stats["3k_mtu_ceo_initial_data_character_historical_lady_ma_yunlu"]["armourCeo"],
+            "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+        )
+        self.assertEqual(
+            stats["3k_mtu_ceo_initial_data_character_historical_lady_ma_yunlu"]["armourCeo"],
+            "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+        )
+
+    def test_snapshot_runtime_equipment_keys_preserve_source_ceo_keys(self) -> None:
+        character_data = {
+            "pack": {
+                "characters": [
+                    {
+                        "key": "3k_mtu_template_historical_lady_ma_yunlu_hero_metal",
+                        "combatStats": {
+                            "armourCeo": "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+                        },
+                    },
+                ],
+            },
+        }
+
+        web._normalize_character_data_runtime_equipment_keys(character_data)
+
+        self.assertEqual(
+            character_data["pack"]["characters"][0]["combatStats"]["armourCeo"],
+            "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique",
+        )
+
     def test_title_catalog_merges_duplicate_title_keys(self) -> None:
         title_key = "3k_main_ceo_node_career_historical_test_hero_01"
         characters = [

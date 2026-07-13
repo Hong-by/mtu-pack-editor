@@ -67,6 +67,7 @@ function clearReferenceEditWarning() {
 }
 
 function renderValidation() {
+  syncCreateSubtypeWarning();
   const items = [];
   for (const message of state.serverMessages.slice(-1)) {
     const level = message.level === 'error' ? 'error' : message.level === 'warning' ? 'warning' : message.level === 'ok' ? 'ok' : 'info';

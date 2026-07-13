@@ -24,10 +24,6 @@ DEFAULT_OUTPUT = ROOT / "work" / "packs" / "refs" / "mtu_reference_core.pack"
 REFERENCE_TABLE_FOLDERS = {
     "campaign_character_art_sets_tables",
     "campaign_character_arts_tables",
-    "ceo_initial_data_active_ceos_tables",
-    "ceo_initial_data_equipments_tables",
-    "ceo_initial_data_stages_tables",
-    "ceo_initial_data_to_stages_tables",
     "ceo_initial_datas_tables",
     "ceos_tables",
     "ceo_nodes_tables",

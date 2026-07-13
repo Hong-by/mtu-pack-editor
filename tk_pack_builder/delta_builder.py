@@ -3,7 +3,9 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import struct
+from dataclasses import replace as _dataclass_replace
 from pathlib import Path
 from typing import Any
 import zlib
@@ -12,10 +14,13 @@ from .adapters import RpfmPackSession, _decode_rpfm_cell, _encode_rpfm_cell
 from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_name
 from .character_rules import (
     coerce_bool as _coerce_bool,
+    element_from_subtype as _element_from_subtype,
     gender_compatible_initial_ceo_key as _gender_compatible_initial_ceo_key,
 )
+from .campaign_script import build_campaign_start_script
 from .korea_addon import korea_related_template_keys
 from .land_units import validate_land_unit_clone
+from .pfh import read_entry_bytes, read_pfh_index
 from .recipe import AgeRangeClone, ArmourTypeClone, AttributeSetClone, CharacterClone, CharacterPatch, Recipe, SkillSetClone, recipe_from_dict
 from .stat_tables import TABLE_ALIASES, StatTarget, resolve_stat_target, resolve_table_name
 
@@ -28,13 +33,12 @@ CORE_ASSET_SOURCE_ID = "17309a40b912"
 IMAGE_ONLY_ASSET_PREFIX = "__image_only_reference__"
 TEMP_IMAGE_ASSET_ROOT = ROOT / "work" / "tmp_delta_image_assets"
 TEMP_LUA_SCRIPT_ROOT = ROOT / "work" / "tmp_delta_scripts"
-SPAWN_SCRIPT_SAVE_VERSION = 7
+SPAWN_SCRIPT_SAVE_VERSION = 8
 CEO_SET_SCRIPT_SAVE_VERSION = 6
-EQUIPMENT_SCRIPT_SAVE_VERSION = 7
+EQUIPMENT_SCRIPT_SAVE_VERSION = 21
 CAMPAIGN_SPAWN_SCRIPT_PATH = "script/campaign/3k_main_campaign_map/mod/hby_mtu_pack_editor_player_spawn.lua"
 CAMPAIGN_SPAWN_SCRIPT_PATHS = (
     CAMPAIGN_SPAWN_SCRIPT_PATH,
-    "script/campaign/3k_main_campaign_map/hby_mtu_pack_editor_player_spawn.lua",
 )
 SPAWN_EVENT_TEMPLATE_WEIGHT = 19.5
 GENERATED_CHARACTER_START_RANK = 3
@@ -42,33 +46,69 @@ SPAWN_INCIDENT_EVENT_CATEGORY = "historical"
 CHARACTER_GAME_MODES = ("historical", "romance")
 MTU_CHARACTER_ART_SETS_TABLE = "db/campaign_character_art_sets_tables/_mtu_characters"
 MTU_CHARACTER_ARTS_TABLE = "db/campaign_character_arts_tables/_mtu_characters"
+MTU_AGENT_UNIFORMS_TABLE = "db/agent_uniforms_tables/_mtu_characters"
 MTU_FRONTEND_CHARACTER_CEOS_TABLE = "db/frontend_character_ceos_tables/_mtu_characters_ceo"
-CEO_INITIAL_EQUIPMENT_ALIASES = {
-    "ceo_initial_data_stages": [
-        "ceo_initial_data_stages",
-        "db/ceo_initial_data_stages_tables/_mtu_characters_ceo",
-        "db/ceo_initial_data_stages_tables/data__",
-        "db/ceo_initial_data_stages_tables/data",
-    ],
-    "ceo_initial_data_to_stages": [
-        "ceo_initial_data_to_stages",
-        "db/ceo_initial_data_to_stages_tables/_mtu_characters_ceo",
-        "db/ceo_initial_data_to_stages_tables/data__",
-        "db/ceo_initial_data_to_stages_tables/data",
-    ],
-    "ceo_initial_data_active_ceos": [
-        "ceo_initial_data_active_ceos",
-        "db/ceo_initial_data_active_ceos_tables/_mtu_characters_ceo",
-        "db/ceo_initial_data_active_ceos_tables/data__",
-        "db/ceo_initial_data_active_ceos_tables/data",
-    ],
-    "ceo_initial_data_equipments": [
-        "ceo_initial_data_equipments",
-        "db/ceo_initial_data_equipments_tables/_mtu_characters_ceo",
-        "db/ceo_initial_data_equipments_tables/data__",
-        "db/ceo_initial_data_equipments_tables/data",
-    ],
+GENERIC_FEMALE_UNIFORM = "3k_main_hero_skin_female_01"
+GENERIC_FEMALE_SHARED_FALLBACK = (
+    "3k_main_ancillary_armour_light_armour_earth_metal_and_water_common_female"
+)
+GENERIC_FEMALE_COMPATIBILITY = {
+    "earth": {
+        "initial_ceo": "3k_main_ceo_initial_data_character_generic_f_earth_general",
+        "fallback": GENERIC_FEMALE_SHARED_FALLBACK,
+        "armour_displays": (
+            "3k_main_ancillary_armour_light_leather_partial_common_shared_female",
+            "3k_main_ancillary_armour_light_leather_partial_exceptional_earth_female",
+            "3k_main_ancillary_armour_light_leather_partial_refined_shared_female",
+            "3k_main_ancillary_armour_light_leather_partial_unique_earth_female",
+            "3k_main_ancillary_armour_medium_leather_common_shared_female",
+            "3k_main_ancillary_armour_medium_leather_exceptional_earth_female",
+            "3k_main_ancillary_armour_medium_leather_refined_shared_female",
+            "3k_main_ancillary_armour_medium_leather_unique_earth_female",
+            "ep_ancillary_armour_light_leather_partial_exceptional_earth_female",
+            "ep_ancillary_armour_light_leather_partial_unique_earth_female",
+            "ep_ancillary_armour_medium_leather_exceptional_earth_female",
+            "ep_ancillary_armour_medium_leather_unique_earth_female",
+        ),
+    },
+    "metal": {
+        "initial_ceo": "3k_main_ceo_initial_data_character_generic_f_metal_general",
+        "fallback": GENERIC_FEMALE_SHARED_FALLBACK,
+        "armour_displays": (
+            "3k_main_ancillary_armour_light_leather_partial_common_shared_female",
+            "3k_main_ancillary_armour_light_leather_partial_exceptional_metal_female",
+            "3k_main_ancillary_armour_light_leather_partial_refined_shared_female",
+            "3k_main_ancillary_armour_light_leather_partial_unique_metal_female",
+            "3k_main_ancillary_armour_medium_leather_common_shared_female",
+            "3k_main_ancillary_armour_medium_leather_exceptional_metal_female",
+            "3k_main_ancillary_armour_medium_leather_refined_shared_female",
+            "3k_main_ancillary_armour_medium_leather_unique_metal_female",
+            "ep_ancillary_armour_light_leather_partial_exceptional_metal_female",
+            "ep_ancillary_armour_light_leather_partial_unique_metal_female",
+            "ep_ancillary_armour_medium_leather_exceptional_metal_female",
+            "ep_ancillary_armour_medium_leather_unique_metal_female",
+        ),
+    },
+    "water": {
+        "initial_ceo": "3k_main_ceo_initial_data_character_generic_f_water_general",
+        "fallback": "3k_main_ancillary_armour_strategist_light_armour_water_common_female",
+        "armour_displays": (
+            "3k_main_ancillary_armour_light_tunic_common_water_female",
+            "3k_main_ancillary_armour_light_tunic_exceptional_water_female",
+            "3k_main_ancillary_armour_light_tunic_refined_water_female",
+            "3k_main_ancillary_armour_light_tunic_unique_water_female",
+            "ep_ancillary_armour_light_tunic_exceptional_water_female",
+            "ep_ancillary_armour_light_tunic_unique_water_female",
+            "3k_main_ancillary_armour_light_leather_partial_common_shared_female",
+            "3k_main_ancillary_armour_light_leather_partial_exceptional_water_female",
+            "3k_main_ancillary_armour_light_leather_partial_refined_shared_female",
+            "3k_main_ancillary_armour_light_leather_partial_unique_water_female",
+        ),
+    },
 }
+# Vanilla has generic female campaign art only for earth, metal, and water.
+# Fire and wood initial CEO records exist, but no matching female art family.
+UNSUPPORTED_GENERIC_FEMALE_ELEMENTS = frozenset({"fire", "wood"})
 HISTORICAL_INITIAL_CEO_TOKEN_ALIASES = {
     "empress_he_fire": ("3k_dlc04_ceo_initial_data_character_historical_non_deployable_empress_he_fire",),
     "lady_sun_shangxiang": ("lady_sun",),
@@ -223,15 +263,27 @@ def build_delta_pack(
                 loc_rows,
             )
 
-        incident_tables = _write_spawn_incident_tables(
-            session,
-            target_key,
-            processed_clones,
-        )
+        # Lua is the single spawn path. Pairing it with SPAWN_AGENT_OFF_MAP can
+        # duplicate characters, while the DB-only event does not reliably fire.
+        incident_tables = 0
         copied_assets = _copy_image_assets(
             session,
             target_key,
             [*processed_clones, *processed_patches],
+            opened_pack_keys,
+        )
+        copied_model_assets = _copy_uniform_model_assets(
+            session,
+            target_key,
+            rows_by_table,
+            reference_paths or [],
+            opened_pack_keys,
+        )
+        copied_equipment_assets = _copy_equipment_ceo_raw_assets(
+            session,
+            target_key,
+            [*processed_clones, *processed_patches],
+            reference_paths or [],
             opened_pack_keys,
         )
 
@@ -260,6 +312,8 @@ def build_delta_pack(
                 f"{copied_dependency_rows} referenced DB row(s), "
                 f"{len(loc_rows)} name loc row(s), {incident_tables} spawn incident table(s), "
                 f"{copied_assets} image asset(s), "
+                f"{copied_model_assets} uniform model asset(s), "
+                f"{copied_equipment_assets} equipment CEO asset(s), "
                 f"and {1 if campaign_script else 0} campaign script(s)."
             ),
         }
@@ -296,6 +350,13 @@ def build_delta_pack_from_materials(
 
         def metadata(self) -> dict[str, Any]:
             return source_session.metadata()
+
+        def material_source_path_for_table(self, table_name: str) -> str:
+            path = source_session._resolve_table_path(table_name)
+            entry = getattr(source_session, "payload", {}).get("tables", {}).get(path, {})
+            if isinstance(entry, dict):
+                return str(entry.get("sourcePath") or "")
+            return ""
 
     return build_delta_pack(
         MaterialWriterSession(),  # type: ignore[arg-type]
@@ -1060,6 +1121,13 @@ def _collect_character_patch_rows(
                     art_set_id,
                     _coerce_bool(art_set_overrides["is_male"]),
                 )
+            _copy_agent_uniform_dependencies(
+                tables,
+                table_names,
+                source_dbs,
+                rows_by_table,
+                _output_art_rows_for_art_set(rows_by_table, art_set_id),
+            )
         for patched_template_key in patched_template_keys:
             patched_template = next(
                 (
@@ -1120,26 +1188,6 @@ def _collect_character_patch_rows(
             if resolved_initial_ceo and patched.get("initial_ceos") != resolved_initial_ceo:
                 patched["initial_ceos"] = resolved_initial_ceo
                 changed += 1
-            active_ceo_keys = _unique_strings([*patch.trait_ceo_keys])
-            removable_active_ceo_keys = _unique_strings([
-                *patch.removable_trait_ceo_keys,
-            ])
-            if active_ceo_keys or patch.equipment_ceo_keys:
-                equipment_initial_ceo = _materialize_equipment_initial_ceo(
-                    tables,
-                    table_names,
-                    source_dbs,
-                    rows_by_table,
-                    patched.get("initial_ceos"),
-                    patch.template_key,
-                    patch.equipment_ceo_keys,
-                    patch.removable_equipment_ceo_keys,
-                    active_ceo_keys,
-                    removable_active_ceo_keys,
-                )
-                if equipment_initial_ceo and patched.get("initial_ceos") != equipment_initial_ceo:
-                    patched["initial_ceos"] = equipment_initial_ceo
-                    changed += 1
             _upsert_delta_row(
                 rows_by_table,
                 detail_table,
@@ -1319,6 +1367,52 @@ def _patch_child_art_rows_for_gender(
         )
 
 
+def _output_art_rows_for_art_set(
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    art_set_id: str,
+) -> list[dict[str, Any]]:
+    return [
+        row
+        for table_path, rows in rows_by_table.items()
+        if "/campaign_character_arts_tables/" in _normalize_pack_path(table_path)
+        for row in rows
+        if str(row.get("art_set_id") or "") == str(art_set_id or "")
+    ]
+
+
+def _copy_agent_uniform_dependencies(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    art_rows: list[dict[str, Any]],
+) -> None:
+    uniform_names = _unique_strings([row.get("uniform") for row in art_rows])
+    if not uniform_names or "agent_uniforms" not in tables:
+        return
+    for uniform_name in uniform_names:
+        source = _find_row(tables.get("agent_uniforms", []), "uniform_name", uniform_name)
+        if not source:
+            continue
+        source_table = str(
+            source.get("_sourceTablePath")
+            or table_names.get("agent_uniforms")
+            or MTU_AGENT_UNIFORMS_TABLE
+        )
+        if not source_table:
+            continue
+        if source_table not in source_dbs and "agent_uniforms" in table_names:
+            _ensure_output_source_db(source_dbs, source_table, table_names["agent_uniforms"])
+        if source_table not in source_dbs:
+            continue
+        _upsert_delta_row(
+            rows_by_table,
+            source_table,
+            "uniform_name",
+            _clean_source_row(source),
+        )
+
+
 def _child_art_overrides_for_gender(is_male: bool) -> dict[str, str]:
     if is_male:
         return {
@@ -1448,6 +1542,23 @@ def _collect_character_clone_rows(
     names = _read_rows(session, "names", source_dbs)
     names_table = _source_table_path_for_rows(names, "names")
 
+    for index, clone in enumerate(clones):
+        source_template = dict(_find_required(
+            tables["character_generation_templates"],
+            "key",
+            clone.source_template_key,
+        ))
+        preview_template = {
+            **source_template,
+            **clone.template_overrides,
+        }
+        clones[index] = _with_generic_female_art_compatibility(
+            clone,
+            preview_template,
+        )
+
+    _preserve_unique_armour_equipment(tables, clones)
+
     created = 0
     for clone in clones:
         source_template = dict(_find_required(
@@ -1502,6 +1613,11 @@ def _collect_character_clone_rows(
                 art_set_overrides = dict(clone.art_set_overrides or {})
                 if is_male is not None:
                     art_set_overrides["is_male"] = is_male
+                _bind_generated_art_set_to_template_subtype(
+                    art_set_overrides,
+                    new_template,
+                    source_art_set_row,
+                )
                 _clone_art_set_delta(
                     tables,
                     table_names,
@@ -1625,25 +1741,6 @@ def _collect_character_clone_rows(
             )
             if compatible_initial_ceo:
                 new_detail["initial_ceos"] = compatible_initial_ceo
-            active_ceo_keys = _unique_strings([*clone.trait_ceo_keys])
-            removable_active_ceo_keys = _unique_strings([
-                *clone.removable_trait_ceo_keys,
-            ])
-            if active_ceo_keys or clone.equipment_ceo_keys:
-                equipment_initial_ceo = _materialize_equipment_initial_ceo(
-                    tables,
-                    table_names,
-                    source_dbs,
-                    rows_by_table,
-                    new_detail.get("initial_ceos"),
-                    clone.new_template_key,
-                    clone.equipment_ceo_keys,
-                    clone.removable_equipment_ceo_keys,
-                    active_ceo_keys,
-                    removable_active_ceo_keys,
-                )
-                if equipment_initial_ceo:
-                    new_detail["initial_ceos"] = equipment_initial_ceo
             _upsert_delta_row(
                 rows_by_table,
                 table_names["character_generation_template_game_mode_details"],
@@ -1658,6 +1755,223 @@ def _collect_character_clone_rows(
                 new_detail.get("initial_ceos"),
             )
     return created
+
+
+def _preserve_unique_armour_equipment(
+    tables: dict[str, list[dict[str, Any]]],
+    clones: list[CharacterClone],
+) -> None:
+    # Custom-model heroes only render correctly in their unique armour. Keep
+    # that source CEO as the default item and discard a conflicting generic
+    # armour pick. Template creation applies the source initial CEO chain; Lua
+    # only grants the same item to faction inventory as a safe fallback.
+    variants = tables.get("equipment_variants_armours", [])
+    if not variants:
+        return
+    for index, clone in enumerate(clones):
+        if _clone_uses_generic_initial_ceo(clone):
+            # Generic characters already receive safe vanilla equipment from
+            # their initial CEO chain. Do not re-introduce the source hero's
+            # character-bound armour as a Lua inventory grant.
+            continue
+        unique_armour = _unique_armour_ceo_for_template_key(variants, clone.source_template_key)
+        if not unique_armour:
+            continue
+        picks = list(clone.equipment_ceo_keys or ())
+        defaults = list(clone.default_equipment_ceo_keys or ())
+        generic_armours = [key for key in picks if _is_armour_ceo_key(key) and key != unique_armour]
+        default_armours = [key for key in defaults if _is_armour_ceo_key(key)]
+        new_picks = [key for key in picks if key not in generic_armours and key != unique_armour]
+        new_defaults = [key for key in defaults if key not in default_armours and key != unique_armour]
+        new_defaults.append(unique_armour)
+        removable = _unique_strings([
+            *(clone.removable_equipment_ceo_keys or ()),
+            *generic_armours,
+        ])
+        removable = [key for key in removable if key != unique_armour]
+        clones[index] = _dataclass_replace(
+            clone,
+            equipment_ceo_keys=tuple(new_picks),
+            default_equipment_ceo_keys=tuple(new_defaults),
+            removable_equipment_ceo_keys=tuple(removable),
+        )
+
+
+def _is_armour_ceo_key(value: Any) -> bool:
+    key = str(value or "").lower()
+    if "_ancillary_armour_" in key or "_ancilliary_armour_" in key:
+        return True
+    return "_ancillary_" in key and ("_armour_" in key or "_armor_" in key)
+
+
+def _clone_uses_generic_initial_ceo(clone: CharacterClone) -> bool:
+    initial_ceos = [
+        str(overrides.get("initial_ceos") or "").lower()
+        for overrides in (clone.detail_overrides or {}).values()
+    ]
+    initial_ceos.append(str(clone.initial_ceo_source_key or "").lower())
+    return any("_ceo_initial_data_character_generic_" in key for key in initial_ceos if key)
+
+
+def _with_generic_female_art_compatibility(
+    clone: CharacterClone,
+    template: dict[str, Any],
+) -> CharacterClone:
+    """Detach custom female art from source-hero equipment dependencies.
+
+    Vanilla supplies complete generic female campaign art families for earth,
+    metal, and water.  Use the matching initial CEO, uniform, fallback display,
+    and armour aliases for every custom-image female clone in those classes.
+    Fire and wood have no vanilla generic female art family and are deliberately
+    left unchanged so we do not claim a compatibility path that does not exist.
+    """
+    if _coerce_bool(template.get("is_male")):
+        return clone
+
+    art_overrides = dict(clone.art_overrides or {})
+    if not (art_overrides.get("portrait") or art_overrides.get("card")):
+        return clone
+    if art_overrides.get("uniform") or not (clone.image_assets or []):
+        # An explicitly selected model/uniform remains authoritative.  The
+        # compatibility path is only for imported custom image sets whose body
+        # would otherwise inherit the source hero's equipment-bound model.
+        return clone
+    element = _element_from_subtype(str(template.get("subtype") or ""))
+    compatibility = GENERIC_FEMALE_COMPATIBILITY.get(element)
+    if not compatibility:
+        return clone
+    art_overrides.update({
+        "uniform": GENERIC_FEMALE_UNIFORM,
+        "fallback_composite_display": str(compatibility["fallback"]),
+    })
+    detail_overrides = {
+        mode: dict(overrides)
+        for mode, overrides in (clone.detail_overrides or {}).items()
+    }
+    for mode in CHARACTER_GAME_MODES:
+        detail_overrides.setdefault(mode, {})["initial_ceos"] = str(compatibility["initial_ceo"])
+    image_assets = _generic_female_image_alias_assets(
+        clone.image_assets or [],
+        tuple(compatibility["armour_displays"]),
+    )
+    return _dataclass_replace(
+        clone,
+        initial_ceo_source_key=None,
+        detail_overrides=detail_overrides,
+        art_overrides=art_overrides,
+        image_assets=image_assets,
+        # The generic initial CEO supplies its own safe armour.  Do not grant
+        # the source hero's character-bound armour as a second inventory item.
+        default_equipment_ceo_keys=tuple(
+            key for key in (clone.default_equipment_ceo_keys or ())
+            if not _is_armour_ceo_key(key)
+        ),
+    )
+
+
+def _generic_female_image_alias_assets(
+    image_assets: list[dict[str, str]],
+    armour_displays: tuple[str, ...],
+) -> list[dict[str, str]]:
+    result = [dict(asset) for asset in image_assets]
+    existing_targets = {
+        _normalize_pack_path(asset.get("targetPath") or asset.get("path") or "")
+        for asset in result
+    }
+    by_suffix: dict[str, dict[str, str]] = {}
+    for asset in result:
+        target = _normalize_pack_path(asset.get("targetPath") or asset.get("path") or "")
+        marker = "/composites/"
+        if marker in target:
+            suffix = target.split(marker, 1)[1]
+            if suffix in {
+                "large_panel/angry/angry.png",
+                "large_panel/happy/happy.png",
+                "large_panel/norm/norm.png",
+                "small_panel/angry/angry.png",
+                "small_panel/happy/happy.png",
+                "small_panel/norm/norm.png",
+            }:
+                by_suffix[f"composites/{suffix}"] = asset
+        marker = "/stills/"
+        if marker in target:
+            suffix = target.split(marker, 1)[1]
+            parts = suffix.split("/")
+            if len(parts) == 2 and parts[0] in {
+                "bobbleheads", "halfbody_large", "halfbody_small", "mini", "unitcards",
+            }:
+                by_suffix[f"stills/{parts[0]}"] = asset
+            elif len(parts) == 3 and parts[1] == "large" and parts[0] in {
+                "bobbleheads", "halfbody_large", "halfbody_small", "mini", "unitcards",
+            }:
+                by_suffix[f"stills/{parts[0]}/large"] = asset
+
+    portrait_root = ""
+    for target in existing_targets:
+        if "/composites/" in target:
+            portrait_root = target.split("/composites/", 1)[0]
+            break
+    if not portrait_root:
+        return result
+
+    for display in armour_displays:
+        for key, source in by_suffix.items():
+            if key.startswith("composites/"):
+                target = f"{portrait_root}/composites/{display}/{key.removeprefix('composites/')}"
+            else:
+                still_path = key.removeprefix("stills/")
+                if still_path.endswith("/large"):
+                    still_type = still_path.removesuffix("/large")
+                    target = f"{portrait_root}/stills/{still_type}/large/{display}.png"
+                else:
+                    target = f"{portrait_root}/stills/{still_path}/{display}.png"
+            if target in existing_targets:
+                continue
+            result.append({**source, "targetPath": target})
+            existing_targets.add(target)
+    return result
+
+
+def _unique_armour_ceo_for_template_key(
+    armour_variants: list[dict[str, Any]],
+    template_key: Any,
+) -> str:
+    tokens = _template_slug_tokens(template_key)
+    if not tokens:
+        return ""
+    unique_rows = [
+        row for row in armour_variants
+        if "unique" in str(row.get("ceos_key") or "").lower()
+        and str(row.get("armour") or "")
+    ]
+    variant = _best_equipment_variant_for_tokens(tokens, unique_rows, "armour")
+    if not variant:
+        return ""
+    return _runtime_armour_ceo_key(str(variant.get("ceos_key") or ""))
+
+
+def _runtime_armour_ceo_key(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _template_slug_tokens(template_key: Any) -> list[str]:
+    token = str(template_key or "").lower()
+    for marker in ("_historical_", "_generated_", "_ancestral_"):
+        if marker in token:
+            token = token.split(marker, 1)[1]
+            break
+    token = re.sub(r"(?:_\d+)+$", "", token)
+    for suffix in (
+        "_hero_earth", "_hero_fire", "_hero_metal", "_hero_water", "_hero_wood",
+        "_earth", "_fire", "_metal", "_water", "_wood",
+    ):
+        if token.endswith(suffix):
+            token = token.removesuffix(suffix)
+            break
+    tokens = [token]
+    if token.startswith("lady_"):
+        tokens.append(token.removeprefix("lady_"))
+    return _unique_strings([value for value in tokens if len(value) >= 4])
 
 
 def _clone_art_set_delta(
@@ -1689,6 +2003,7 @@ def _clone_art_set_delta(
     ]
     output_art_rows = _clone_output_art_rows(art_rows)
     apply_all = not any(_is_adult_art_row(row) for row in output_art_rows)
+    new_art_rows: list[dict[str, Any]] = []
     for art_row in output_art_rows:
         overrides = clone.art_overrides if apply_all or _is_adult_art_row(art_row) else {}
         if final_is_male is not None and not _is_adult_art_row(art_row):
@@ -1712,6 +2027,15 @@ def _clone_art_set_delta(
             _art_key,
             _clean_source_row(new_row),
         )
+        new_art_rows.append(_clean_source_row(new_row))
+    if clone.new_art_set_id:
+        new_art_rows.extend(_append_age999_art_fallback_row(
+            rows_by_table,
+            MTU_CHARACTER_ARTS_TABLE,
+            clone.new_art_set_id,
+            new_art_rows,
+        ))
+    _copy_agent_uniform_dependencies(tables, table_names, source_dbs, rows_by_table, new_art_rows)
 
 
 def _clone_template_gender(
@@ -1760,6 +2084,7 @@ def _clone_art_set_patch_delta(
     ]
     output_rows = _clone_output_art_rows(source_rows)
     apply_all = not any(_is_adult_art_row(row) for row in output_rows)
+    new_art_rows: list[dict[str, Any]] = []
     for source_row in output_rows:
         overrides = art_overrides if apply_all or _is_adult_art_row(source_row) else {}
         source_art_table = str(source_row.get("_sourceTablePath") or table_names["campaign_character_arts"])
@@ -1774,6 +2099,14 @@ def _clone_art_set_patch_delta(
             new_row["id"] = _art_id_for_clone(new_art_set, source_row)
         _upsert_delta_row(rows_by_table, art_table, _art_key, new_row)
         tables.setdefault("campaign_character_arts", []).append({**new_row, "_sourceTablePath": art_table})
+        new_art_rows.append(new_row)
+    new_art_rows.extend(_append_age999_art_fallback_row(
+        rows_by_table,
+        MTU_CHARACTER_ARTS_TABLE,
+        new_art_set,
+        new_art_rows,
+    ))
+    _copy_agent_uniform_dependencies(tables, table_names, source_dbs, rows_by_table, new_art_rows)
 
 
 def _clone_keyed_delta(
@@ -1837,6 +2170,38 @@ def _event_spawn_age_range_overrides(source_age: dict[str, Any], clone: Characte
 def _clone_output_art_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     adult_rows = [row for row in rows if _is_adult_art_row(row)]
     return adult_rows or rows
+
+
+def _append_age999_art_fallback_row(
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    table_name: str,
+    art_set_id: str,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not art_set_id or not rows or any(_is_age999_art_row(row) for row in rows):
+        return []
+    adult_rows = [row for row in rows if _is_adult_art_row(row)]
+    if not adult_rows:
+        return []
+    source = adult_rows[0]
+    fallback = {
+        **source,
+        "art_set_id": art_set_id,
+        "age": 999,
+        "has_come_of_age": True,
+    }
+    if "id" in fallback:
+        fallback["id"] = _art_id_for_clone(art_set_id, fallback)
+    clean = _clean_source_row(fallback)
+    _upsert_delta_row(rows_by_table, table_name, _art_key, clean)
+    return [clean]
+
+
+def _is_age999_art_row(row: dict[str, Any]) -> bool:
+    try:
+        return int(row.get("age") or 0) == 999
+    except (TypeError, ValueError):
+        return False
 
 
 def _is_adult_art_row(row: dict[str, Any]) -> bool:
@@ -1919,6 +2284,17 @@ def _collect_character_dependency_rows(
                 lambda row, key=art_set_id: row.get("art_set_id") == key,
                 _art_key,
             )
+            _copy_agent_uniform_dependencies(
+                tables,
+                table_names,
+                source_dbs,
+                rows_by_table,
+                _output_art_rows_for_art_set(rows_by_table, art_set_id)
+                or [
+                    row for row in tables.get("campaign_character_arts", [])
+                    if row.get("art_set_id") == art_set_id
+                ],
+            )
         if age_range:
             _copy_matching_rows(
                 tables,
@@ -1986,6 +2362,17 @@ def _collect_character_dependency_rows(
                 detail.get("skill_set_override"),
                 detail.get("retinue"),
             )
+        for ceo_key in _unique_strings([
+            *clone.equipment_ceo_keys,
+            *clone.default_equipment_ceo_keys,
+        ]):
+            _copy_equipment_variant_dependency_for_ceo_key(
+                tables,
+                table_names,
+                source_dbs,
+                rows_by_table,
+                ceo_key,
+            )
 
     after = sum(len(rows) for rows in rows_by_table.values())
     return max(0, after - before)
@@ -1993,6 +2380,20 @@ def _collect_character_dependency_rows(
 
 def _clone_initial_ceo_key(clone: CharacterClone, initial_ceo: Any, is_male: Any, subtype: Any) -> str:
     return _gender_compatible_initial_ceo_key(initial_ceo, is_male, subtype)
+
+
+def _bind_generated_art_set_to_template_subtype(
+    art_set_overrides: dict[str, Any],
+    template: dict[str, Any],
+    source_art_set_row: dict[str, Any],
+) -> None:
+    # The generated template's art_set_override is the authoritative link for
+    # custom portraits; narrowing art-set matching fields breaks metal clones.
+    return
+
+
+def _spawn_subtype_for_clone(clone: CharacterClone) -> str:
+    return str(clone.template_overrides.get("subtype") or "")
 
 
 def _required_game_mode_details(source_details: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2339,6 +2740,13 @@ def _character_dependency_aliases() -> dict[str, list[str]]:
             "db/campaign_character_arts_tables/data__",
             "db/campaign_character_arts_tables/new_hero",
         ],
+        "agent_uniforms": [
+            "agent_uniforms",
+            "db/agent_uniforms_tables/_mtu_characters",
+            "db/agent_uniforms_tables/data__",
+            "db/agent_uniforms_tables/data",
+            "db/agent_uniforms_tables/new_hero",
+        ],
         "character_generation_spawn_age_ranges": [
             "character_generation_spawn_age_ranges",
             "db/character_generation_spawn_age_ranges_tables/_mtu_characters",
@@ -2353,7 +2761,16 @@ def _character_dependency_aliases() -> dict[str, list[str]]:
             "db/ceo_initial_datas_tables/data__",
             "db/ceo_initial_datas_tables/new_hero",
         ],
-        **CEO_INITIAL_EQUIPMENT_ALIASES,
+        "equipment_variants_weapons": TABLE_ALIASES["equipment_variants_weapons"],
+        "equipment_variants_armours": TABLE_ALIASES["equipment_variants_armours"],
+        "unit_armour_types": [
+            *TABLE_ALIASES["unit_armour_types"],
+            "db/unit_armour_types_tables/data__",
+            "db/unit_armour_types_tables/data",
+        ],
+        "melee_weapons": TABLE_ALIASES["melee_weapons"],
+        "missile_weapons": TABLE_ALIASES["missile_weapons"],
+        "projectiles": TABLE_ALIASES["projectiles"],
         "frontend_character_ceos": [
             "frontend_character_ceos",
             "db/frontend_character_ceos_tables/_mtu_characters_ceo",
@@ -2373,6 +2790,61 @@ def _character_dependency_aliases() -> dict[str, list[str]]:
             "cai_retinues_to_aspects",
             "db/cai_retinues_to_aspects_tables/data__",
             "db/cai_retinues_to_aspects_tables/unit",
+        ],
+        "agent_subtypes": [
+            "agent_subtypes",
+            "db/agent_subtypes_tables/data__",
+            "db/agent_subtypes_tables/data",
+        ],
+        "cai_agent_subtypes_to_aspects": [
+            "cai_agent_subtypes_to_aspects",
+            "db/cai_agent_subtypes_to_aspects_tables/data__",
+            "db/cai_agent_subtypes_to_aspects_tables/data",
+        ],
+        "agent_subtype_loyalty_factor_junctions": [
+            "agent_subtype_loyalty_factor_junctions",
+            "db/agent_subtype_loyalty_factor_junctions_tables/data__",
+            "db/agent_subtype_loyalty_factor_junctions_tables/data",
+        ],
+        "effect_bonus_value_agent_subtype_loyalty_factor_junctions": [
+            "effect_bonus_value_agent_subtype_loyalty_factor_junctions",
+            "db/effect_bonus_value_agent_subtype_loyalty_factor_junctions_tables/data__",
+            "db/effect_bonus_value_agent_subtype_loyalty_factor_junctions_tables/data",
+        ],
+        "agent_subtype_weighted_selection_set_to_weights": [
+            "agent_subtype_weighted_selection_set_to_weights",
+            "db/agent_subtype_weighted_selection_set_to_weights_tables/data__",
+            "db/agent_subtype_weighted_selection_set_to_weights_tables/data",
+        ],
+        "campaign_group_member_criteria_agent_subtypes": [
+            "campaign_group_member_criteria_agent_subtypes",
+            "db/campaign_group_member_criteria_agent_subtypes_tables/data__",
+            "db/campaign_group_member_criteria_agent_subtypes_tables/data",
+        ],
+        "faction_agent_permitted_subtypes": [
+            "faction_agent_permitted_subtypes",
+            "db/faction_agent_permitted_subtypes_tables/data__",
+            "db/faction_agent_permitted_subtypes_tables/data",
+        ],
+        "ministerial_postion_valid_agent_subtypes": [
+            "ministerial_postion_valid_agent_subtypes",
+            "db/ministerial_postion_valid_agent_subtypes_tables/data__",
+            "db/ministerial_postion_valid_agent_subtypes_tables/data",
+        ],
+        "effect_bonus_value_agent_subtype_junctions": [
+            "effect_bonus_value_agent_subtype_junctions",
+            "db/effect_bonus_value_agent_subtype_junctions_tables/data__",
+            "db/effect_bonus_value_agent_subtype_junctions_tables/data",
+        ],
+        "agent_subtype_subculture_overrides": [
+            "agent_subtype_subculture_overrides",
+            "db/agent_subtype_subculture_overrides_tables/data__",
+            "db/agent_subtype_subculture_overrides_tables/data",
+        ],
+        "agent_subtype_civil_war_faction_overrides": [
+            "agent_subtype_civil_war_faction_overrides",
+            "db/agent_subtype_civil_war_faction_overrides_tables/data__",
+            "db/agent_subtype_civil_war_faction_overrides_tables/data",
         ],
         "character_attribute_sets": [
             "character_attribute_sets",
@@ -2518,6 +2990,7 @@ def _copy_initial_ceo_dependency(
     if resolved_key:
         key = resolved_key
     if _delta_initial_ceo_row_exists(rows_by_table, key):
+        _copy_initial_ceo_equipment_variant_dependencies(tables, table_names, source_dbs, rows_by_table, key)
         return
     _ensure_initial_ceo_rows_available(tables, table_names, source_dbs, key)
     source_row = _find_row(tables.get("ceo_initial_datas", []), "key", key)
@@ -2526,6 +2999,22 @@ def _copy_initial_ceo_dependency(
     table_path = source_row.get("_sourceTablePath") or table_names.get("ceo_initial_datas")
     if table_path:
         _upsert_delta_row(rows_by_table, str(table_path), "key", _clean_source_row(source_row))
+    _copy_initial_ceo_equipment_variant_dependencies(tables, table_names, source_dbs, rows_by_table, key)
+
+
+def _copy_initial_ceo_equipment_dependency(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    initial_ceo: Any,
+) -> None:
+    # Total War: THREE KINGDOMS stores character initial CEO data as a key-only
+    # table in the shipped database. Earlier builds tried to synthesize a
+    # stage/equipment/active-CEO chain here, but those tables are not present in
+    # the real 3K DB or the working sample packs, and emitting them can create
+    # invalid/ignored data. Keep the function as a compatibility no-op.
+    return
 
 
 def _copy_initial_ceo_dependency_if_available(
@@ -2565,250 +3054,256 @@ def _materialize_equipment_initial_ceo(
     removable_active_ceo_keys: tuple[str, ...] | list[str] = (),
 ) -> str | None:
     source_key = str(source_initial_ceo or "").strip()
-    equipment_keys = _unique_strings(list(equipment_ceo_keys or ()))
-    active_keys = _unique_strings(list(active_ceo_keys or ()))
-    if not source_key or (not equipment_keys and not active_keys):
-        return source_key or None
-
-    _ensure_initial_ceo_rows_available(tables, table_names, source_dbs, source_key)
-    _ensure_ceo_initial_equipment_rows_available(tables, source_dbs, source_key)
-    source_initial = _find_row(tables.get("ceo_initial_datas", []), "key", source_key)
-    stage_links = [
-        row for row in tables.get("ceo_initial_data_to_stages", [])
-        if str(row.get("ceo_initial_data") or "") == source_key
-    ]
-    if not source_initial:
-        return source_key
-    if not stage_links:
-        return source_key
-
-    new_initial_key = _equipment_initial_ceo_key(owner_key, source_key, equipment_keys, active_keys)
-    if _find_row(tables.get("ceo_initial_datas", []), "key", new_initial_key):
-        return new_initial_key
-
-    initial_table = str(source_initial.get("_sourceTablePath") or table_names.get("ceo_initial_datas") or "")
-    if initial_table:
-        new_initial = {**source_initial, "key": new_initial_key}
-        _upsert_generated_dependency_row(tables, rows_by_table, "ceo_initial_datas", initial_table, "key", new_initial)
-
-    removable = set(_unique_strings(list(removable_equipment_ceo_keys or ())))
-    removable_active = set(_unique_strings(list(removable_active_ceo_keys or ())))
-    stage_rows_by_key = {
-        str(row.get("key") or ""): row
-        for row in tables.get("ceo_initial_data_stages", [])
-        if row.get("key")
-    }
-    for index, link in enumerate(stage_links, start=1):
-        source_stage = str(link.get("initial_data_stage") or link.get("stage") or "").strip()
-        if not source_stage:
-            continue
-        new_stage = _equipment_initial_stage_key(new_initial_key, source_stage, index)
-        source_stage_row = stage_rows_by_key.get(source_stage)
-        stage_table = str((source_stage_row or {}).get("_sourceTablePath") or table_names.get("ceo_initial_data_stages") or "")
-        if source_stage_row and stage_table:
-            _upsert_generated_dependency_row(
-                tables,
-                rows_by_table,
-                "ceo_initial_data_stages",
-                stage_table,
-                "key",
-                {**source_stage_row, "key": new_stage},
-            )
-
-        link_table = str(link.get("_sourceTablePath") or table_names.get("ceo_initial_data_to_stages") or "")
-        if link_table:
-            _upsert_generated_dependency_row(
-                tables,
-                rows_by_table,
-                "ceo_initial_data_to_stages",
-                link_table,
-                _ceo_initial_data_to_stage_key,
-                {**link, "ceo_initial_data": new_initial_key, "initial_data_stage": new_stage},
-            )
-
-        _clone_initial_stage_equipment_rows(
-            tables,
-            table_names,
-            source_dbs,
-            rows_by_table,
-            source_stage,
-            new_stage,
-            equipment_keys,
-            removable,
-            active_keys,
-            removable_active,
-        )
-    return new_initial_key
+    return source_key or None
 
 
-def _equipment_initial_ceo_key(
-    owner_key: str,
-    source_initial_ceo: str,
-    equipment_keys: list[str],
-    active_keys: list[str] | None = None,
-) -> str:
-    seed = f"{owner_key}:{source_initial_ceo}:{'|'.join(equipment_keys)}:{'|'.join(active_keys or [])}"
-    token = _safe_table_leaf(owner_key or source_initial_ceo).lower()
-    token = token[:72].strip("_") or "character"
-    return f"hby_mtu_ceo_initial_data_{token}_{zlib.crc32(seed.encode('utf-8')) & 0xffffffff:08x}"
-
-
-def _equipment_initial_stage_key(new_initial_key: str, source_stage: str, index: int) -> str:
-    seed = f"{new_initial_key}:{source_stage}:{index}"
-    return f"{new_initial_key}_stage_{zlib.crc32(seed.encode('utf-8')) & 0xffffffff:08x}"
-
-
-def _clone_initial_stage_equipment_rows(
+def _copy_initial_ceo_equipment_variant_dependencies(
     tables: dict[str, list[dict[str, Any]]],
     table_names: dict[str, str],
     source_dbs: dict[str, dict[str, Any]],
     rows_by_table: dict[str, list[dict[str, Any]]],
-    source_stage: str,
-    new_stage: str,
-    equipment_keys: list[str],
-    removable_equipment: set[str],
-    active_keys: list[str],
-    removable_active: set[str],
+    initial_ceo: Any,
 ) -> None:
-    source_equipment_rows = [
-        row for row in tables.get("ceo_initial_data_equipments", [])
-        if str(row.get("initial_data_stage") or "") == source_stage
-    ]
-    source_equipment_rows = sorted(source_equipment_rows, key=_equipment_row_sort_key)
-    source_equipment_ceos = {
-        str(row.get("equipped_ceo") or "")
-        for row in source_equipment_rows
-        if row.get("equipped_ceo")
-    }
-    selected_kinds = {_equipment_kind_from_ceo_key(key) for key in equipment_keys}
-    selected_kinds.discard("")
-    used_templates: set[int] = set()
-    replaced_ceos: set[str] = set()
-    skipped_equipment_ceos: set[str] = set()
-
-    for equipment_key in equipment_keys:
-        template = _best_equipment_row_template(equipment_key, source_equipment_rows, used_templates)
-        if not template:
-            continue
-        used_templates.add(id(template))
-        old_ceo = str(template.get("equipped_ceo") or "")
-        if old_ceo:
-            replaced_ceos.add(old_ceo)
-        table_path = str(template.get("_sourceTablePath") or table_names.get("ceo_initial_data_equipments") or "")
-        if not table_path:
-            continue
-        new_row = {
-            **template,
-            "initial_data_stage": new_stage,
-            "equipped_ceo": equipment_key,
-            "auto_id": _unique_ceo_initial_auto_id(tables, rows_by_table, "ceo_initial_data_equipments", f"{new_stage}:{equipment_key}"),
-        }
-        _upsert_generated_dependency_row(
+    tokens = _equipment_tokens_from_initial_ceo(initial_ceo)
+    if not tokens:
+        return
+    armour_variant = _best_equipment_variant_for_tokens(
+        tokens,
+        tables.get("equipment_variants_armours", []),
+        "armour",
+    )
+    if armour_variant:
+        _copy_equipment_variant_row(
             tables,
+            table_names,
+            source_dbs,
             rows_by_table,
-            "ceo_initial_data_equipments",
-            table_path,
-            _ceo_initial_data_equipment_key,
-            new_row,
+            "equipment_variants_armours",
+            armour_variant,
         )
-
-    for row in source_equipment_rows:
-        if id(row) in used_templates:
-            continue
-        equipped = str(row.get("equipped_ceo") or "")
-        kind = _equipment_kind_from_row(row)
-        if equipped in removable_equipment or (kind and kind in selected_kinds):
-            if equipped:
-                skipped_equipment_ceos.add(equipped)
-            continue
-        table_path = str(row.get("_sourceTablePath") or table_names.get("ceo_initial_data_equipments") or "")
-        if not table_path:
-            continue
-        _upsert_generated_dependency_row(
+        _copy_armour_type_dependency(
             tables,
+            table_names,
+            source_dbs,
             rows_by_table,
-            "ceo_initial_data_equipments",
-            table_path,
-            _ceo_initial_data_equipment_key,
-            {
-                **row,
-                "initial_data_stage": new_stage,
-                "auto_id": _unique_ceo_initial_auto_id(tables, rows_by_table, "ceo_initial_data_equipments", f"{new_stage}:{equipped}:copy"),
-            },
+            armour_variant.get("armour"),
         )
-
-    removed_active_ceos = removable_equipment | replaced_ceos | skipped_equipment_ceos | removable_active
-    active_ceos_written: set[str] = set()
-    for row in tables.get("ceo_initial_data_active_ceos", []):
-        if str(row.get("initial_data_stage") or "") != source_stage:
-            continue
-        active_ceo = str(row.get("active_ceo") or "")
-        if active_ceo in removed_active_ceos:
-            continue
-        table_path = str(row.get("_sourceTablePath") or table_names.get("ceo_initial_data_active_ceos") or "")
-        if not table_path:
-            continue
-        active_ceos_written.add(active_ceo)
-        _upsert_generated_dependency_row(
+    weapon_variant = _best_equipment_variant_for_tokens(
+        tokens,
+        tables.get("equipment_variants_weapons", []),
+        "weapon",
+    )
+    if weapon_variant:
+        _copy_equipment_variant_row(
             tables,
+            table_names,
+            source_dbs,
             rows_by_table,
-            "ceo_initial_data_active_ceos",
-            table_path,
-            _ceo_initial_data_active_ceo_key,
-            {
-                **row,
-                "initial_data_stage": new_stage,
-                "auto_id": _unique_ceo_initial_auto_id(tables, rows_by_table, "ceo_initial_data_active_ceos", f"{new_stage}:{active_ceo}:copy"),
-            },
+            "equipment_variants_weapons",
+            weapon_variant,
         )
+        _copy_weapon_stat_dependencies(tables, table_names, rows_by_table, weapon_variant)
 
-    active_templates = [
-        row for row in tables.get("ceo_initial_data_active_ceos", [])
-        if str(row.get("initial_data_stage") or "") == source_stage
-    ]
-    for active_key in [*equipment_keys, *active_keys]:
-        if active_key in active_ceos_written:
+
+def _copy_equipment_variant_dependency_for_ceo_key(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    ceo_key: Any,
+) -> None:
+    key = str(ceo_key or "").strip()
+    if not key:
+        return
+    for alias, kind in (
+        ("equipment_variants_armours", "armour"),
+        ("equipment_variants_weapons", "weapon"),
+    ):
+        variant = next(
+            (
+                row for row in tables.get(alias, [])
+                if str(row.get("ceos_key") or "") == key
+                or (kind == "armour" and _runtime_armour_ceo_key(row.get("ceos_key")) == key)
+            ),
+            None,
+        )
+        if not variant:
             continue
-        template = next((row for row in active_templates if str(row.get("active_ceo") or "") in source_equipment_ceos), None)
-        template = template or (active_templates[0] if active_templates else {})
-        table_path = str(template.get("_sourceTablePath") or table_names.get("ceo_initial_data_active_ceos") or "")
-        if not table_path:
-            continue
-        new_row = {
-            **template,
-            "initial_data_stage": new_stage,
-            "active_ceo": active_key,
-            "auto_id": _unique_ceo_initial_auto_id(tables, rows_by_table, "ceo_initial_data_active_ceos", f"{new_stage}:{active_key}:active"),
-        }
-        if "starting_points_delta" in new_row and new_row.get("starting_points_delta") in (None, ""):
-            new_row["starting_points_delta"] = 1
-        _upsert_generated_dependency_row(
+        _copy_equipment_variant_row(
             tables,
+            table_names,
+            source_dbs,
             rows_by_table,
-            "ceo_initial_data_active_ceos",
-            table_path,
-            _ceo_initial_data_active_ceo_key,
-            new_row,
+            alias,
+            variant,
         )
-        active_ceos_written.add(active_key)
+        if kind == "armour":
+            _copy_armour_type_dependency(
+                tables,
+                table_names,
+                source_dbs,
+                rows_by_table,
+                variant.get("armour"),
+            )
+        else:
+            _copy_weapon_stat_dependencies(tables, table_names, rows_by_table, variant)
+        return
 
 
-def _best_equipment_row_template(
-    equipment_key: str,
+def _equipment_tokens_from_initial_ceo(initial_ceo: Any) -> list[str]:
+    raw = _historical_initial_ceo_token(initial_ceo)
+    tokens = [raw]
+    if raw.startswith("lady_"):
+        tokens.append(raw.removeprefix("lady_"))
+    return _unique_strings(tokens)
+
+
+def _best_equipment_variant_for_tokens(
+    tokens: list[str],
     rows: list[dict[str, Any]],
-    used_templates: set[int],
+    equipment_kind: str,
 ) -> dict[str, Any] | None:
-    wanted_kind = _equipment_kind_from_ceo_key(equipment_key)
-    if wanted_kind:
-        for row in rows:
-            if id(row) not in used_templates and _equipment_kind_from_row(row) == wanted_kind:
-                return row
+    candidates: list[tuple[int, int, int, str, dict[str, Any]]] = []
+    for row in rows:
+        ceo_key = str(row.get("ceos_key") or "")
+        normalized = ceo_key.lower()
+        if equipment_kind == "weapon" and "weapon" not in normalized:
+            continue
+        if equipment_kind == "armour" and "armour" not in normalized:
+            continue
+        for token_index, token in enumerate(tokens):
+            match_rank = _equipment_variant_match_rank(row, normalized, token)
+            if match_rank is None:
+                continue
+            candidates.append((token_index, match_rank, ceo_key.count("_"), ceo_key, row))
+            break
+    if not candidates:
         return None
-    return next((row for row in rows if id(row) not in used_templates), None) or (rows[0] if rows else None)
+    return sorted(candidates)[0][4]
 
 
-def _equipment_kind_from_row(row: dict[str, Any]) -> str:
-    return _equipment_kind_from_ceo_key(f"{row.get('category') or ''} {row.get('equipped_ceo') or ''}")
+def _equipment_variant_token_matches(normalized_ceo_key: str, token: Any) -> bool:
+    token_text = str(token or "").lower()
+    if not token_text:
+        return False
+    if len(token_text) >= 4 and token_text in normalized_ceo_key:
+        return True
+    parts = [part for part in re.split(r"[^a-z0-9]+", normalized_ceo_key) if part]
+    return any(part == token_text or part == f"{token_text}s" for part in parts)
+
+
+def _equipment_variant_match_rank(row: dict[str, Any], normalized_ceo_key: str, token: Any) -> int | None:
+    if _equipment_variant_token_matches(normalized_ceo_key, token):
+        return 0
+    row_text = " ".join(
+        str(value).lower()
+        for value in row.values()
+        if isinstance(value, str) and value
+    )
+    if _equipment_variant_token_matches(row_text, token):
+        return 1
+    return None
+
+
+def _copy_equipment_variant_row(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    alias: str,
+    row: dict[str, Any],
+) -> None:
+    ceo_key = str(row.get("ceos_key") or "")
+    if ceo_key:
+        _append_internal_material_keyed_rows(
+            alias,
+            "ceos_to_equipment_variants_tables",
+            "ceos_key",
+            ceo_key,
+            tables,
+            source_dbs,
+        )
+    table_path = row.get("_sourceTablePath") or table_names.get(alias)
+    if not table_path:
+        table_path = _ensure_dependency_table_name(
+            table_names,
+            source_dbs,
+            alias,
+            "ceos_to_equipment_variants_tables",
+        )
+    if table_path:
+        _upsert_delta_row(rows_by_table, str(table_path), _equipment_variant_key, _clean_source_row(row))
+
+
+def _copy_armour_type_dependency(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    armour_key: Any,
+) -> None:
+    key = str(armour_key or "")
+    if not key:
+        return
+    _append_internal_material_keyed_rows(
+        "unit_armour_types",
+        "unit_armour_types_tables",
+        "key",
+        key,
+        tables,
+        source_dbs,
+    )
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "unit_armour_types",
+        lambda row: str(row.get("key") or "") == key,
+        "key",
+    )
+
+
+def _copy_weapon_stat_dependencies(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    variant: dict[str, Any],
+) -> None:
+    melee_key = str(variant.get("primary_melee_weapon") or "")
+    missile_key = str(variant.get("primary_missile_weapon") or "")
+    if melee_key:
+        _copy_matching_rows_once(
+            tables,
+            table_names,
+            rows_by_table,
+            "melee_weapons",
+            lambda row: str(row.get("key") or "") == melee_key,
+            "key",
+        )
+    if not missile_key:
+        return
+    missile_rows = [
+        row for row in tables.get("missile_weapons", [])
+        if str(row.get("key") or "") == missile_key
+    ]
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "missile_weapons",
+        lambda row: str(row.get("key") or "") == missile_key,
+        "key",
+    )
+    projectile_keys = _unique_strings([row.get("default_projectile") for row in missile_rows])
+    for projectile_key in projectile_keys:
+        _copy_matching_rows_once(
+            tables,
+            table_names,
+            rows_by_table,
+            "projectiles",
+            lambda row, key=projectile_key: str(row.get("key") or "") == key,
+            "key",
+        )
 
 
 def _equipment_kind_from_ceo_key(value: Any) -> str:
@@ -2827,41 +3322,6 @@ def _equipment_kind_from_ceo_key(value: Any) -> str:
         if kind in text:
             return "armour" if kind == "armor" else kind
     return ""
-
-
-def _equipment_row_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
-    kind_order = {"weapon": 0, "armour": 1, "follower": 2, "accessory": 3, "mount": 4}
-    slot = row.get("slot_index")
-    try:
-        slot_index = int(slot)
-    except (TypeError, ValueError):
-        slot_index = 99
-    return (kind_order.get(_equipment_kind_from_row(row), 50), slot_index, str(row.get("equipped_ceo") or ""))
-
-
-def _unique_ceo_initial_auto_id(
-    tables: dict[str, list[dict[str, Any]]],
-    rows_by_table: dict[str, list[dict[str, Any]]],
-    alias: str,
-    seed: str,
-) -> int:
-    rows = list(tables.get(alias, []))
-    rows.extend(row for table_rows in rows_by_table.values() for row in table_rows if "auto_id" in row)
-    return _unique_numeric_delta_value(seed, rows, "auto_id")
-
-
-def _upsert_generated_dependency_row(
-    tables: dict[str, list[dict[str, Any]]],
-    rows_by_table: dict[str, list[dict[str, Any]]],
-    alias: str,
-    table_path: str,
-    key_field: str | Any,
-    row: dict[str, Any],
-) -> None:
-    clean_row = _clean_source_row(row)
-    _upsert_delta_row(rows_by_table, table_path, key_field, clean_row)
-    table_row = {**clean_row, "_sourceTablePath": table_path}
-    _upsert_plain_row(tables.setdefault(alias, []), key_field, table_row)
 
 
 def _ensure_initial_ceo_rows_available(
@@ -2887,134 +3347,6 @@ def _ensure_initial_ceo_rows_available(
     if any(str(row.get("key") or "") == key for row in target):
         _ensure_dependency_table_name(table_names, source_dbs, "ceo_initial_datas", "ceo_initial_datas_tables")
         return
-
-
-def _ensure_ceo_initial_equipment_rows_available(
-    tables: dict[str, list[dict[str, Any]]],
-    source_dbs: dict[str, dict[str, Any]],
-    initial_ceo_key: Any,
-) -> None:
-    key = str(initial_ceo_key or "")
-    if not key:
-        return
-    links = [
-        row for row in tables.get("ceo_initial_data_to_stages", [])
-        if str(row.get("ceo_initial_data") or "") == key
-    ]
-    stage_keys = {
-        str(row.get("initial_data_stage") or row.get("stage") or "")
-        for row in links
-        if row.get("initial_data_stage") or row.get("stage")
-    }
-    has_equipment = any(
-        str(row.get("initial_data_stage") or "") in stage_keys
-        for row in tables.get("ceo_initial_data_equipments", [])
-    )
-    has_active = any(
-        str(row.get("initial_data_stage") or "") in stage_keys
-        for row in tables.get("ceo_initial_data_active_ceos", [])
-    )
-    if links and has_equipment and has_active:
-        return
-    if not INTERNAL_MATERIALS_PATH.is_file():
-        return
-    try:
-        with INTERNAL_MATERIALS_PATH.open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except (OSError, json.JSONDecodeError):
-        return
-    material_tables = payload.get("tables", {})
-    if not isinstance(material_tables, dict):
-        return
-
-    _append_internal_material_rows_by_field(
-        material_tables,
-        "ceo_initial_data_to_stages",
-        "ceo_initial_data_to_stages_tables",
-        "ceo_initial_data",
-        key,
-        _ceo_initial_data_to_stage_key,
-        tables,
-        source_dbs,
-    )
-    links = [
-        row for row in tables.get("ceo_initial_data_to_stages", [])
-        if str(row.get("ceo_initial_data") or "") == key
-    ]
-    stage_keys = {
-        str(row.get("initial_data_stage") or row.get("stage") or "")
-        for row in links
-        if row.get("initial_data_stage") or row.get("stage")
-    }
-    for stage_key in sorted(stage_keys):
-        _append_internal_material_rows_by_field(
-            material_tables,
-            "ceo_initial_data_stages",
-            "ceo_initial_data_stages_tables",
-            "key",
-            stage_key,
-            "key",
-            tables,
-            source_dbs,
-        )
-        _append_internal_material_rows_by_field(
-            material_tables,
-            "ceo_initial_data_active_ceos",
-            "ceo_initial_data_active_ceos_tables",
-            "initial_data_stage",
-            stage_key,
-            _ceo_initial_data_active_ceo_key,
-            tables,
-            source_dbs,
-        )
-        _append_internal_material_rows_by_field(
-            material_tables,
-            "ceo_initial_data_equipments",
-            "ceo_initial_data_equipments_tables",
-            "initial_data_stage",
-            stage_key,
-            _ceo_initial_data_equipment_key,
-            tables,
-            source_dbs,
-        )
-
-
-def _append_internal_material_rows_by_field(
-    material_tables: dict[str, Any],
-    alias: str,
-    folder: str,
-    field: str,
-    wanted_value: str,
-    row_key: str | Any,
-    tables: dict[str, list[dict[str, Any]]],
-    source_dbs: dict[str, dict[str, Any]],
-) -> None:
-    target = tables.setdefault(alias, [])
-    existing = {
-        row_key(row) if callable(row_key) else row.get(row_key)
-        for row in target
-    }
-    for table_path, entry in material_tables.items():
-        if f"/{folder}/" not in table_path or not isinstance(entry, dict):
-            continue
-        rows = entry.get("rows", [])
-        if not isinstance(rows, list):
-            continue
-        matched = False
-        for row in rows:
-            if not isinstance(row, dict) or str(row.get(field) or "") != wanted_value:
-                continue
-            clean_row = copy.deepcopy(row)
-            clean_row["_sourceTablePath"] = table_path
-            key = row_key(clean_row) if callable(row_key) else clean_row.get(row_key)
-            if key in existing:
-                continue
-            target.append(clean_row)
-            existing.add(key)
-            matched = True
-        db = entry.get("db")
-        if matched and isinstance(db, dict):
-            source_dbs.setdefault(table_path, copy.deepcopy(db))
 
 
 def _copy_attribute_dependency(
@@ -4078,6 +4410,8 @@ def _dependency_key_for_alias(alias: str) -> str | Any:
         return "art_set_id"
     if alias == "campaign_character_arts":
         return _art_key
+    if alias == "agent_uniforms":
+        return "uniform_name"
     if alias == "character_attributes":
         return _attribute_key
     if alias == "character_attribute_sets":
@@ -4092,16 +4426,32 @@ def _dependency_key_for_alias(alias: str) -> str | Any:
         return _effect_bonus_value_unit_ability_key
     if alias == "frontend_character_ceos":
         return _frontend_character_ceo_key
-    if alias == "ceo_initial_data_to_stages":
-        return _ceo_initial_data_to_stage_key
-    if alias == "ceo_initial_data_active_ceos":
-        return _ceo_initial_data_active_ceo_key
-    if alias == "ceo_initial_data_equipments":
-        return _ceo_initial_data_equipment_key
     if alias == "retinue_slot_initial_units":
         return _retinue_slot_key
     if alias == "cai_retinues_to_aspects":
         return _retinue_aspect_key
+    if alias == "cai_agent_subtypes_to_aspects":
+        return lambda row: (row.get("agent_subtype"), row.get("aspect"))
+    if alias == "agent_subtype_weighted_selection_set_to_weights":
+        return lambda row: (row.get("subtype_set"), row.get("agent_subtype"), row.get("is_male"))
+    if alias == "campaign_group_member_criteria_agent_subtypes":
+        return lambda row: (row.get("member"), row.get("value"))
+    if alias == "faction_agent_permitted_subtypes":
+        return lambda row: (row.get("agent"), row.get("faction"), row.get("subtype"))
+    if alias == "ministerial_postion_valid_agent_subtypes":
+        return lambda row: (row.get("agent_subtype"), row.get("ministerial_position_cultural_variant"))
+    if alias == "effect_bonus_value_agent_subtype_loyalty_factor_junctions":
+        return lambda row: (
+            row.get("agent_subtype_loyalty_factor_junction"),
+            row.get("effect"),
+            row.get("bonus_value_id"),
+        )
+    if alias == "effect_bonus_value_agent_subtype_junctions":
+        return lambda row: (row.get("agent_subtype"), row.get("effect"), row.get("bonus_value_id"))
+    if alias == "agent_subtype_subculture_overrides":
+        return lambda row: (row.get("agent_subtype"), row.get("subculture"))
+    if alias == "agent_subtype_civil_war_faction_overrides":
+        return lambda row: (row.get("agent_subtype"), row.get("faction"))
     if alias == "land_units_to_unit_abilites_junctions":
         return _land_unit_ability_key
     if alias == "special_ability_to_special_ability_phase_junctions":
@@ -4146,31 +4496,6 @@ def _frontend_character_ceo_key(row: dict[str, Any]) -> tuple[Any, Any, Any, Any
         row.get("ceo"),
         row.get("reason"),
         row.get("threshold_points"),
-    )
-
-
-def _ceo_initial_data_to_stage_key(row: dict[str, Any]) -> tuple[Any, Any, Any]:
-    return (
-        row.get("ceo_initial_data"),
-        row.get("stage"),
-        row.get("initial_data_stage"),
-    )
-
-
-def _ceo_initial_data_active_ceo_key(row: dict[str, Any]) -> tuple[Any, Any, Any]:
-    return (
-        row.get("initial_data_stage"),
-        row.get("active_ceo"),
-        row.get("auto_id"),
-    )
-
-
-def _ceo_initial_data_equipment_key(row: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
-    return (
-        row.get("initial_data_stage"),
-        row.get("category"),
-        row.get("slot_index"),
-        row.get("target"),
     )
 
 
@@ -4264,6 +4589,7 @@ def _table_key_for_path(path: str, source_db: dict[str, Any]) -> str | Any | Non
     alias_by_folder = {
         "campaign_character_arts_tables": "campaign_character_arts",
         "campaign_character_art_sets_tables": "campaign_character_art_sets",
+        "agent_uniforms_tables": "agent_uniforms",
         "character_generation_template_game_mode_details_tables": "character_generation_template_game_mode_details",
         "character_generation_templates_tables": "character_generation_templates",
         "character_generation_spawn_age_ranges_tables": "character_generation_spawn_age_ranges",
@@ -4275,6 +4601,17 @@ def _table_key_for_path(path: str, source_db: dict[str, Any]) -> str | Any | Non
         "retinues_tables": "retinues",
         "retinue_slot_initial_units_tables": "retinue_slot_initial_units",
         "cai_retinues_to_aspects_tables": "cai_retinues_to_aspects",
+        "agent_subtypes_tables": "agent_subtypes",
+        "cai_agent_subtypes_to_aspects_tables": "cai_agent_subtypes_to_aspects",
+        "agent_subtype_loyalty_factor_junctions_tables": "agent_subtype_loyalty_factor_junctions",
+        "effect_bonus_value_agent_subtype_loyalty_factor_junctions_tables": "effect_bonus_value_agent_subtype_loyalty_factor_junctions",
+        "agent_subtype_weighted_selection_set_to_weights_tables": "agent_subtype_weighted_selection_set_to_weights",
+        "campaign_group_member_criteria_agent_subtypes_tables": "campaign_group_member_criteria_agent_subtypes",
+        "faction_agent_permitted_subtypes_tables": "faction_agent_permitted_subtypes",
+        "ministerial_postion_valid_agent_subtypes_tables": "ministerial_postion_valid_agent_subtypes",
+        "effect_bonus_value_agent_subtype_junctions_tables": "effect_bonus_value_agent_subtype_junctions",
+        "agent_subtype_subculture_overrides_tables": "agent_subtype_subculture_overrides",
+        "agent_subtype_civil_war_faction_overrides_tables": "agent_subtype_civil_war_faction_overrides",
         "land_units_tables": "land_units",
         "land_units_to_unit_abilites_junctions_tables": "land_units_to_unit_abilites_junctions",
         "unit_abilities_tables": "unit_abilities",
@@ -4288,10 +4625,6 @@ def _table_key_for_path(path: str, source_db: dict[str, Any]) -> str | Any | Non
         "main_units_tables": "main_units",
         "effects_tables": "effects",
         "frontend_character_ceos_tables": "frontend_character_ceos",
-        "ceo_initial_data_stages_tables": "ceo_initial_data_stages",
-        "ceo_initial_data_to_stages_tables": "ceo_initial_data_to_stages",
-        "ceo_initial_data_active_ceos_tables": "ceo_initial_data_active_ceos",
-        "ceo_initial_data_equipments_tables": "ceo_initial_data_equipments",
         "ceos_to_equipment_variants_tables": "equipment_variants_armours",
         "unit_armour_types_tables": "unit_armour_types",
     }
@@ -4310,7 +4643,7 @@ def _new_delta_pack(session: RpfmPackSession) -> str:
     response = session.client.send("NewPack")
     _raise_rpfm_error(response)
     target_key = response["data"]["String"]
-    _raise_rpfm_error(session.client.send({"SetPackFileType": [target_key, "Movie"]}))
+    _raise_rpfm_error(session.client.send({"SetPackFileType": [target_key, "Mod"]}))
     return target_key
 
 
@@ -4380,11 +4713,12 @@ def _write_spawn_incident_tables(
     loc = {}
     for turn, turn_clones in sorted(grouped_clones.items()):
         incident_key = _incident_key_for_spawn_group(turn_clones, SPAWN_INCIDENT_EVENT_CATEGORY, turn)
+        source_incident = incidents_source[0]
         incident_rows.append({
-            **incidents_source[0],
+            **source_incident,
             "key": incident_key,
             "generate": True,
-            "ui_image": "3k_event_ready_for_duty",
+            "ui_image": source_incident.get("ui_image") or "3k_event_giving_jobs",
             "prioritised": True,
             "event_category": SPAWN_INCIDENT_EVENT_CATEGORY,
         })
@@ -4648,6 +4982,336 @@ def _copy_image_assets(
             continue
         copied += len(paths)
     return copied
+
+
+def _copy_equipment_ceo_raw_assets(
+    session: RpfmPackSession,
+    target_key: str,
+    items: list[Any],
+    reference_paths: list[Path] | None = None,
+    opened_sources: dict[str, str] | None = None,
+) -> int:
+    equipment_ceo_keys = _equipment_ceo_keys_for_raw_assets(items)
+    if not equipment_ceo_keys or not hasattr(session, "client"):
+        return 0
+
+    opened_sources = dict(opened_sources or {})
+    opened_sources.setdefault(str(session.pack_path), session.pack_key)
+    opened_sources.setdefault(str(session.pack_path.resolve()), session.pack_key)
+
+    copied = 0
+    copied_paths: set[str] = set()
+    source_paths = [Path(session.pack_path), *(reference_paths or [])]
+    for source_path in source_paths:
+        paths = _equipment_raw_asset_paths_from_source(source_path, equipment_ceo_keys)
+        paths = [path for path in paths if path not in copied_paths]
+        if not paths:
+            continue
+        source_key = _open_pack_reusing_existing(session, source_path, opened_sources)
+        response = session.client.send({
+            "AddPackedFilesFromPackFile": [
+                target_key,
+                source_key,
+                [{"File": path} for path in paths],
+            ]
+        })
+        _raise_rpfm_error(response)
+        copied += len(paths)
+        copied_paths.update(paths)
+    return copied
+
+
+def _equipment_ceo_keys_for_raw_assets(items: list[Any]) -> list[str]:
+    keys: list[str] = []
+    for item in items:
+        for attr in ("equipment_ceo_keys", "default_equipment_ceo_keys"):
+            for value in getattr(item, attr, ()) or ():
+                text = str(value or "").strip()
+                if text:
+                    keys.append(text)
+    return _unique_strings(keys)
+
+
+def _equipment_raw_asset_paths_from_source(source_path: Path, equipment_ceo_keys: list[str]) -> list[str]:
+    try:
+        index = read_pfh_index(source_path.resolve())
+    except Exception:
+        return []
+    files = {_normalize_pack_path(entry.path) for entry in index.entries}
+    paths: set[str] = set()
+    paths.update(_equipment_ancillary_icon_paths(files, equipment_ceo_keys))
+    return sorted(paths)
+
+
+def _equipment_ancillary_icon_paths(files: set[str], equipment_ceo_keys: list[str]) -> list[str]:
+    needles = _equipment_icon_needles(equipment_ceo_keys)
+    if not needles:
+        return []
+    matches = []
+    for path in files:
+        lower = path.lower()
+        if not lower.startswith("ui/ancillaries/"):
+            continue
+        if not lower.endswith((".png", ".dds")):
+            continue
+        file_name = lower.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        if any(needle and needle in file_name for needle in needles):
+            matches.append(path)
+    return sorted(matches)
+
+
+def _equipment_icon_needles(equipment_ceo_keys: list[str]) -> list[str]:
+    needles: set[str] = set()
+    for key in equipment_ceo_keys:
+        normalized = str(key or "").strip().lower()
+        if not normalized:
+            continue
+        needles.add(normalized)
+        for marker in ("_ancillary_armour_", "_ancilliary_armour_", "_ancillary_weapon_", "_ancilliary_weapon_"):
+            if marker not in normalized:
+                continue
+            prefix, suffix = normalized.split(marker, 1)
+            if suffix:
+                needles.add(suffix)
+                needles.add(f"{prefix}_ancillary_{suffix}")
+                needles.add(f"{prefix}_ancilliary_{suffix}")
+                if marker.endswith("_weapon_") and "bow" in suffix:
+                    needles.add(f"{prefix}_ancillary_bow_{suffix}")
+                    needles.add(f"{prefix}_ancilliary_bow_{suffix}")
+    return sorted(needles, key=lambda value: (-len(value), value))
+
+
+MODEL_REFERENCE_RE = re.compile(
+    r"(?i)(?:variantmeshes[/\\]_variantmodels|commontextures|shaders)[^<>\s\"']+"
+)
+TEXT_MODEL_ASSET_SUFFIXES = (
+    ".variantmeshdefinition",
+    ".wsmodel",
+    ".material",
+    ".xml",
+    ".shader",
+)
+
+
+def _copy_uniform_model_assets(
+    session: RpfmPackSession,
+    target_key: str,
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    reference_paths: list[Path],
+    opened_sources: dict[str, str] | None = None,
+) -> int:
+    uniform_rows = _output_agent_uniform_rows(rows_by_table)
+    if not uniform_rows or not hasattr(session, "client"):
+        return 0
+
+    opened_sources = dict(opened_sources or {})
+    opened_sources.setdefault(str(session.pack_path), session.pack_key)
+    opened_sources.setdefault(str(session.pack_path.resolve()), session.pack_key)
+    index_cache: dict[str, Any] = {}
+    paths_by_source: dict[Path, set[str]] = {}
+
+    for table_path, uniform_row in uniform_rows:
+        for source_path in _uniform_model_source_candidates(session, table_path, reference_paths):
+            resolved_source = source_path.resolve()
+            source_key = str(resolved_source).lower()
+            try:
+                index = index_cache.get(source_key)
+                if index is None:
+                    index = read_pfh_index(resolved_source)
+                    index_cache[source_key] = index
+            except Exception:
+                continue
+            definition_paths = _find_uniform_definition_paths(index, uniform_row)
+            if not definition_paths:
+                continue
+            model_paths = _model_asset_closure(resolved_source, index, definition_paths)
+            if model_paths:
+                paths_by_source.setdefault(resolved_source, set()).update(model_paths)
+                break
+
+    copied = 0
+    for source_path, packed_paths in paths_by_source.items():
+        source_key = _open_pack_reusing_existing(session, source_path, opened_sources)
+        paths = [{"File": path} for path in sorted(packed_paths)]
+        if not paths:
+            continue
+        response = session.client.send({
+            "AddPackedFilesFromPackFile": [target_key, source_key, paths]
+        })
+        _raise_rpfm_error(response)
+        copied += len(paths)
+    return copied
+
+
+def _output_agent_uniform_rows(
+    rows_by_table: dict[str, list[dict[str, Any]]],
+) -> list[tuple[str, dict[str, Any]]]:
+    rows: list[tuple[str, dict[str, Any]]] = []
+    seen: set[str] = set()
+    for table_path, table_rows in rows_by_table.items():
+        if "/agent_uniforms_tables/" not in _normalize_pack_path(table_path):
+            continue
+        for row in table_rows:
+            uniform_name = str(row.get("uniform_name") or "")
+            if not uniform_name or uniform_name in seen:
+                continue
+            seen.add(uniform_name)
+            rows.append((table_path, row))
+    return rows
+
+
+def _uniform_model_source_candidates(
+    session: RpfmPackSession,
+    table_path: str,
+    reference_paths: list[Path],
+) -> list[Path]:
+    candidates: list[Path] = []
+    source_for_table = getattr(session, "material_source_path_for_table", None)
+    if callable(source_for_table):
+        try:
+            raw_source = str(source_for_table(table_path) or "")
+        except Exception:
+            raw_source = ""
+        if raw_source:
+            candidates.append(Path(raw_source))
+    candidates.append(Path(session.pack_path))
+    candidates.extend(reference_paths)
+
+    result: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except OSError:
+            continue
+        if not resolved.is_file() or _is_base_game_asset_pack(resolved):
+            continue
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(resolved)
+    return result
+
+
+def _is_base_game_asset_pack(path: Path) -> bool:
+    name = path.name.lower()
+    return (
+        name == "mtu_reference_core.pack"
+        or name == "database.pack"
+        or name.startswith("data")
+        or name.startswith("local_")
+    )
+
+
+def _find_uniform_definition_paths(index: Any, uniform_row: dict[str, Any]) -> list[str]:
+    definition_paths = [
+        entry.path
+        for entry in index.entries
+        if _normalize_pack_path(entry.path).lower().startswith("variantmeshes/variantmeshdefinitions/")
+        and entry.path.lower().endswith(".variantmeshdefinition")
+    ]
+    by_lower = {path.lower(): path for path in definition_paths}
+    by_basename = {
+        _definition_stem(path): path
+        for path in definition_paths
+    }
+    matches: list[str] = []
+    for name in _uniform_model_name_candidates(uniform_row):
+        for candidate in _definition_name_candidates(name):
+            exact = by_lower.get(f"variantmeshes/variantmeshdefinitions/{candidate}.variantmeshdefinition")
+            if exact:
+                matches.append(exact)
+            basename = by_basename.get(candidate)
+            if basename:
+                matches.append(basename)
+    return _unique_strings(matches)
+
+
+def _uniform_model_name_candidates(uniform_row: dict[str, Any]) -> list[str]:
+    return _unique_strings([
+        uniform_row.get("filename"),
+        uniform_row.get("battle_filename"),
+        uniform_row.get("campaign_porthole_filename"),
+        uniform_row.get("campaign_politician_filename"),
+        uniform_row.get("uniform_name"),
+    ])
+
+
+def _definition_name_candidates(name: Any) -> list[str]:
+    raw = _definition_name_stem(str(name or ""))
+    if not raw:
+        return []
+    candidates = [raw]
+    for prefix in (
+        "3k_mtu_",
+        "3k_main_",
+        "3k_dlc04_",
+        "3k_dlc05_",
+        "3k_dlc06_",
+        "3k_dlc07_",
+        "3k_ytr_",
+        "ep_",
+    ):
+        if raw.startswith(prefix):
+            candidates.append(raw[len(prefix):])
+    for candidate in list(candidates):
+        if candidate.startswith("sad_"):
+            sad_tail = candidate[len("sad_"):]
+            candidates.append(sad_tail)
+            candidates.append(f"tup_{sad_tail}")
+            if sad_tail.startswith("hero_"):
+                candidates.append(sad_tail[len("hero_"):])
+            if sad_tail.startswith("lady_"):
+                candidates.append(sad_tail[len("lady_"):])
+    return _unique_strings(candidates)
+
+
+def _definition_stem(path: str) -> str:
+    return _definition_name_stem(Path(_normalize_pack_path(path)).name)
+
+
+def _definition_name_stem(value: str) -> str:
+    name = value.replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
+    if name.endswith(".variantmeshdefinition"):
+        name = name[: -len(".variantmeshdefinition")]
+    return name
+
+
+def _model_asset_closure(source_path: Path, index: Any, definition_paths: list[str]) -> set[str]:
+    entries_by_lower = {entry.path.lower(): entry for entry in index.entries}
+    queued = list(definition_paths)
+    copied: set[str] = set()
+    while queued:
+        path = _normalize_pack_path(queued.pop(0))
+        key = path.lower()
+        if key in copied:
+            continue
+        entry = entries_by_lower.get(key)
+        if entry is None:
+            continue
+        copied.add(entry.path)
+        if not key.endswith(TEXT_MODEL_ASSET_SUFFIXES):
+            continue
+        try:
+            data = read_entry_bytes(source_path, entry)
+        except Exception:
+            continue
+        text = data.decode("utf-8", errors="ignore")
+        for referenced_path in _model_references_from_text(text):
+            referenced_entry = entries_by_lower.get(referenced_path.lower())
+            if referenced_entry is not None and referenced_entry.path.lower() not in copied:
+                queued.append(referenced_entry.path)
+    return copied
+
+
+def _model_references_from_text(text: str) -> list[str]:
+    refs = []
+    for match in MODEL_REFERENCE_RE.finditer(text):
+        ref = _normalize_pack_path(match.group(0).strip().rstrip(".,;:)"))
+        if ref:
+            refs.append(ref)
+    return _unique_strings(refs)
 
 
 def _copy_extracted_image_assets(
@@ -4920,13 +5584,6 @@ def _character_clone_integrity_warnings(
         for row in rows
         if row.get("key")
     }
-    initial_stage_links = {
-        str(row.get("ceo_initial_data") or ""): row
-        for table_path, rows in rows_by_table.items()
-        if "/ceo_initial_data_to_stages_tables/" in _normalize_pack_path(table_path)
-        for row in rows
-        if row.get("ceo_initial_data")
-    }
     details_by_template: dict[str, list[dict[str, Any]]] = {}
     arts_by_set: dict[str, list[dict[str, Any]]] = {}
     for row in all_rows:
@@ -4939,6 +5596,33 @@ def _character_clone_integrity_warnings(
 
     for clone in clones:
         template = templates.get(clone.new_template_key)
+        clone_subtype = str(
+            (template or {}).get("subtype")
+            or (clone.template_overrides or {}).get("subtype")
+            or ""
+        )
+        clone_is_male = _coerce_bool(
+            (template or {}).get("is_male", (clone.template_overrides or {}).get("is_male"))
+        )
+        clone_has_custom_art = bool(
+            (
+                (clone.art_overrides or {}).get("portrait")
+                or (clone.art_overrides or {}).get("card")
+            )
+            and not (clone.art_overrides or {}).get("uniform")
+            and (clone.image_assets or [])
+        )
+        clone_element = _element_from_subtype(clone_subtype)
+        if (
+            not clone_is_male
+            and clone_has_custom_art
+            and clone_element in UNSUPPORTED_GENERIC_FEMALE_ELEMENTS
+        ):
+            warnings.append(
+                "Vanilla has no generic female campaign art family for "
+                f"{clone_element}: {clone.new_template_key}. "
+                "Use earth, metal, or water for equipment-independent female art."
+            )
         if not template:
             warnings.append(f"Generated character template row missing: {clone.new_template_key}")
             continue
@@ -4961,12 +5645,7 @@ def _character_clone_integrity_warnings(
                 warnings.append(f"Generated character initial CEO missing: {clone.new_template_key}")
                 continue
             ceo_row = ceo_initials.get(initial_ceo)
-            if initial_ceo.startswith("hby_") and (not ceo_row or initial_ceo not in initial_stage_links):
-                warnings.append(
-                    f"Generated character custom initial CEO chain is incomplete: "
-                    f"{clone.new_template_key} initial_ceo={initial_ceo}"
-                )
-            elif not ceo_row:
+            if not ceo_row:
                 warnings.append(
                     f"Generated character initial CEO row not copied into patch pack: "
                     f"{clone.new_template_key} initial_ceo={initial_ceo}"
@@ -5045,7 +5724,7 @@ def _spawn_entries_for_clones(clones: list[CharacterClone]) -> list[dict[str, An
         grouped_clones.setdefault(_spawn_turn_for_clone(clone), []).append(clone)
     entries = []
     for clone in spawn_clones:
-        subtype = clone.template_overrides.get("subtype")
+        subtype = _spawn_subtype_for_clone(clone)
         if not subtype:
             continue
         min_turn = _spawn_turn_for_clone(clone)
@@ -5057,7 +5736,7 @@ def _spawn_entries_for_clones(clones: list[CharacterClone]) -> list[dict[str, An
         }]
         entries.append({
             "template": clone.new_template_key,
-            "subtype": str(subtype),
+            "subtype": subtype,
             "event": clone.spawn_event,
             "turn": min_turn,
             "saveKey": f"hby_mtu_pack_editor_player_spawn_v{SPAWN_SCRIPT_SAVE_VERSION}_{zlib.crc32(save_seed) & 0xffffffff:08x}",
@@ -5080,18 +5759,30 @@ def _equipment_entries_for_characters(
     entries: list[dict[str, Any]] = []
     for item in [*clones, *patches]:
         template_key = getattr(item, "new_template_key", None) or getattr(item, "template_key", "")
-        equipment_ceos = _unique_lua_ceo_keys(getattr(item, "equipment_ceo_keys", ()))
-        if not template_key or not equipment_ceos:
+        equipment_ceos = _unique_lua_ceo_keys(
+            _runtime_armour_ceo_key(value) for value in getattr(item, "equipment_ceo_keys", ())
+        )
+
+
+        # The initial CEO chain remains authoritative. These defaults are only
+        # granted to faction inventory as a non-equipping fallback when a
+        # character-bound MTU CEO cannot create a second instance for a clone.
+        default_equipment_ceos = _unique_lua_ceo_keys(
+            _runtime_armour_ceo_key(value) for value in getattr(item, "default_equipment_ceo_keys", ())
+        )
+        grant_equipment_ceos = _unique_lua_ceo_keys([*equipment_ceos, *default_equipment_ceos])
+        if not template_key or not grant_equipment_ceos:
             continue
-        remove_ceos = _unique_lua_ceo_keys(getattr(item, "removable_equipment_ceo_keys", ()))
+        remove_ceos: list[str] = []
         equipment_set_key = getattr(item, "equipment_set_key", "") or ""
         save_seed = (
             f"{template_key}:{equipment_set_key}:"
-            f"{','.join(equipment_ceos)}:{','.join(remove_ceos)}:equipment:v{EQUIPMENT_SCRIPT_SAVE_VERSION}"
+            f"{','.join(equipment_ceos)}:{','.join(default_equipment_ceos)}:"
+            f"{','.join(remove_ceos)}:equipment:v{EQUIPMENT_SCRIPT_SAVE_VERSION}"
         ).encode("utf-8")
         grant_seed = (
             f"{template_key}:{equipment_set_key}:"
-            f"{','.join(equipment_ceos)}:equipment-grant:v{EQUIPMENT_SCRIPT_SAVE_VERSION}"
+            f"{','.join(grant_equipment_ceos)}:equipment-grant:v{EQUIPMENT_SCRIPT_SAVE_VERSION}"
         ).encode("utf-8")
         entries.append({
             "template": template_key,
@@ -5099,6 +5790,11 @@ def _equipment_entries_for_characters(
             "grantKey": f"hby_mtu_pack_editor_equipment_grant_v{EQUIPMENT_SCRIPT_SAVE_VERSION}_{zlib.crc32(grant_seed) & 0xffffffff:08x}",
             "equipmentSetKey": equipment_set_key,
             "equipmentCeos": equipment_ceos,
+            "defaultEquipmentCeos": default_equipment_ceos,
+            "grantEquipmentCeos": grant_equipment_ceos,
+            "cleanupEquipmentCeos": [
+                "3k_mtu_ancillary_lady_ma_yunlus_armour_unique"
+            ] if "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique" in grant_equipment_ceos else [],
             "removeCeos": remove_ceos,
         })
     return entries
@@ -5163,7 +5859,7 @@ def _unique_lua_ceo_keys(values: list[str] | tuple[str, ...]) -> list[str]:
     return result
 
 
-def _campaign_start_spawn_script(
+def _legacy_campaign_start_spawn_script(
     clones: list[CharacterClone],
     patches: list[CharacterPatch] | None = None,
 ) -> str | None:
@@ -5199,7 +5895,7 @@ def _campaign_start_spawn_script(
     ])
     for entry in equipment_entries:
         lines.append(
-            f'    {{ template = "{_lua_escape(entry["template"])}", save_key = "{_lua_escape(entry["saveKey"])}", grant_key = "{_lua_escape(entry["grantKey"])}", remove_ceos = {_lua_string_list(entry["removeCeos"])}, equipment_ceos = {_lua_string_list(entry["equipmentCeos"])} }},'
+            f'    {{ template = "{_lua_escape(entry["template"])}", save_key = "{_lua_escape(entry["saveKey"])}", grant_key = "{_lua_escape(entry["grantKey"])}", remove_ceos = {_lua_string_list(entry["removeCeos"])}, equipment_ceos = {_lua_string_list(entry["equipmentCeos"])}, default_equipment_ceos = {_lua_string_list(entry["defaultEquipmentCeos"])}, grant_equipment_ceos = {_lua_string_list(entry["grantEquipmentCeos"])}, cleanup_equipment_ceos = {_lua_string_list(entry["cleanupEquipmentCeos"])} }},'
         )
     lines.extend([
         "}",
@@ -5225,8 +5921,13 @@ def _campaign_start_spawn_script(
         "end",
         "",
         "local function hby_mtu_all_equipment_sets_done()",
-        "    -- Equipment is enforced like sandbox mode because 3K can settle inventory after spawn callbacks.",
-        "    return #hby_mtu_equipment_characters == 0",
+        "    for i = 1, #hby_mtu_equipment_characters do",
+        "        local item = hby_mtu_equipment_characters[i]",
+        "        if not cm:get_saved_value(item.save_key) then",
+        "            return false",
+        "        end",
+        "    end",
+        "    return true",
         "end",
         "",
         "local function hby_mtu_character_exists(template_key)",
@@ -5243,14 +5944,14 @@ def _campaign_start_spawn_script(
         "end",
         "",
         "local function hby_mtu_faction_key(value)",
-        '    if type(value) == "string" then',
-        "        return value",
-        "    end",
         "    if value then",
         "        local ok, name = pcall(function() return value:name() end)",
-        "        if ok and name then",
+        '        if ok and type(name) == "string" and name ~= "" then',
         "            return name",
         "        end",
+        "    end",
+        '    if type(value) == "string" then',
+        "        return value",
         "    end",
         '    return ""',
         "end",
@@ -5288,16 +5989,29 @@ def _campaign_start_spawn_script(
         "    return true",
         "end",
         "",
+        "local function hby_mtu_spawn_modify_faction(faction_key)",
+        "    faction_key = hby_mtu_faction_key(faction_key)",
+        '    if not faction_key or faction_key == "" then',
+        "        return nil",
+        "    end",
+        "    local modify_ok, modify_faction = pcall(function() return cm:modify_faction(faction_key) end)",
+        "    if modify_ok and modify_faction then",
+        "        return modify_faction",
+        "    end",
+        "    return nil",
+        "end",
+        "",
         "local function hby_mtu_direct_spawn_character(faction_key, subtype_key, template_key)",
         "    if hby_mtu_query_character_for_template(template_key) then",
         '        return "exists"',
         "    end",
-        "    if not cdir_events_manager or not cdir_events_manager.spawn_character_subtype_template_in_faction then",
-        '        output("MTU Pack Editor: cdir_events_manager spawn API not ready.")',
+        "    local modify_faction = hby_mtu_spawn_modify_faction(faction_key)",
+        "    if not modify_faction or not modify_faction.create_character_from_template then",
+        '        output("MTU Pack Editor: MTU template spawn API not ready.")',
         '        return "failed"',
         "    end",
-        "    local cdir_ok = pcall(function() cdir_events_manager:spawn_character_subtype_template_in_faction(faction_key, subtype_key, template_key) end)",
-        "    if not cdir_ok then",
+        "    local create_ok, result = pcall(function() return modify_faction:create_character_from_template(\"general\", subtype_key, template_key, true) end)",
+        "    if not create_ok or result == false then",
         '        output("MTU Pack Editor: generated character spawn API failed: " .. tostring(template_key))',
         '        return "failed"',
         "    end",
@@ -5406,6 +6120,43 @@ def _campaign_start_spawn_script(
         "    return nil",
         "end",
         "",
+        "local function hby_mtu_modify_character_from_character(character)",
+        "    if not character then",
+        "        return nil",
+        "    end",
+        "    local ok, modify_character = pcall(function() return cm:modify_character(character) end)",
+        "    if ok and modify_character then",
+        "        return modify_character",
+        "    end",
+        "    local lookup = hby_mtu_character_lookup(character)",
+        "    if lookup then",
+        "        ok, modify_character = pcall(function() return cm:modify_character(lookup) end)",
+        "        if ok and modify_character then",
+        "            return modify_character",
+        "        end",
+        "    end",
+        "    local cqi = hby_mtu_character_cqi(character)",
+        "    if cqi then",
+        "        ok, modify_character = pcall(function() return cm:modify_character(cqi) end)",
+        "        if ok and modify_character then",
+        "            return modify_character",
+        "        end",
+        "    end",
+        "    return nil",
+        "end",
+        "",
+        "local function hby_mtu_ceo_manager_for_character(character)",
+        "    local modify_character = hby_mtu_modify_character_from_character(character)",
+        "    if not modify_character then",
+        "        return nil",
+        "    end",
+        "    local ok, ceo_manager = pcall(function() return modify_character:ceo_management() end)",
+        "    if ok and ceo_manager then",
+        "        return ceo_manager",
+        "    end",
+        "    return nil",
+        "end",
+        "",
         "local function hby_mtu_force_add_character_ceo(character, modify_character, ceo_manager, ceo_key)",
         "    if ceo_manager and hby_mtu_add_ceo(ceo_manager, ceo_key) then",
         "        return true",
@@ -5502,118 +6253,132 @@ def _campaign_start_spawn_script(
         '    if not faction_key or faction_key == "" then',
         "        return nil",
         "    end",
-        "    local ok, modify_faction = pcall(function() return cm:modify_faction(faction_key) end)",
-        "    if ok and modify_faction then",
+        "    local modify_ok, modify_faction = pcall(function() return cm:modify_faction(faction_key) end)",
+        "    if modify_ok and modify_faction then",
         "        return modify_faction",
         "    end",
-        "    local query_ok, faction = pcall(function() return cm:query_faction(faction_key) end)",
-        "    if query_ok and faction then",
-        "        ok, modify_faction = pcall(function() return cm:modify_faction(faction) end)",
-        "        if ok and modify_faction then",
-        "            return modify_faction",
+        "    return nil",
+        "end",
+        "",
+        "local function hby_mtu_append_unique(list, value)",
+        "    if not value or value == \"\" then",
+        "        return",
+        "    end",
+        "    for i = 1, #list do",
+        "        if list[i] == value then",
+        "            return",
+        "        end",
+        "    end",
+        "    table.insert(list, value)",
+        "end",
+        "",
+        "local function hby_mtu_weapon_type_from_suffix(suffix)",
+        "    local weapon_types = { \"bow\", \"spear\", \"sword\", \"axe\", \"halberd\", \"crossbow\", \"dao\", \"ji\", \"glaive\", \"mace\" }",
+        "    suffix = tostring(suffix or \"\")",
+        "    for i = 1, #weapon_types do",
+        "        local weapon_type = weapon_types[i]",
+        "        if suffix == weapon_type or string.sub(suffix, -string.len(weapon_type)) == weapon_type then",
+        "            return weapon_type",
         "        end",
         "    end",
         "    return nil",
         "end",
         "",
-        "local function hby_mtu_add_ancillary_to_faction(faction_key, ancillary_key)",
-        "    local added = false",
-        "    local ok, result = pcall(function() return cm:add_ancillary_to_faction(faction_key, ancillary_key, false) end)",
-        "    if ok and result ~= false then",
-        "        added = true",
-        "    end",
-        "    local query_ok, faction = pcall(function() return cm:query_faction(faction_key) end)",
-        "    if query_ok and faction then",
-        "        ok, result = pcall(function() return cm:add_ancillary_to_faction(faction, ancillary_key, false) end)",
-        "        if ok and result ~= false then",
-        "            added = true",
-        "        end",
-        "    end",
-        "    local modify_faction = hby_mtu_modify_faction(faction_key)",
-        "    if modify_faction then",
-        "        local manager_ok, ceo_manager = pcall(function() return modify_faction:ceo_management() end)",
-        "        if manager_ok and ceo_manager and hby_mtu_add_ceo(ceo_manager, ancillary_key) then",
-        "            added = true",
-        "        end",
-        "    end",
-        "    return added",
+        "local function hby_mtu_is_custom_ancillary_key(key)",
+        "    key = string.lower(tostring(key or \"\"))",
+        "    return string.sub(key, 1, 7) == \"3k_mtu_\" or string.sub(key, 1, 4) == \"hby_\" or string.find(key, \"_mtu_\", 1, true) ~= nil",
         "end",
         "",
-        "local function hby_mtu_force_equip_ancillary(character, modify_character, ancillary_key)",
-        "    local equipped = false",
-        "    local ok, result = pcall(function() return cm:force_add_ancillary(character, ancillary_key, false, true) end)",
-        "    if ok and result ~= false then",
-        "        equipped = true",
+        "local function hby_mtu_ancillary_key_candidates(ancillary_key)",
+        "    local key = tostring(ancillary_key or \"\")",
+        "    local candidates = {}",
+        "    if not hby_mtu_is_custom_ancillary_key(key) then",
+        "        hby_mtu_append_unique(candidates, key)",
+        "        return candidates",
         "    end",
-        "    ok, result = pcall(function() return cm:force_equip_ancillary(character, ancillary_key, true) end)",
-        "    if ok and result ~= false then",
-        "        equipped = true",
+        "    local start_pos, end_pos = string.find(key, \"_ancillary_armour_\", 1, true)",
+        "    if start_pos then",
+        "        hby_mtu_append_unique(candidates, key)",
         "    end",
-        "    local lookup = hby_mtu_character_lookup(character)",
-        "    if lookup then",
-        "        ok, result = pcall(function() return cm:force_add_ancillary(lookup, ancillary_key, false, true) end)",
-        "        if ok and result ~= false then",
-        "            equipped = true",
-        "        end",
-        "        ok, result = pcall(function() return cm:force_equip_ancillary(lookup, ancillary_key, true) end)",
-        "        if ok and result ~= false then",
-        "            equipped = true",
+        "    start_pos, end_pos = string.find(key, \"_ancilliary_armour_\", 1, true)",
+        "    if start_pos then",
+        "        local prefix = string.sub(key, 1, start_pos - 1)",
+        "        local suffix = string.sub(key, end_pos + 1)",
+        "        hby_mtu_append_unique(candidates, key)",
+        "        hby_mtu_append_unique(candidates, prefix .. \"_ancillary_armour_\" .. suffix)",
+        "    end",
+        "    start_pos, end_pos = string.find(key, \"_ancillary_weapon_\", 1, true)",
+        "    if start_pos then",
+        "        hby_mtu_append_unique(candidates, key)",
+        "    end",
+        "    start_pos, end_pos = string.find(key, \"_ancilliary_weapon_\", 1, true)",
+        "    if start_pos then",
+        "        local prefix = string.sub(key, 1, start_pos - 1)",
+        "        local suffix = string.sub(key, end_pos + 1)",
+        "        hby_mtu_append_unique(candidates, key)",
+        "        hby_mtu_append_unique(candidates, prefix .. \"_ancillary_weapon_\" .. suffix)",
+        "    end",
+        "    if #candidates == 0 then",
+        "        hby_mtu_append_unique(candidates, key)",
+        "    end",
+        "    return candidates",
+        "end",
+        "",
+        "local function hby_mtu_add_ancillary_to_faction(faction_key, ancillary_key)",
+        "    local candidates = hby_mtu_ancillary_key_candidates(ancillary_key)",
+        "    local modify_faction = hby_mtu_modify_faction(faction_key)",
+        "    if not modify_faction then",
+        "        return false",
+        "    end",
+        "    local manager_ok, ceo_manager = pcall(function() return modify_faction:ceo_management() end)",
+        "    if not manager_ok or not ceo_manager then",
+        "        return false",
+        "    end",
+        "    for i = 1, #candidates do",
+        "        local candidate_key = candidates[i]",
+        "        if hby_mtu_add_ceo(ceo_manager, candidate_key) then",
+        "            return true",
         "        end",
         "    end",
-        "    local cqi = hby_mtu_character_cqi(character)",
-        "    if cqi then",
-        "        ok, result = pcall(function() return cm:force_add_ancillary(cqi, ancillary_key, false, true) end)",
-        "        if ok and result ~= false then",
-        "            equipped = true",
-        "        end",
-        "        ok, result = pcall(function() return cm:force_equip_ancillary(cqi, ancillary_key, true) end)",
-        "        if ok and result ~= false then",
-        "            equipped = true",
-        "        end",
-        "    end",
-        "    return equipped",
+        "    return false",
         "end",
         "",
         "local function hby_mtu_apply_equipment_set(item, faction_key)",
-        "    local character = hby_mtu_query_character_for_template(item.template)",
-        "    local modify_character = hby_mtu_modify_character_for_template(item.template)",
-        "    if not character then",
-        '        output("MTU Pack Editor: equipment target not ready: " .. tostring(item.template))',
+        "    faction_key = hby_mtu_faction_key(faction_key)",
+        '    if not faction_key or faction_key == "" then',
         "        return false",
         "    end",
-        "    local manager_ok, ceo_manager = false, nil",
-        "    if modify_character then",
-        "        manager_ok, ceo_manager = pcall(function() return modify_character:ceo_management() end)",
+        "    if item.save_key and cm:get_saved_value(item.save_key) then",
+        "        return true",
         "    end",
-        "    for i = 1, #(item.remove_ceos or {}) do",
-        "        local ceo_key = item.remove_ceos[i]",
-        "        if manager_ok and ceo_manager then",
-        "            hby_mtu_remove_ceo(ceo_manager, ceo_key)",
-        "        end",
-        "    end",
-        "    local applied = true",
         "    local grant_done = item.grant_key and cm:get_saved_value(item.grant_key)",
-        "    for i = 1, #(item.equipment_ceos or {}) do",
-        "        local ceo_key = item.equipment_ceos[i]",
-        "        if not grant_done then",
-        "            hby_mtu_add_ancillary_to_faction(faction_key, ceo_key)",
+        "    local granted = true",
+        "    if not grant_done then",
+        "        local modify_faction = hby_mtu_modify_faction(faction_key)",
+        "        if modify_faction then",
+        "            local manager_ok, ceo_manager = pcall(function() return modify_faction:ceo_management() end)",
+        "            if manager_ok and ceo_manager then",
+        "                for i = 1, #(item.cleanup_equipment_ceos or {}) do",
+        "                    hby_mtu_remove_ceo(ceo_manager, item.cleanup_equipment_ceos[i])",
+        "                end",
+        "            end",
         "        end",
-        "        if manager_ok and ceo_manager then",
-        "            hby_mtu_remove_ceo(ceo_manager, ceo_key)",
+        "        for i = 1, #(item.grant_equipment_ceos or {}) do",
+        "            local ceo_key = item.grant_equipment_ceos[i]",
+        "            if not hby_mtu_add_ancillary_to_faction(faction_key, ceo_key) then",
+        '                output("MTU Pack Editor: failed to grant ancillary: " .. tostring(item.template) .. " -> " .. tostring(ceo_key))',
+        "                granted = false",
+        "            end",
         "        end",
-        "        if not hby_mtu_force_equip_ancillary(character, modify_character, ceo_key) then",
-        '            output("MTU Pack Editor: failed to equip ancillary: " .. tostring(item.template) .. " -> " .. tostring(ceo_key))',
-        "            applied = false",
+        "        if not granted then",
+        "            return false",
         "        end",
-        "    end",
-        "    if not grant_done and item.grant_key then",
-        "        cm:set_saved_value(item.grant_key, true)",
-        "    end",
-        "    if not applied then",
-        "        return false",
+        "        if item.grant_key then",
+        "            cm:set_saved_value(item.grant_key, true)",
+        "        end",
         "    end",
         "    cm:set_saved_value(item.save_key, true)",
-        '    output("MTU Pack Editor: enforced equipment set: " .. tostring(item.template))',
+        '    output("MTU Pack Editor: granted equipment items: " .. tostring(item.template))',
         "    return true",
         "end",
         "",
@@ -5682,12 +6447,35 @@ def _campaign_start_spawn_script(
         "    end",
         "end",
         "",
+        "local function hby_mtu_register_special_character_templates()",
+        "    if not ancillaries or not ancillaries.char_start_ancillaries_banned_character_templates then",
+        "        return false",
+        "    end",
+        "    local banned = ancillaries.char_start_ancillaries_banned_character_templates",
+        "    for i = 1, #hby_mtu_player_spawn_characters do",
+        "        local template_key = hby_mtu_player_spawn_characters[i].template",
+        "        local found = false",
+        "        for j = 1, #banned do",
+        "            if banned[j] == template_key then",
+        "                found = true",
+        "                break",
+        "            end",
+        "        end",
+        "        if not found then",
+        "            table.insert(banned, template_key)",
+        "            output(\"MTU Pack Editor: registered special character template: \" .. tostring(template_key))",
+        "        end",
+        "    end",
+        "    return true",
+        "end",
+        "",
         "local function hby_mtu_spawn_for_player(faction_key)",
         "    faction_key = hby_mtu_faction_key(faction_key)",
         '    if not faction_key or faction_key == "" then',
         '        output("MTU Pack Editor: no local player faction found.")',
         "        return",
         "    end",
+        "    hby_mtu_register_special_character_templates()",
         "    hby_mtu_preflight_spawn_state(faction_key)",
         "    if hby_mtu_all_player_spawns_done() then",
         "        return",
@@ -5731,36 +6519,92 @@ def _campaign_start_spawn_script(
         "    hby_mtu_apply_ceo_sets()",
         "end",
         "",
-        "cm:add_first_tick_callback(function()",
-        '    cm:set_saved_value("hby_mtu_player_spawn_listener_registered", true)',
-        "    local faction_key = cm:get_local_faction()",
-        '    if not faction_key or faction_key == "" then',
-        "        local local_ok, local_value = pcall(function() return cm:get_local_faction(true) end)",
-        "        if local_ok then",
-        "            faction_key = hby_mtu_faction_key(local_value)",
-        "        end",
-        "    end",
-        "    hby_mtu_spawn_for_player(faction_key)",
-        "    hby_mtu_apply_equipment_sets(faction_key)",
-        "    hby_mtu_apply_ceo_sets()",
-        "end)",
+        "-- Errors escaping this file's load or callbacks would abort every mod",
+        "-- script queued after it (Korea addon, sandbox mode UI, ...), so all",
+        "-- entry points stay guarded and never propagate.",
+        "local hby_mtu_turn_start_listener_added = false",
         "",
-        "core:add_listener(",
-        '    "hby_mtu_pack_editor_player_spawn_turn_start",',
-        '    "FactionTurnStart",',
-        "    function(context)",
-        "        return context:faction():is_human() and (not hby_mtu_all_player_spawns_done() or not hby_mtu_all_equipment_sets_done() or not hby_mtu_all_ceo_sets_done())",
-        "    end,",
-        "    function(context)",
-        "        hby_mtu_spawn_for_player(context:faction():name())",
-        "        hby_mtu_apply_equipment_sets(context:faction():name())",
-        "        hby_mtu_apply_ceo_sets()",
-        "    end,",
-        "    true",
-        ")",
+        "local function hby_mtu_register_turn_start_listener()",
+        "    if hby_mtu_turn_start_listener_added then",
+        "        return",
+        "    end",
+        "    if not core or not core.add_listener then",
+        "        return",
+        "    end",
+        "    hby_mtu_turn_start_listener_added = true",
+        "    core:add_listener(",
+        '        "hby_mtu_pack_editor_player_spawn_turn_start",',
+        '        "FactionTurnStart",',
+        "        function(context)",
+        "            local cond_ok, wanted = pcall(function()",
+        "                return context:faction():is_human() and (not hby_mtu_all_player_spawns_done() or not hby_mtu_all_equipment_sets_done() or not hby_mtu_all_ceo_sets_done())",
+        "            end)",
+        "            if not cond_ok then",
+        "                return false",
+        "            end",
+        "            return wanted == true",
+        "        end,",
+        "        function(context)",
+        "            local run_ok, run_error = pcall(function()",
+        "                local faction_key = context:faction():name()",
+        "                hby_mtu_spawn_for_player(faction_key)",
+        "                hby_mtu_apply_equipment_sets(faction_key)",
+        "                hby_mtu_apply_ceo_sets()",
+        "            end)",
+        "            if not run_ok then",
+        '                output("MTU Pack Editor: turn start error: " .. tostring(run_error))',
+        "            end",
+        "        end,",
+        "        true",
+        "    )",
+        "end",
+        "",
+        "if cm and cm.add_first_tick_callback then",
+        "    cm:add_first_tick_callback(function()",
+        "        local tick_ok, tick_error = pcall(function()",
+        '            cm:set_saved_value("hby_mtu_player_spawn_listener_registered", true)',
+        "            hby_mtu_register_turn_start_listener()",
+        "            local faction_key = nil",
+        "            local local_ok, local_value = pcall(function() return cm:get_local_faction() end)",
+        "            if local_ok then",
+        "                faction_key = hby_mtu_faction_key(local_value)",
+        "            end",
+        '            if not faction_key or faction_key == "" then',
+        "                local_ok, local_value = pcall(function() return cm:get_local_faction(true) end)",
+        "                if local_ok then",
+        "                    faction_key = hby_mtu_faction_key(local_value)",
+        "                end",
+        "            end",
+        "            hby_mtu_spawn_for_player(faction_key)",
+        "            hby_mtu_apply_equipment_sets(faction_key)",
+        "            hby_mtu_apply_ceo_sets()",
+        "        end)",
+        "        if not tick_ok then",
+        '            output("MTU Pack Editor: first tick error: " .. tostring(tick_error))',
+        "        end",
+        "    end)",
+        "end",
         "",
     ])
     return "\n".join(lines)
+
+
+def _campaign_start_spawn_script(
+    clones: list[CharacterClone],
+    patches: list[CharacterPatch] | None = None,
+) -> str | None:
+    """Generate the guarded, minimal campaign runtime script.
+
+    The older generator grew several speculative API fallbacks.  Keep the
+    shipped Lua on CA's documented Three Kingdoms paths instead.
+    """
+    return build_campaign_start_script(
+        _spawn_entries_for_clones(clones),
+        _ceo_set_entries_for_characters(clones, patches or []),
+        _equipment_entries_for_characters(clones, patches or []),
+        escape=_lua_escape,
+        string_list=_lua_string_list,
+    )
 
 
 def _lua_escape(value: str) -> str:

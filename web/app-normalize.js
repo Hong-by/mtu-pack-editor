@@ -24,6 +24,7 @@ function normalizePackCharacter(item, summary) {
   const element = elementFromSubtype(item.subtype);
   const artSet = summary.artSets.find((candidate) => candidate.key === item.artSet);
   const combatStats = item.combatStats || {};
+  const armourCeo = runtimeArmourCeoKey(combatStats.armourCeo);
   const titleInfo = item.titleInfo || {};
   const sheetHero = sheetHeroInfoForAny(
     item.key,
@@ -57,7 +58,7 @@ function normalizePackCharacter(item, summary) {
     historical.attributeSet,
     romance.attributeSet,
     combatStats.weaponCeo,
-    combatStats.armourCeo,
+    armourCeo,
     combatStats.landUnitKey,
     item.subtype,
     element,
@@ -83,7 +84,7 @@ function normalizePackCharacter(item, summary) {
     retinue: historical.retinue || romance.retinue || '-',
     attributeSet: historical.attributeSet || romance.attributeSet || '-',
     attributeStats: item.attributeStats || {},
-    combatProfile: combatStats.weaponCeo || combatStats.armourCeo || historical.initialCeos || romance.initialCeos || '장비 정보 미확인',
+    combatProfile: combatStats.weaponCeo || armourCeo || historical.initialCeos || romance.initialCeos || '장비 정보 미확인',
     titleName: resolvedTitleName || manualTitle?.title || '칭호 미확인',
     titleOwnerName: sheetTitle?.krName || manualTitle?.owner || displayName,
     titleDescription: titleInfo.description || '',
@@ -94,6 +95,7 @@ function normalizePackCharacter(item, summary) {
     titleNote: titleInfo.note || 'set_title 쓰기는 검증 필요',
     baseAttack: nullableNumber(combatStats.baseAttack),
     baseDefense: nullableNumber(combatStats.baseDefense),
+    weaponCeo: combatStats.weaponCeo || '',
     weaponStatKey: combatStats.weaponStatKey || '',
     weaponDamage: nullableNumber(combatStats.weaponDamage),
     weaponApDamage: nullableNumber(combatStats.weaponApDamage),
@@ -103,7 +105,7 @@ function normalizePackCharacter(item, summary) {
     projectileDamage: nullableNumber(combatStats.projectileDamage),
     projectileApDamage: nullableNumber(combatStats.projectileApDamage),
     projectileRange: nullableNumber(combatStats.projectileRange),
-    armourCeo: combatStats.armourCeo || '',
+    armourCeo,
     armourStatKey: combatStats.armourStatKey || '',
     armourAudioType: combatStats.armourAudioType || '',
     armourFromReference: Boolean(combatStats.armourFromReference),
@@ -161,4 +163,10 @@ function normalizePackCharacter(item, summary) {
     koreaSubtype: item.koreaSubtype || '',
     koreaSourceScript: item.koreaSourceScript || '',
   };
+}
+
+function runtimeArmourCeoKey(value) {
+  const key = String(value || '').trim();
+  if (!key) return '';
+  return key;
 }

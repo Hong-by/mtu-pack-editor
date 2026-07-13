@@ -1542,6 +1542,27 @@ label {
   line-height: 1.45;
 }
 
+.create-subtype-warning {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e4c36a;
+  border-radius: 8px;
+  background: #fff8e4;
+  padding: 10px 12px;
+  color: #6f5415;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.create-subtype-warning[hidden] {
+  display: none;
+}
+
+.create-subtype-warning strong {
+  color: #936d14;
+  font-size: 13px;
+}
+
 .spawn-help ul {
   display: grid;
   gap: 3px;

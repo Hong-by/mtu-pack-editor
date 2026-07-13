@@ -292,7 +292,7 @@ Spawn event output has three parts:
   - `db/cdir_events_incident_payloads_tables/event`
   - `db/cdir_events_incident_option_junctions_tables/event`
   - `text/db/hby_mtu_pack_editor_event.loc`
-- Output pack type: `Movie`
+- Output pack type: `Mod`
 
 DB incident rows control the visible turn-one event and its conditions. Each generated turn group needs one `historical` incident key with the sample option set: `CND_FIRST_ROUND`, `GEN_CND_SELF`, `GEN_TARGET_FACTION`, `CND_UNIQUE`, `VAR_CHANCE`, and `CND_LAST_ROUND`; its payload table should keep `LOCATED = FACTION` only. It must not include `SPAWN_AGENT_OFF_MAP` while the generated Lua direct-spawn path is active.
 

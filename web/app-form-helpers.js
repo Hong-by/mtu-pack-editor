@@ -70,11 +70,15 @@ function uniqueCeoKeys(values) {
   return uniqueStrings((values || []).map(ceoKeyFromValue));
 }
 
+function ceoSetRuntimeKeys(kind, values) {
+  return uniqueCeoKeys(values);
+}
+
 function ceoSetNodeKeys(kind, key) {
   const set = ceoSetByKey(kind, key);
   if (!set) return [];
-  const explicit = Array.isArray(set.ceoKeys) ? uniqueCeoKeys(set.ceoKeys) : [];
-  const fromItems = uniqueCeoKeys(set.items || []);
+  const explicit = Array.isArray(set.ceoKeys) ? ceoSetRuntimeKeys(kind, set.ceoKeys) : [];
+  const fromItems = ceoSetRuntimeKeys(kind, set.items || []);
   return explicit.length ? explicit : fromItems;
 }
 
@@ -87,7 +91,7 @@ function ceoSetKnownNodeKeys(kind) {
   if (kind === 'trait') {
     keys.push(...TRAIT_CEO_REMOVAL_EXTRAS);
   }
-  return uniqueCeoKeys(keys);
+  return ceoSetRuntimeKeys(kind, keys);
 }
 
 function ceoSetSelection(kind, key) {
@@ -99,8 +103,12 @@ function ceoSetSelection(kind, key) {
     setKey: set.key,
     label: set.label,
     addCeos,
-    removeCeos: ceoSetKnownNodeKeys(kind),
+    removeCeos: kind === 'equipment' ? [] : ceoSetKnownNodeKeys(kind),
   };
+}
+
+function defaultCharacterEquipmentCeos(character, equipmentSet = null) {
+  return uniqueCeoKeys([character?.weaponCeo, character?.missileWeaponCeo, character?.armourCeo]);
 }
 
 function ceoSetOptionLabel(set) {

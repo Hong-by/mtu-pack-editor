@@ -137,7 +137,7 @@ Use this guide as a baseline shape, not as an unquestioned current schema. It wa
   Reason: our editor defaults to the base character chain, then applies explicit UI swaps. Do not downgrade named base data to generic unless that was the selected source.
 - The Steam guide's event spawn is DB-driven through `incidents`, `cdir_events_incident_payloads`, and `cdir_events_incident_option_junctions`, with `SPAWN_AGENT_OFF_MAP` carrying `AGENT_SUBTYPE[...]` and `CHARACTER_TEMPLATE[...]`. This editor intentionally does not use that DB spawn payload while Lua direct spawn is active.
   Reason: the guide remains useful for template/detail/art/age chain validation, but this project uses Lua as the single creator to avoid the confirmed DB-plus-Lua duplicate spawn path.
-- Output pack type must remain `Movie`.
+- Output pack type must remain `Mod` so the patch follows the user's mod-manager load order and can be disabled normally.
   Reason: the guide's event flow assumes the pack is loaded at campaign start without the user enabling it as a normal mod dependency.
 - The guide comments contain a later correction: `character_generation_templates.subtype` and a matching `ceo_initial_datas` row were required to stop random generic output.
   Reason: if the event fires and a random character appears, treat subtype and initial CEO chain integrity as first-class checks.

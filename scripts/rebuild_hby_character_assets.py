@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -34,6 +35,11 @@ PANEL_SOURCES = {
     ("small_panel", "norm"): Path("small_panel/norm/norm.png"),
 }
 
+PANEL_COORDS = {
+    "large_panel": (-21, 147),
+    "small_panel": (-15, 102),
+}
+
 STILL_SOURCES = {
     Path("stills/bobbleheads/{key}.png"): Path("stills/bobbleheads.png"),
     Path("stills/bobbleheads/large/{key}.png"): Path("stills/bobbleheads/large.png"),
@@ -48,6 +54,7 @@ STILL_SOURCES = {
 }
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+MAX_IDAT_CHUNK_SIZE = 64 * 1024
 
 
 def read_png_comment(path: Path) -> bytes:
@@ -96,6 +103,7 @@ def set_png_comment(source: Path, target: Path, comment: bytes) -> None:
     if not inserted:
         chunks.insert(1, (b"tEXt", b"Comment\x00" + comment))
     target.parent.mkdir(parents=True, exist_ok=True)
+    chunks = normalize_idat_chunks(chunks)
     target.write_bytes(PNG_SIGNATURE + b"".join(write_chunk(kind, payload) for kind, payload in chunks))
 
 
@@ -103,6 +111,25 @@ def write_chunk(kind: bytes, payload: bytes) -> bytes:
     crc = zlib.crc32(kind)
     crc = zlib.crc32(payload, crc) & 0xFFFFFFFF
     return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", crc)
+
+
+def normalize_idat_chunks(chunks: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
+    idat_payloads = [payload for kind, payload in chunks if kind == b"IDAT"]
+    if not idat_payloads:
+        return chunks
+    compressed = zlib.compress(zlib.decompress(b"".join(idat_payloads)), level=9)
+    normalized: list[tuple[bytes, bytes]] = []
+    inserted = False
+    for kind, payload in chunks:
+        if kind == b"IDAT":
+            if inserted:
+                continue
+            for offset in range(0, len(compressed), MAX_IDAT_CHUNK_SIZE):
+                normalized.append((b"IDAT", compressed[offset:offset + MAX_IDAT_CHUNK_SIZE]))
+            inserted = True
+            continue
+        normalized.append((kind, payload))
+    return normalized
 
 
 def copy_file(source: Path, target: Path) -> None:
@@ -115,7 +142,17 @@ def copy_file(source: Path, target: Path) -> None:
 def panel_comment(panel: str, state: str) -> bytes:
     source_name = state
     path = SUN_CE_ROOT / "composites" / panel / state / f"{source_name}.png"
-    return read_png_comment(path)
+    return normalize_panel_comment(panel, read_png_comment(path))
+
+
+def normalize_panel_comment(panel: str, comment: bytes) -> bytes:
+    x, y = PANEL_COORDS[panel]
+    text = comment.decode("latin1")
+    text, x_count = re.subn(r"x:-?\d+;", f"x:{x};", text, count=1)
+    text, y_count = re.subn(r"y:-?\d+;", f"y:{y};", text, count=1)
+    if x_count != 1 or y_count != 1:
+        raise ValueError(f"Panel comment has no x/y coordinates: {comment!r}")
+    return text.encode("latin1")
 
 
 def rebuild() -> None:

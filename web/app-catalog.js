@@ -84,6 +84,18 @@ function hasFactionRosterMetadata(character) {
   return Boolean(character?.koreaFaction || character?.koreaFactionKey);
 }
 
+function usesSharedPuzzleModel(character) {
+  const uniform = String(character?.uniform || character?.uniformLabel || '').trim().toLowerCase();
+  if (/^sad_[mf]_(earth|fire|metal|water|wood)$/.test(uniform)) return true;
+  const imagePaths = [
+    character?.portraitPath,
+    character?.cardPath,
+    character?.imageSetName,
+    character?.modelSetName,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /(?:^|[\\/_\s-])sad_artsets(?:[\\/_\s-]|$)/.test(imagePaths);
+}
+
 function generatedTemplatePoolSearchText(character) {
   return [
     realTemplateKey(character),
@@ -153,6 +165,7 @@ function isLowInformationGeneratedName(value) {
 }
 
 function isLowQualityGeneratedCharacter(character) {
+  if (usesSharedPuzzleModel(character)) return true;
   if (hasFactionRosterMetadata(character) || hasUniqueImageSet(character)) return false;
   const combined = generatedTemplatePoolSearchText(character);
   if (isGeneratedTemplatePoolKey(character)) return true;
@@ -162,6 +175,7 @@ function isLowQualityGeneratedCharacter(character) {
 }
 
 function isTemplateVariantPoolCharacter(character) {
+  if (usesSharedPuzzleModel(character)) return true;
   if (hasFactionRosterMetadata(character) || hasUniqueImageSet(character)) return false;
   const combined = generatedTemplatePoolSearchText(character);
   return /(?:^|[_\s-])scripted(?:[_\s-]|$)/.test(combined)

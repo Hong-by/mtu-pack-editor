@@ -36,8 +36,8 @@ WEB_STATIC_SUFFIXES = {".css", ".html", ".js"}
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
 _BUILD_LOCK = threading.Lock()
 REFERENCE_SNAPSHOT = ROOT / "work" / "reference_snapshot.json"
-REFERENCE_SNAPSHOT_VERSION = 21
-OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 21
+REFERENCE_SNAPSHOT_VERSION = 23
+OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 23
 INTERNAL_CHARACTER_CATALOG = ROOT / "work" / "internal_dbs" / "character_catalog.json"
 INTERNAL_MATERIALS_PATH = ROOT / "work" / "internal_materials" / "materials.v015.json"
 INTERNAL_ASSET_MANIFEST = ROOT / "work" / "internal_materials" / "asset_manifest.v015.json"
@@ -1158,6 +1158,7 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
         cached = PACK_CACHE.get_open_payload(pack_path, include_vanilla, reference_paths, open_cache_token) if pack_path.exists() else None
         timings["cacheLookup"] = _elapsed(cache_started)
         if cached is not None:
+            _normalize_character_data_runtime_equipment_keys(cached.get("characters"))
             cached["timings"] = {**timings, "total": _elapsed(started_at)}
             cached["assetCacheToken"] = asset_cache_token
             cached["openCacheToken"] = open_cache_token
@@ -1347,10 +1348,12 @@ def _load_reference_snapshot(
         return None
     if pack_path is not None and payload.get("inputPack") != _pack_snapshot_fingerprint(pack_path, include_vanilla):
         return None
+    characters = payload.get("characters", {})
+    _normalize_character_data_runtime_equipment_keys(characters)
     return {
         "ok": True,
         "analysis": payload.get("analysis", {}),
-        "characters": payload.get("characters", {}),
+        "characters": characters,
         "cache": {
             "hit": True,
             "type": "reference_snapshot",
@@ -1366,6 +1369,7 @@ def _enrich_korea_addon_character_data(character_data: dict[str, Any]) -> None:
     _merge_internal_material_character_summary(character_data)
     _merge_auxiliary_catalog_characters(character_data)
     _apply_korea_addon_metadata_to_characters(character_data)
+    _normalize_character_data_runtime_equipment_keys(character_data)
     character_data["_mtuEnrichmentToken"] = enrichment_token
 
 
@@ -1409,10 +1413,32 @@ def _clear_stale_korea_metadata(character: dict[str, Any]) -> None:
 
 def _character_enrichment_token() -> str:
     payload = {
-        "version": 12,
+        "version": 13,
         "internalMaterialToken": _internal_material_cache_token(),
     }
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _normalize_character_data_runtime_equipment_keys(character_data: Any) -> None:
+    if not isinstance(character_data, dict):
+        return
+    for summary in _iter_character_summaries(character_data):
+        characters = summary.get("characters")
+        if not isinstance(characters, list):
+            continue
+        for character in characters:
+            if not isinstance(character, dict):
+                continue
+            _normalize_character_runtime_equipment_keys(character)
+
+
+def _normalize_character_runtime_equipment_keys(character: dict[str, Any]) -> None:
+    stats = character.get("combatStats")
+    if not isinstance(stats, dict):
+        return
+    armour_ceo = _runtime_armour_ceo_key(stats.get("armourCeo"))
+    if armour_ceo:
+        stats["armourCeo"] = armour_ceo
 
 
 def _merge_internal_material_character_summary(character_data: dict[str, Any]) -> None:
@@ -4261,7 +4287,7 @@ def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dic
                 "projectileDamage": _number_or_none((projectile_row or {}).get("damage")),
                 "projectileApDamage": _number_or_none((projectile_row or {}).get("ap_damage")),
                 "projectileRange": _number_or_none((projectile_row or {}).get("effective_range")),
-                "armourCeo": (armour or {}).get("ceos_key") if armour_row else None,
+                "armourCeo": _runtime_armour_ceo_key((armour or {}).get("ceos_key")) if armour_row else None,
                 "armourStatKey": (armour or {}).get("armour") if armour_row else None,
                 "armourAudioType": (armour_row or {}).get("audio_type"),
                 "armourFromReference": bool(
@@ -4272,6 +4298,13 @@ def _combat_stats_by_initial_ceo(tables: dict[str, list[dict[str, Any]]]) -> dic
                 "baseDefense": _number_or_none((armour_row or {}).get("armour_value")),
             }
     return stats
+
+
+def _runtime_armour_ceo_key(value: Any) -> str | None:
+    key = str(value or "").strip()
+    if not key:
+        return None
+    return key
 
 
 def _combat_stats_for_details(
@@ -4510,13 +4543,27 @@ def _best_equipment_variant(
         if equipment_kind == "armour" and "armour" not in normalized:
             continue
         for token_index, token in enumerate(tokens):
-            if not _equipment_variant_token_matches(normalized, token):
+            match_rank = _equipment_variant_match_rank(row, normalized, token)
+            if match_rank is None:
                 continue
-            candidates.append((token_index, ceo_key.count("_"), ceo_key, row))
+            candidates.append((token_index, match_rank, ceo_key.count("_"), ceo_key, row))
             break
     if not candidates:
         return None
-    return sorted(candidates)[0][3]
+    return sorted(candidates)[0][4]
+
+
+def _equipment_variant_match_rank(row: dict[str, Any], normalized_ceo_key: str, token: str) -> int | None:
+    if _equipment_variant_token_matches(normalized_ceo_key, token):
+        return 0
+    row_text = " ".join(
+        str(value).lower()
+        for value in row.values()
+        if isinstance(value, str) and value
+    )
+    if _equipment_variant_token_matches(row_text, token):
+        return 1
+    return None
 
 
 def _equipment_variant_token_matches(normalized_ceo_key: str, token: str) -> bool:
@@ -4948,38 +4995,20 @@ def _read_internal_material_reference_tables(session: Any) -> dict[str, list[dic
             "db/frontend_character_ceos_tables/data__",
             "db/frontend_character_ceos_tables/data",
         ],
-        "ceo_initial_data_stages": [
-            "db/ceo_initial_data_stages_tables/_mtu_characters_ceo",
-            "db/ceo_initial_data_stages_tables/data__",
-            "db/ceo_initial_data_stages_tables/data",
-        ],
-        "ceo_initial_data_to_stages": [
-            "db/ceo_initial_data_to_stages_tables/_mtu_characters_ceo",
-            "db/ceo_initial_data_to_stages_tables/data__",
-            "db/ceo_initial_data_to_stages_tables/data",
-        ],
-        "ceo_initial_data_active_ceos": [
-            "db/ceo_initial_data_active_ceos_tables/_mtu_characters_ceo",
-            "db/ceo_initial_data_active_ceos_tables/data__",
-            "db/ceo_initial_data_active_ceos_tables/data",
-        ],
-        "ceo_initial_data_equipments": [
-            "db/ceo_initial_data_equipments_tables/_mtu_characters_ceo",
-            "db/ceo_initial_data_equipments_tables/data__",
-            "db/ceo_initial_data_equipments_tables/data",
+        "agent_uniforms": [
+            "db/agent_uniforms_tables/_mtu_characters",
+            "db/agent_uniforms_tables/data__",
+            "db/agent_uniforms_tables/data",
         ],
     }
     wanted_aliases = {
         *CHARACTER_TABLE_ALIASES,
         "campaign_character_art_sets",
         "campaign_character_arts",
+        "agent_uniforms",
         "character_attribute_sets",
         "character_attributes",
         "frontend_character_ceos",
-        "ceo_initial_data_stages",
-        "ceo_initial_data_to_stages",
-        "ceo_initial_data_active_ceos",
-        "ceo_initial_data_equipments",
         "equipment_variants_weapons",
         "equipment_variants_armours",
         "melee_weapons",
@@ -5091,38 +5120,20 @@ def _read_reference_tables(session: Any) -> dict[str, list[dict[str, Any]]]:
             "db/frontend_character_ceos_tables/data__",
             "db/frontend_character_ceos_tables/data",
         ],
-        "ceo_initial_data_stages": [
-            "db/ceo_initial_data_stages_tables/_mtu_characters_ceo",
-            "db/ceo_initial_data_stages_tables/data__",
-            "db/ceo_initial_data_stages_tables/data",
-        ],
-        "ceo_initial_data_to_stages": [
-            "db/ceo_initial_data_to_stages_tables/_mtu_characters_ceo",
-            "db/ceo_initial_data_to_stages_tables/data__",
-            "db/ceo_initial_data_to_stages_tables/data",
-        ],
-        "ceo_initial_data_active_ceos": [
-            "db/ceo_initial_data_active_ceos_tables/_mtu_characters_ceo",
-            "db/ceo_initial_data_active_ceos_tables/data__",
-            "db/ceo_initial_data_active_ceos_tables/data",
-        ],
-        "ceo_initial_data_equipments": [
-            "db/ceo_initial_data_equipments_tables/_mtu_characters_ceo",
-            "db/ceo_initial_data_equipments_tables/data__",
-            "db/ceo_initial_data_equipments_tables/data",
+        "agent_uniforms": [
+            "db/agent_uniforms_tables/_mtu_characters",
+            "db/agent_uniforms_tables/data__",
+            "db/agent_uniforms_tables/data",
         ],
     }
     wanted_aliases = {
         *CHARACTER_TABLE_ALIASES,
         "campaign_character_art_sets",
         "campaign_character_arts",
+        "agent_uniforms",
         "character_attribute_sets",
         "character_attributes",
         "frontend_character_ceos",
-        "ceo_initial_data_stages",
-        "ceo_initial_data_to_stages",
-        "ceo_initial_data_active_ceos",
-        "ceo_initial_data_equipments",
         "equipment_variants_weapons",
         "equipment_variants_armours",
         "melee_weapons",

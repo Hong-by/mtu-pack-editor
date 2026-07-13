@@ -306,6 +306,7 @@ class RecipeFromDictTest(unittest.TestCase):
                 "equipmentSetKey": "sentinel",
                 "equipmentCeoKeys": ["equipment_a"],
                 "removableEquipmentCeoKeys": ["equipment_old"],
+                "defaultEquipmentCeoKeys": ["default_armour"],
             }],
             "characterPatches": [{
                 "templateKey": "3k_mtu_template_x",
@@ -326,6 +327,7 @@ class RecipeFromDictTest(unittest.TestCase):
         self.assertEqual(clone.trait_set_key, "warrior")
         self.assertEqual(clone.trait_ceo_keys, ("trait_a",))
         self.assertEqual(clone.removable_equipment_ceo_keys, ("equipment_old",))
+        self.assertEqual(clone.default_equipment_ceo_keys, ("default_armour",))
         patch = recipe.character_patches[0]
         self.assertEqual(patch.title_ceo_key, "3k_main_ceo_career_historical_lu_bu")
         self.assertEqual(patch.trait_set_key, "commander")
