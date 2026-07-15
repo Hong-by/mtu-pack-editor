@@ -127,6 +127,26 @@ def validate(session: PackSession, recipe: Recipe, output_path: str | None = Non
                 ValidationMessage("error", "invalid_character_patch", str(error))
             )
 
+    for clone in recipe.age_range_clones:
+        if "birth_year" not in clone.overrides:
+            continue
+        try:
+            birth_year = int(float(clone.overrides.get("birth_year")))
+        except (TypeError, ValueError):
+            birth_year = 0
+        if not 0 < birth_year < 999:
+            messages.append(
+                ValidationMessage(
+                    "error",
+                    "invalid_birth_year",
+                    (
+                        f"Birth year must be between 1 and 998: "
+                        f"{clone.new_key}={clone.overrides.get('birth_year')!r}. "
+                        "The value 999 is an open-ended database sentinel and causes random adult age."
+                    ),
+                )
+            )
+
     seen_character_keys: set[str] = set()
     for clone in recipe.character_clones:
         if clone.new_template_key in seen_character_keys:

@@ -103,6 +103,7 @@ function stageEdit() {
   const editSlug = slugify(`${targetTemplateKey}_${itemNumber}`);
   const attributeSetClone = attributeSetCloneFrom('edit', attribute, editSlug, itemNumber);
   const editBirthYear = birthYearFromInput('editAgeRange');
+  if (rejectInvalidBirthYear(editBirthYear)) return;
   const editAgeRange = ageRangePatch(character.spawnAge, editBirthYear, editSlug, itemNumber);
   const unitStatClone = unitStatCloneFrom('edit', unit, editSlug, itemNumber);
   const payload = {
@@ -169,6 +170,7 @@ function stageCreate() {
   const attributeSetClone = attributeSetCloneFrom('source', attribute, createSlug, itemNumber);
   const spawnAgeSourceKey = spawn?.spawnAge || base?.spawnAge || base?.templateRow?.spawn_age_range;
   const createBirthYear = birthYearFromInput('createAgeRange');
+  if (rejectInvalidBirthYear(createBirthYear)) return;
   const createAgeRange = ageRangePatch(spawnAgeSourceKey, createBirthYear, createSlug, itemNumber);
   const unitStatClone = null;
   const payload = {

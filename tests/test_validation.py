@@ -264,6 +264,36 @@ class ValidateForbiddenKeysTest(unittest.TestCase):
         codes = [m.code for m in messages]
         self.assertNotIn("invalid_output_path", codes)
 
+    def test_birth_year_999_sentinel_is_rejected(self) -> None:
+        session = self._make_mock_session()
+        recipe = recipe_from_dict({
+            "modName": "test",
+            "ageRangeClones": [{
+                "sourceKey": "source_age",
+                "newKey": "hby_age_test",
+                "overrides": {"birth_year": 999},
+            }],
+        })
+
+        messages = validate(session, recipe)
+
+        self.assertIn("invalid_birth_year", [message.code for message in messages])
+
+    def test_fixed_birth_year_is_accepted(self) -> None:
+        session = self._make_mock_session()
+        recipe = recipe_from_dict({
+            "modName": "test",
+            "ageRangeClones": [{
+                "sourceKey": "source_age",
+                "newKey": "hby_age_test",
+                "overrides": {"birth_year": 176},
+            }],
+        })
+
+        messages = validate(session, recipe)
+
+        self.assertNotIn("invalid_birth_year", [message.code for message in messages])
+
     def test_non_numeric_stat_value_produces_error(self) -> None:
         session = self._make_mock_session()
         recipe = recipe_from_dict({

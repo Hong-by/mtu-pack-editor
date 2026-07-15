@@ -126,6 +126,7 @@ REQUIRED_TABLE_FOLDERS = {
     "unit_abilities_tables",
     "unit_armour_types_tables",
     "unit_special_abilities_tables",
+    "variants_tables",
 }
 
 

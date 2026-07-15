@@ -353,8 +353,9 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("fields.traitCeoKeys = characterAddCeos", recipe_js)
         self.assertIn("function inventoryEquipmentSetCeos(addCeos, defaultEquipmentCeos = [])", recipe_js)
         self.assertIn("const equipmentAddCeos = inventoryEquipmentSetCeos(payload.equipmentSet.addCeos, defaultEquipmentCeos)", recipe_js)
-        self.assertIn("function characterEquipmentSlotFromCeoKey(ceoKey)", recipe_js)
-        self.assertIn("key.includes('_ancillary_') && (key.includes('_armour_') || key.includes('_armor_'))", recipe_js)
+        self.assertIn("return uniqueCeoKeys(addCeos);", recipe_js)
+        self.assertNotIn("function characterEquipmentSlotFromCeoKey(ceoKey)", recipe_js)
+        self.assertNotIn("defaultSlots", recipe_js)
         self.assertIn("fields.removableEquipmentCeoKeys = []", recipe_js)
         self.assertNotIn("isArmourCeoKey", helpers_js)
 
@@ -568,12 +569,36 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("spawnEvent: spawnPlan.event", workflow_js)
         self.assertIn("min_spawn_round: spawnPlan.minRound", workflow_js)
         self.assertIn("max_spawn_round: 999", workflow_js)
+        self.assertIn("can_be_born: false", recipe_js)
         self.assertIn("min_rank: 3", recipe_js)
         self.assertIn("max_rank: 3", recipe_js)
         self.assertNotIn("event: $('sourceSpawnEvent').value", workflow_js)
         self.assertNotIn("maxRound: Number($('createMaxRound').value)", workflow_js)
         self.assertIn('<select id="sourceSpawnEvent" hidden aria-hidden="true"></select>', index_html)
         self.assertNotIn("<span>등장 이벤트</span>\n              <select id=\"sourceSpawnEvent\"></select>", index_html)
+
+    def test_birth_year_input_rejects_database_sentinel(self) -> None:
+        helpers_js = read_web_script("app-form-helpers.js")
+        queue_js = read_web_script("app-queue.js")
+        index_html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("function rejectInvalidBirthYear(birthYear)", helpers_js)
+        self.assertIn("Number(birthYear) < 999", helpers_js)
+        self.assertIn("if (rejectInvalidBirthYear(createBirthYear)) return;", queue_js)
+        self.assertIn('id="createAgeRange" type="number" min="1" max="998"', index_html)
+
+    def test_generated_birth_year_uses_source_when_blank_and_exact_year_when_entered(self) -> None:
+        helpers_js = read_web_script("app-form-helpers.js")
+        queue_js = read_web_script("app-queue.js")
+
+        self.assertIn(
+            "if (birthYear === '' || birthYear === undefined || birthYear === null) return null;",
+            helpers_js,
+        )
+        self.assertIn("birth_year: year", helpers_js)
+        self.assertIn("min_spawn_year: year", helpers_js)
+        self.assertIn("has_valid_birth_year: true", helpers_js)
+        self.assertIn("ageRange: createAgeRange?.newKey || spawnAgeSourceKey", queue_js)
 
     def test_image_art_keys_do_not_invent_missing_card_assets(self) -> None:
         recipe_js = read_web_script("app-recipe.js")

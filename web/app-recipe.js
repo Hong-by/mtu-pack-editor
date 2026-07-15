@@ -100,19 +100,10 @@ function ceoSetRecipeFields(payload) {
 }
 
 function inventoryEquipmentSetCeos(addCeos, defaultEquipmentCeos = []) {
-  const defaultSlots = new Set(uniqueCeoKeys(defaultEquipmentCeos).map(characterEquipmentSlotFromCeoKey).filter(Boolean));
-  return uniqueCeoKeys(addCeos).filter((ceoKey) => {
-    const slot = characterEquipmentSlotFromCeoKey(ceoKey);
-    return !slot || !defaultSlots.has(slot);
-  });
-}
-
-function characterEquipmentSlotFromCeoKey(ceoKey) {
-  const key = String(ceoKey || '').toLowerCase();
-  if (key.includes('_ancillary_weapon_') || key.includes('_ancilliary_weapon_') || key.includes('_ancillary_bow_')) return 'weapon';
-  if (key.includes('_ancillary_armour_') || key.includes('_ancilliary_armour_')) return 'armour';
-  if (key.includes('_ancillary_') && (key.includes('_armour_') || key.includes('_armor_'))) return 'armour';
-  return '';
+  // Equipment sets are inventory grants, not equip operations. A selected
+  // weapon or armour must not be discarded because the source character has
+  // an item in the same slot.
+  return uniqueCeoKeys(addCeos);
 }
 
 function pushEquipmentStatPatch(recipe, patch) {
@@ -532,7 +523,9 @@ function recipeFromQueue() {
           family_name: baseTemplate.family_name,
           clan_name: baseTemplate.clan_name,
           other_name: baseTemplate.other_name,
-          can_be_born: baseTemplate.can_be_born,
+          // This template is created explicitly by campaign Lua. Allowing it
+          // into the natural-birth pool makes the game randomize its age.
+          can_be_born: false,
           ai_skill_generation: baseTemplate.ai_skill_generation,
           min_rounds_to_stay_in_a_pool: baseTemplate.min_rounds_to_stay_in_a_pool,
           max_rounds_to_stay_in_a_pool: baseTemplate.max_rounds_to_stay_in_a_pool,

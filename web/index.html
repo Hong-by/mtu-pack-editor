@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Cache-Control" content="no-store">
     <title>MTU 장수 제작소</title>
-    <link rel="stylesheet" href="./app.css?v=2.1.0">
+    <link rel="stylesheet" href="./app.css?v=2.1.1">
   </head>
   <body>
     <header class="app-header">
@@ -173,7 +173,7 @@
             <p id="editSpawnHelp" class="spawn-help"></p>
             <label><span>가중치</span><input id="editWeight" type="number"></label>
             <label><span>등장 이벤트</span><select id="editSpawnEvent"></select></label>
-            <label><span>출생년도</span><input id="editAgeRange" type="number"></label>
+            <label><span>출생년도</span><input id="editAgeRange" type="number" min="1" max="998" step="1"></label>
             <label><span id="editMinRoundLabel">최소 라운드</span><input id="editMinRound" type="number"><small id="editMinRoundNote"></small></label>
             <label><span id="editMaxRoundLabel">최대 라운드</span><input id="editMaxRound" type="number"><small id="editMaxRoundNote"></small></label>
           </div>
@@ -243,7 +243,7 @@
           <div class="tab-section" data-tab-section="create-spawn">
             <p id="createSpawnHelp" class="spawn-help"></p>
             <label><span>출생년도 기준</span><select id="sourceSpawn"></select></label>
-            <label><span>출생년도</span><input id="createAgeRange" type="number"></label>
+            <label><span>출생년도</span><input id="createAgeRange" type="number" min="1" max="998" step="1"></label>
             <select id="sourceSpawnEvent" hidden aria-hidden="true"></select>
             <label><span>가중치</span><input id="createWeight" type="number"></label>
             <label><span id="createMinRoundLabel">등장 라운드</span><input id="createMinRound" type="number"><small id="createMinRoundNote"></small></label>
@@ -284,22 +284,22 @@
       <textarea id="recipeText" spellcheck="false"></textarea>
     </dialog>
 
-    <script src="./app-data.js?v=2.1.0"></script>
-    <script src="./reference_names.js?v=2.1.0"></script>
-    <script src="./app-labels.js?v=2.1.0"></script>
-    <script src="./app-catalog.js?v=2.1.0"></script>
-    <script src="./app-appearance.js?v=2.1.0"></script>
-    <script src="./app-state.js?v=2.1.0"></script>
-    <script src="./app-workflow.js?v=2.1.0"></script>
-    <script src="./app-title-effects.js?v=2.1.0"></script>
-    <script src="./app-normalize.js?v=2.1.0"></script>
-    <script src="./app-form-helpers.js?v=2.1.0"></script>
-    <script src="./app-render.js?v=2.1.0"></script>
-    <script src="./app-editor.js?v=2.1.0"></script>
-    <script src="./app-queue.js?v=2.1.0"></script>
-    <script src="./app-skills.js?v=2.1.0"></script>
-    <script src="./app-recipe.js?v=2.1.0"></script>
-    <script src="./app-server.js?v=2.1.0"></script>
-    <script src="./app.js?v=2.1.0"></script>
+    <script src="./app-data.js?v=2.1.1"></script>
+    <script src="./reference_names.js?v=2.1.1"></script>
+    <script src="./app-labels.js?v=2.1.1"></script>
+    <script src="./app-catalog.js?v=2.1.1"></script>
+    <script src="./app-appearance.js?v=2.1.1"></script>
+    <script src="./app-state.js?v=2.1.1"></script>
+    <script src="./app-workflow.js?v=2.1.1"></script>
+    <script src="./app-title-effects.js?v=2.1.1"></script>
+    <script src="./app-normalize.js?v=2.1.1"></script>
+    <script src="./app-form-helpers.js?v=2.1.1"></script>
+    <script src="./app-render.js?v=2.1.1"></script>
+    <script src="./app-editor.js?v=2.1.1"></script>
+    <script src="./app-queue.js?v=2.1.1"></script>
+    <script src="./app-skills.js?v=2.1.1"></script>
+    <script src="./app-recipe.js?v=2.1.1"></script>
+    <script src="./app-server.js?v=2.1.1"></script>
+    <script src="./app.js?v=2.1.1"></script>
   </body>
 </html>

@@ -35,6 +35,11 @@ MATERIAL_TABLE_ALIASES = {
         "db/agent_uniforms_tables/data__",
         "db/agent_uniforms_tables/data",
     ],
+    "variants": [
+        "db/variants_tables/_mtu_characters_variants",
+        "db/variants_tables/data__",
+        "db/variants_tables/data",
+    ],
     "incidents": [
         "db/incidents_tables/event",
         "db/incidents_tables/data__",

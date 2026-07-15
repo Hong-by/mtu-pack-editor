@@ -15,6 +15,7 @@ from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_na
 from .character_rules import (
     coerce_bool as _coerce_bool,
     element_from_subtype as _element_from_subtype,
+    generic_initial_ceo_key_for_template_gender as _generic_initial_ceo_key_for_template_gender,
     gender_compatible_initial_ceo_key as _gender_compatible_initial_ceo_key,
 )
 from .campaign_script import build_campaign_start_script
@@ -33,9 +34,10 @@ CORE_ASSET_SOURCE_ID = "17309a40b912"
 IMAGE_ONLY_ASSET_PREFIX = "__image_only_reference__"
 TEMP_IMAGE_ASSET_ROOT = ROOT / "work" / "tmp_delta_image_assets"
 TEMP_LUA_SCRIPT_ROOT = ROOT / "work" / "tmp_delta_scripts"
+TEMP_MODEL_ASSET_ROOT = ROOT / "work" / "tmp_delta_model_assets"
 SPAWN_SCRIPT_SAVE_VERSION = 8
 CEO_SET_SCRIPT_SAVE_VERSION = 6
-EQUIPMENT_SCRIPT_SAVE_VERSION = 21
+EQUIPMENT_SCRIPT_SAVE_VERSION = 22
 CAMPAIGN_SPAWN_SCRIPT_PATH = "script/campaign/3k_main_campaign_map/mod/hby_mtu_pack_editor_player_spawn.lua"
 CAMPAIGN_SPAWN_SCRIPT_PATHS = (
     CAMPAIGN_SPAWN_SCRIPT_PATH,
@@ -47,7 +49,10 @@ CHARACTER_GAME_MODES = ("historical", "romance")
 MTU_CHARACTER_ART_SETS_TABLE = "db/campaign_character_art_sets_tables/_mtu_characters"
 MTU_CHARACTER_ARTS_TABLE = "db/campaign_character_arts_tables/_mtu_characters"
 MTU_AGENT_UNIFORMS_TABLE = "db/agent_uniforms_tables/_mtu_characters"
+MTU_VARIANTS_TABLE = "db/variants_tables/_mtu_characters_variants"
 MTU_FRONTEND_CHARACTER_CEOS_TABLE = "db/frontend_character_ceos_tables/_mtu_characters_ceo"
+FIXED_MODEL_AGENT_UNIFORMS_TABLE = "db/agent_uniforms_tables/fixed_unique_models"
+FIXED_MODEL_VARIANTS_TABLE = "db/variants_tables/fixed_unique_models"
 GENERIC_FEMALE_UNIFORM = "3k_main_hero_skin_female_01"
 GENERIC_FEMALE_SHARED_FALLBACK = (
     "3k_main_ancillary_armour_light_armour_earth_metal_and_water_common_female"
@@ -109,6 +114,60 @@ GENERIC_FEMALE_COMPATIBILITY = {
 # Vanilla has generic female campaign art only for earth, metal, and water.
 # Fire and wood initial CEO records exist, but no matching female art family.
 UNSUPPORTED_GENERIC_FEMALE_ELEMENTS = frozenset({"fire", "wood"})
+# A one-time VMD audit found these MTU art uniforms contain an explicit body
+# model plus exactly one empty `set_body` equipment-injection slot.  Generated
+# variants remove only that slot, retaining melee, shield and ranged slots.
+# Both male and female source heroes are included.  Bodyless wrappers and
+# uniforms without a removable slot are deliberately excluded.
+_EQUIPMENT_INDEPENDENT_UNIQUE_MODEL_SOURCES = (
+    ("3k_mtu_template_historical_dong_min_hero_earth", "3k_mtu_dong_min", "3k_mtu_hero_earth_dong_min", "hero_earth_dong_min"),
+    ("3k_mtu_template_historical_jian_yong_hero_metal", "3k_mtu_jian_yong", "3k_mtu_hero_metal_jian_yong", "hero_metal_jian_yong"),
+    ("3k_main_template_historical_lady_cai_yan_hero_water", "3k_mtu_lady_cai_yan", "3k_mtu_hero_water_lady_cai_yan", "hero_water_lady_cai_yan"),
+    ("3k_mtu_template_historical_lady_dong_peishan_hero_earth", "3k_mtu_lady_dong_peishan", "3k_mtu_hero_earth_lady_dong_peishan", "hero_earth_lady_dong_peishan"),
+    ("3k_mtu_template_historical_lady_du_hero_earth", "3k_mtu_lady_bian_huilan", "3k_mtu_hero_earth_lady_bian_huilan", "hero_earth_lady_bian_huilan"),
+    ("3k_mtu_template_historical_lady_feng_hero_earth", "3k_mtu_lady_da_qiao", "3k_mtu_hero_earth_lady_da_qiao", "hero_earth_lady_da_qiao"),
+    ("3k_mtu_template_historical_lady_gongsun_jinting_hero_water", "3k_mtu_lady_gongsun_jinting", "3k_mtu_hero_water_lady_gongsun_jinting", "hero_water_lady_gongsun_jinting"),
+    ("3k_mtu_template_historical_lady_guan_yinping_hero_wood", "3k_mtu_lady_guan_yinping", "3k_mtu_hero_wood_lady_guan_yinping", "hero_wood_lady_guan_yinping"),
+    ("3k_mtu_template_historical_lady_lu_ji_hero_wood", "3k_mtu_lady_lu_ji", "3k_mtu_hero_wood_lady_lu_ji", "hero_wood_lady_lu_ji"),
+    ("3k_mtu_template_historical_lady_lu_zheng_hero_water", "3k_mtu_lady_lu_zheng", "3k_mtu_hero_water_lady_lu_zheng", "hero_water_lady_lu_zheng"),
+    ("3k_mtu_template_historical_lady_ma_lanli_hero_metal", "3k_mtu_lady_ma_lanli", "3k_mtu_hero_fire_lady_ma_lanli", "hero_fire_lady_ma_lanli"),
+    ("3k_mtu_template_historical_lady_ma_yunlu_hero_metal", "3k_mtu_lady_ma_yunlu", "3k_mtu_hero_metal_lady_ma_yunlu", "hero_metal_lady_ma_yunlu"),
+    ("3k_mtu_template_historical_lady_trieu_hero_wood", "3k_mtu_lady_trieu", "3k_mtu_hero_wood_lady_trieu", "hero_wood_lady_trieu"),
+    ("3k_mtu_template_historical_lady_wang_liting_hero_metal", "3k_mtu_lady_wang_liting", "3k_mtu_hero_metal_lady_wang_liting", "hero_metal_lady_wang_liting"),
+    ("3k_mtu_template_historical_lady_yuan_anyang_hero_water", "3k_mtu_lady_xiao_qiao", "3k_mtu_hero_metal_lady_xiao_qiao", "hero_metal_lady_xiao_qiao"),
+    ("3k_mtu_template_historical_lady_zhang_xingcai_hero_fire", "3k_mtu_lady_lu_ji", "3k_mtu_hero_wood_lady_lu_ji", "hero_wood_lady_lu_ji"),
+    ("3k_mtu_template_historical_lady_zou_yuan_hero_water", "3k_mtu_lady_zou_yuan", "3k_mtu_hero_metal_lady_xiao_qiao", "hero_metal_lady_xiao_qiao"),
+    ("3k_main_template_historical_hua_xin_hero_water", "3k_mtu_hua_xin", "3k_mtu_hero_water_hua_xin", "hero_water_hua_xin"),
+    ("3k_mtu_template_historical_yan_xiang_hero_water", "3k_mtu_yan_xiang", "3k_mtu_hero_water_yan_xiang", "hero_water_xun_yu"),
+    ("3k_mtu_template_historical_zhang_bao_hero_fire", "3k_mtu_zhang_bao", "3k_mtu_hero_fire_zhang_bao", "hero_fire_zhang_bao"),
+    ("3k_main_template_historical_shen_pei_hero_water", "3k_mtu_shen_pei", "3k_mtu_hero_wood_shen_pei", "hero_wood_shen_pei"),
+    ("3k_main_template_historical_chunyu_qiong_hero_fire", "3k_mtu_chunyu_qiong", "3k_mtu_hero_fire_chunyu_qiong", "hero_fire_chunyu_qiong"),
+    ("3k_dlc04_template_historical_luo_jun_xiaoyuan_wood", "3k_mtu_luo_jun", "3k_mtu_hero_wood_luo_jun", "hero_wood_luo_jun"),
+    ("3k_main_template_historical_dong_bai_hero_metal", "3k_mtu_lady_dong_bai", "3k_mtu_hero_metal_lady_xiao_qiao", "hero_metal_lady_xiao_qiao"),
+    ("3k_mtu_template_historical_wu_anguo_hero_wood", "3k_mtu_wu_anguo", "3k_mtu_hero_wood_wu_anguo", "hero_wood_wu_anguo"),
+    ("3k_mtu_template_historical_lady_buyeo_wol_hero_water", "3k_mtu_lady_zou_yuan", "3k_mtu_hero_metal_lady_xiao_qiao", "hero_metal_lady_xiao_qiao"),
+)
+
+
+def _fixed_unique_model_key(source_key: str, *, definition: bool = False) -> str:
+    if source_key.startswith("3k_"):
+        return f"hby_{source_key[3:]}_fixed"
+    prefix = "hby_mtu_" if definition else "hby_"
+    return f"{prefix}{source_key}_fixed"
+
+
+EQUIPMENT_INDEPENDENT_UNIQUE_MODELS = {
+    template: {
+        "source_uniform": source_uniform,
+        "source_variant": source_variant,
+        "source_definition": source_definition,
+        "fixed_uniform": _fixed_unique_model_key(source_uniform),
+        "fixed_variant": _fixed_unique_model_key(source_variant),
+        "fixed_definition": _fixed_unique_model_key(source_definition, definition=True),
+    }
+    for template, source_uniform, source_variant, source_definition
+    in _EQUIPMENT_INDEPENDENT_UNIQUE_MODEL_SOURCES
+}
 HISTORICAL_INITIAL_CEO_TOKEN_ALIASES = {
     "empress_he_fire": ("3k_dlc04_ceo_initial_data_character_historical_non_deployable_empress_he_fire",),
     "lady_sun_shangxiang": ("lady_sun",),
@@ -279,6 +338,12 @@ def build_delta_pack(
             reference_paths or [],
             opened_pack_keys,
         )
+        copied_fixed_model_assets = _write_equipment_independent_model_assets(
+            session,
+            target_key,
+            rows_by_table,
+            reference_paths or [],
+        )
         copied_equipment_assets = _copy_equipment_ceo_raw_assets(
             session,
             target_key,
@@ -313,6 +378,7 @@ def build_delta_pack(
                 f"{len(loc_rows)} name loc row(s), {incident_tables} spawn incident table(s), "
                 f"{copied_assets} image asset(s), "
                 f"{copied_model_assets} uniform model asset(s), "
+                f"{copied_fixed_model_assets} equipment-independent model asset(s), "
                 f"{copied_equipment_assets} equipment CEO asset(s), "
                 f"and {1 if campaign_script else 0} campaign script(s)."
             ),
@@ -1487,10 +1553,11 @@ def _collect_age_range_clone_rows(
                 raise ValueError(f"Unsafe age range clone would overwrite source row: {clone.source_key}")
             continue
         source = _find_required(rows, "key", clone.source_key)
+        overrides = _fixed_age_range_overrides(clone.overrides)
         new_row = {
             **source,
             "key": clone.new_key,
-            **clone.overrides,
+            **overrides,
         }
         table_path = source.get("_sourceTablePath") or table_name
         _upsert_delta_row(rows_by_table, table_path, "key", _clean_source_row(new_row))
@@ -1552,11 +1619,21 @@ def _collect_character_clone_rows(
             **source_template,
             **clone.template_overrides,
         }
-        clones[index] = _with_generic_female_art_compatibility(
+        compatible_clone = _with_equipment_independent_unique_model_compatibility(
             clone,
             preview_template,
         )
+        clones[index] = _with_generic_female_art_compatibility(
+            compatible_clone,
+            preview_template,
+        )
 
+    _register_equipment_independent_unique_model_rows(
+        tables,
+        source_dbs,
+        rows_by_table,
+        clones,
+    )
     _preserve_unique_armour_equipment(tables, clones)
 
     created = 0
@@ -1572,8 +1649,9 @@ def _collect_character_clone_rows(
             **clone.template_overrides,
         }
         if clone.spawn_event in {"campaign_start", "delayed_join"}:
-            # The incident payload resolves CHARACTER_TEMPLATE only for spawnable
-            # templates. Keep a positive sample-pack weight, and block natural birth.
+            # Lua creates these templates explicitly. Keep them out of the
+            # natural-birth pool; otherwise the game replaces the fixed DB
+            # birth year with a randomly generated adult age.
             new_template["weight"] = SPAWN_EVENT_TEMPLATE_WEIGHT
             new_template["can_be_born"] = False
         if clone.display_name:
@@ -1650,6 +1728,7 @@ def _collect_character_clone_rows(
         if clone.new_age_range_key:
             new_template["spawn_age_range"] = clone.new_age_range_key
             source_age = clone.age_range_source_key or source_template["spawn_age_range"]
+            age_range_overrides = _fixed_age_range_overrides(clone.age_range_overrides)
             _clone_keyed_delta(
                 tables["character_generation_spawn_age_ranges"],
                 rows_by_table,
@@ -1657,7 +1736,7 @@ def _collect_character_clone_rows(
                 "key",
                 source_age,
                 clone.new_age_range_key,
-                clone.age_range_overrides,
+                age_range_overrides,
             )
         elif clone.spawn_event in {"campaign_start", "delayed_join"} and clone.age_range_overrides:
             source_age = str(
@@ -1722,6 +1801,7 @@ def _collect_character_clone_rows(
                 source_dbs,
                 raw_initial_ceo,
                 clone.source_template_key,
+                preserve_generic=_clone_preserves_generic_initial_ceo(clone),
             )
             if raw_initial_ceo:
                 requested_initial_ceo = str(clone.new_initial_ceo_key or "")
@@ -1761,10 +1841,10 @@ def _preserve_unique_armour_equipment(
     tables: dict[str, list[dict[str, Any]]],
     clones: list[CharacterClone],
 ) -> None:
-    # Custom-model heroes only render correctly in their unique armour. Keep
-    # that source CEO as the default item and discard a conflicting generic
-    # armour pick. Template creation applies the source initial CEO chain; Lua
-    # only grants the same item to faction inventory as a safe fallback.
+    # Keep the source hero's unique armour as an additional inventory fallback,
+    # but never discard a user-selected generic armour. Lua grants both items
+    # to faction inventory and does not equip either one, so there is no slot
+    # conflict to resolve here.
     variants = tables.get("equipment_variants_armours", [])
     if not variants:
         return
@@ -1777,24 +1857,101 @@ def _preserve_unique_armour_equipment(
         unique_armour = _unique_armour_ceo_for_template_key(variants, clone.source_template_key)
         if not unique_armour:
             continue
-        picks = list(clone.equipment_ceo_keys or ())
         defaults = list(clone.default_equipment_ceo_keys or ())
-        generic_armours = [key for key in picks if _is_armour_ceo_key(key) and key != unique_armour]
-        default_armours = [key for key in defaults if _is_armour_ceo_key(key)]
-        new_picks = [key for key in picks if key not in generic_armours and key != unique_armour]
-        new_defaults = [key for key in defaults if key not in default_armours and key != unique_armour]
-        new_defaults.append(unique_armour)
-        removable = _unique_strings([
-            *(clone.removable_equipment_ceo_keys or ()),
-            *generic_armours,
-        ])
-        removable = [key for key in removable if key != unique_armour]
+        defaults.append(unique_armour)
         clones[index] = _dataclass_replace(
             clone,
-            equipment_ceo_keys=tuple(new_picks),
-            default_equipment_ceo_keys=tuple(new_defaults),
-            removable_equipment_ceo_keys=tuple(removable),
+            default_equipment_ceo_keys=tuple(_unique_strings(defaults)),
         )
+
+
+def _register_equipment_independent_unique_model_rows(
+    tables: dict[str, list[dict[str, Any]]],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    clones: list[CharacterClone],
+) -> None:
+    requested_models = {
+        str(clone.art_overrides.get("uniform") or ""): model
+        for clone in clones
+        for model in [_equipment_independent_model_for_clone(clone)]
+        if model and clone.art_overrides.get("uniform") == model["fixed_uniform"]
+    }
+    if not requested_models:
+        return
+
+    agent_uniforms = tables.get("agent_uniforms", [])
+    variants = tables.get("variants", [])
+    if not variants:
+        raise ValueError(
+            "MTU variants table is required for equipment-independent unique models. "
+            "Refresh the bundled internal materials."
+        )
+
+    for model in requested_models.values():
+        source_uniform = _find_required(
+            agent_uniforms,
+            "uniform_name",
+            model["source_uniform"],
+        )
+        source_variant = _find_required(
+            variants,
+            "variant_name",
+            model["source_variant"],
+        )
+
+        source_uniform_path = str(
+            source_uniform.get("_sourceTablePath") or MTU_AGENT_UNIFORMS_TABLE
+        )
+        _ensure_output_source_db(
+            source_dbs,
+            FIXED_MODEL_AGENT_UNIFORMS_TABLE,
+            source_uniform_path,
+        )
+        fixed_uniform = {
+            **source_uniform,
+            "uniform_name": model["fixed_uniform"],
+            "filename": model["fixed_variant"],
+            "battle_filename": model["fixed_variant"],
+            "campaign_porthole_filename": model["fixed_variant"],
+            "campaign_politician_filename": "",
+            "_sourceTablePath": FIXED_MODEL_AGENT_UNIFORMS_TABLE,
+        }
+        _upsert_plain_row(agent_uniforms, "uniform_name", fixed_uniform)
+        _upsert_delta_row(
+            rows_by_table,
+            FIXED_MODEL_AGENT_UNIFORMS_TABLE,
+            "uniform_name",
+            _clean_source_row(fixed_uniform),
+        )
+
+        source_variant_path = str(
+            source_variant.get("_sourceTablePath") or MTU_VARIANTS_TABLE
+        )
+        _ensure_output_source_db(
+            source_dbs,
+            FIXED_MODEL_VARIANTS_TABLE,
+            source_variant_path,
+        )
+        fixed_variant = {
+            **source_variant,
+            "variant_name": model["fixed_variant"],
+            "variant_filename": model["fixed_definition"],
+            "_sourceTablePath": FIXED_MODEL_VARIANTS_TABLE,
+        }
+        _upsert_delta_row(
+            rows_by_table,
+            FIXED_MODEL_VARIANTS_TABLE,
+            "variant_name",
+            _clean_source_row(fixed_variant),
+        )
+
+
+def _equipment_independent_model_for_clone(
+    clone: CharacterClone,
+) -> dict[str, str] | None:
+    model = EQUIPMENT_INDEPENDENT_UNIQUE_MODELS.get(clone.source_template_key)
+    return dict(model) if model else None
 
 
 def _is_armour_ceo_key(value: Any) -> bool:
@@ -1813,6 +1970,67 @@ def _clone_uses_generic_initial_ceo(clone: CharacterClone) -> bool:
     return any("_ceo_initial_data_character_generic_" in key for key in initial_ceos if key)
 
 
+def _clone_preserves_generic_initial_ceo(clone: CharacterClone) -> bool:
+    model = _equipment_independent_model_for_clone(clone)
+    return bool(
+        model
+        and clone.art_overrides.get("uniform") == model["fixed_uniform"]
+        and _clone_uses_generic_initial_ceo(clone)
+    )
+
+
+def _with_equipment_independent_unique_model_compatibility(
+    clone: CharacterClone,
+    template: dict[str, Any],
+) -> CharacterClone:
+    """Keep an audited unique body while switching its equipment chain to generic.
+
+    The fixed uniform works for both genders.  Female earth, metal and water
+    clones also receive the existing generic image aliases because those
+    armour display families are known to exist in vanilla.
+    """
+    model = _equipment_independent_model_for_clone(clone)
+    if not model:
+        return clone
+
+    art_overrides = dict(clone.art_overrides or {})
+    if not (art_overrides.get("portrait") or art_overrides.get("card")):
+        return clone
+    if art_overrides.get("uniform") or not (clone.image_assets or []):
+        return clone
+
+    is_male = _coerce_bool(template.get("is_male"))
+    subtype = str(template.get("subtype") or "")
+    initial_ceo = _generic_initial_ceo_key_for_template_gender(is_male, subtype)
+    if not initial_ceo:
+        return clone
+
+    art_overrides["uniform"] = model["fixed_uniform"]
+    image_assets = list(clone.image_assets or [])
+    if not is_male:
+        compatibility = GENERIC_FEMALE_COMPATIBILITY.get(_element_from_subtype(subtype))
+        if compatibility:
+            art_overrides["fallback_composite_display"] = str(compatibility["fallback"])
+            image_assets = _generic_female_image_alias_assets(
+                image_assets,
+                tuple(compatibility["armour_displays"]),
+            )
+
+    detail_overrides = {
+        mode: dict(overrides)
+        for mode, overrides in (clone.detail_overrides or {}).items()
+    }
+    for mode in CHARACTER_GAME_MODES:
+        detail_overrides.setdefault(mode, {})["initial_ceos"] = initial_ceo
+    return _dataclass_replace(
+        clone,
+        initial_ceo_source_key=None,
+        detail_overrides=detail_overrides,
+        art_overrides=art_overrides,
+        image_assets=image_assets,
+    )
+
+
 def _with_generic_female_art_compatibility(
     clone: CharacterClone,
     template: dict[str, Any],
@@ -1820,8 +2038,10 @@ def _with_generic_female_art_compatibility(
     """Detach custom female art from source-hero equipment dependencies.
 
     Vanilla supplies complete generic female campaign art families for earth,
-    metal, and water.  Use the matching initial CEO, uniform, fallback display,
-    and armour aliases for every custom-image female clone in those classes.
+    metal, and water.  Use the matching initial CEO, fallback display, and
+    armour aliases for every custom-image female clone in those classes.
+    Audited equipment-independent unique models are handled before this path;
+    other clones use the matching vanilla generic female uniform.
     Fire and wood have no vanilla generic female art family and are deliberately
     left unchanged so we do not claim a compatibility path that does not exist.
     """
@@ -2137,6 +2357,29 @@ def _event_spawn_age_range_key(clone: CharacterClone) -> str:
     return f"hby_age_spawn_{slug}_{suffix:08x}"[:120]
 
 
+def _explicit_birth_year(overrides: dict[str, Any] | None) -> int | None:
+    value = (overrides or {}).get("birth_year")
+    try:
+        year = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    # 999 is the database sentinel for an open-ended year, not a real birth
+    # year.  Treating it as a fixed birth year produces a random adult.
+    return year if 0 < year < 999 else None
+
+
+def _fixed_age_range_overrides(overrides: dict[str, Any] | None) -> dict[str, Any]:
+    """Make an explicit birth year authoritative for DB character creation."""
+    normalized = dict(overrides or {})
+    birth_year = _explicit_birth_year(normalized)
+    if birth_year is None:
+        return normalized
+    normalized["birth_year"] = birth_year
+    normalized["min_spawn_year"] = birth_year
+    normalized["has_valid_birth_year"] = True
+    return normalized
+
+
 def _event_spawn_age_range_overrides(source_age: dict[str, Any], clone: CharacterClone) -> dict[str, Any]:
     explicit = dict(clone.age_range_overrides or {})
     try:
@@ -2148,7 +2391,7 @@ def _event_spawn_age_range_overrides(source_age: dict[str, Any], clone: Characte
 
     overrides: dict[str, Any] = {
         "birth_year": birth_year,
-        "min_spawn_year": min(birth_year, 190),
+        "min_spawn_year": birth_year,
         "min_spawn_year_round": 0,
         "max_spawn_year": 999,
         "max_spawn_year_round": 999,
@@ -2159,6 +2402,7 @@ def _event_spawn_age_range_overrides(source_age: dict[str, Any], clone: Characte
         "has_valid_birth_year": True,
     }
     overrides.update(explicit)
+    overrides = _fixed_age_range_overrides(overrides)
     try:
         if int(float(overrides.get("min_spawn_year") or 0)) > int(float(overrides.get("max_spawn_year") or 0)):
             overrides["max_spawn_year"] = 999
@@ -2338,6 +2582,7 @@ def _collect_character_dependency_rows(
                     or clone.initial_ceo_source_key
                     or source_detail.get("initial_ceos"),
                     clone.source_template_key,
+                    preserve_generic=_clone_preserves_generic_initial_ceo(clone),
                 )
                 compatible_initial_ceo = _clone_initial_ceo_key(
                     clone,
@@ -2466,12 +2711,22 @@ def _resolve_non_generic_initial_ceo(
     source_dbs: dict[str, dict[str, Any]],
     initial_ceo: Any,
     source_template_key: Any,
+    *,
+    preserve_generic: bool = False,
 ) -> str:
     key = str(initial_ceo or "")
     if not key:
         return key
     if not _is_generic_initial_ceo_key(key):
         return _resolve_existing_initial_ceo_key(tables, table_names, source_dbs, key, source_template_key) or key
+    if preserve_generic:
+        return _resolve_existing_initial_ceo_key(
+            tables,
+            table_names,
+            source_dbs,
+            key,
+            source_template_key,
+        ) or key
     candidates = _named_initial_ceo_candidates(source_template_key, key)
     if not candidates:
         return key
@@ -2746,6 +3001,12 @@ def _character_dependency_aliases() -> dict[str, list[str]]:
             "db/agent_uniforms_tables/data__",
             "db/agent_uniforms_tables/data",
             "db/agent_uniforms_tables/new_hero",
+        ],
+        "variants": [
+            "variants",
+            "db/variants_tables/_mtu_characters_variants",
+            "db/variants_tables/data__",
+            "db/variants_tables/data",
         ],
         "character_generation_spawn_age_ranges": [
             "character_generation_spawn_age_ranges",
@@ -3179,7 +3440,11 @@ def _best_equipment_variant_for_tokens(
             break
     if not candidates:
         return None
-    return sorted(candidates)[0][4]
+    # Duplicate material/reference rows can produce candidates with identical
+    # ranking fields.  Comparing the full tuples would then fall through to the
+    # final row dict, which is not orderable on Python 3.  Keep the merge order
+    # as the stable tie-breaker and compare only the scalar ranking fields.
+    return min(candidates, key=lambda candidate: candidate[:4])[4]
 
 
 def _equipment_variant_token_matches(normalized_ceo_key: str, token: Any) -> bool:
@@ -3670,7 +3935,11 @@ def _copy_skill_source_retinue_abilities(
     target_slots = _retinue_unit_by_slot(tables.get("retinue_slot_initial_units", []), target_retinue_key)
     if not target_slots:
         return
-    ability_keys = _battle_ability_keys_for_skill_set(tables, skill_set_key)
+    ability_keys = _battle_ability_keys_for_skill_set(
+        tables,
+        skill_set_key,
+        rows_by_table,
+    )
     if not ability_keys:
         return
     source_retinues = [
@@ -3791,15 +4060,30 @@ def _is_character_land_unit_key(unit_key: str) -> bool:
     return "_hero_" in unit_key or "_general_" in unit_key or unit_key.startswith(("3k_main_hero", "3k_main_general"))
 
 
-def _battle_ability_keys_for_skill_set(tables: dict[str, list[dict[str, Any]]], skill_set: str) -> set[str]:
+def _battle_ability_keys_for_skill_set(
+    tables: dict[str, list[dict[str, Any]]],
+    skill_set: str,
+    rows_by_table: dict[str, list[dict[str, Any]]] | None = None,
+) -> set[str]:
+    output_skill_nodes = _output_dependency_rows(
+        rows_by_table or {},
+        "character_skill_nodes_tables",
+    )
     skill_keys = {
         str(row.get("character_skill_key") or "")
-        for row in tables.get("character_skill_nodes", [])
+        for row in [*tables.get("character_skill_nodes", []), *output_skill_nodes]
         if row.get("character_skill_node_set_key") == skill_set and row.get("character_skill_key")
     }
+    output_skill_effects = _output_dependency_rows(
+        rows_by_table or {},
+        "character_skill_level_to_effects_junctions_tables",
+    )
     effect_keys = {
         str(row.get("effect_key") or "")
-        for row in tables.get("character_skill_level_to_effects_junctions", [])
+        for row in [
+            *tables.get("character_skill_level_to_effects_junctions", []),
+            *output_skill_effects,
+        ]
         if str(row.get("character_skill_key") or "") in skill_keys and row.get("effect_key")
     }
     candidates: set[str] = set()
@@ -3823,6 +4107,19 @@ def _battle_ability_keys_for_skill_set(tables: dict[str, list[dict[str, Any]]], 
     }
     existing_junction_abilities = {key for key in candidates if key in known_land_unit_abilities}
     return explicit_abilities | existing_junction_abilities
+
+
+def _output_dependency_rows(
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    table_segment: str,
+) -> list[dict[str, Any]]:
+    marker = f"/{table_segment.lower()}/"
+    return [
+        row
+        for table_path, rows in rows_by_table.items()
+        if marker in f"/{_normalize_pack_path(table_path).lower()}/"
+        for row in rows
+    ]
 
 
 def _battle_ability_keys_from_effect_bonus_rows(
@@ -4412,6 +4709,8 @@ def _dependency_key_for_alias(alias: str) -> str | Any:
         return _art_key
     if alias == "agent_uniforms":
         return "uniform_name"
+    if alias == "variants":
+        return "variant_name"
     if alias == "character_attributes":
         return _attribute_key
     if alias == "character_attribute_sets":
@@ -5143,6 +5442,110 @@ def _copy_uniform_model_assets(
     return copied
 
 
+def _write_equipment_independent_model_assets(
+    session: RpfmPackSession,
+    target_key: str,
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    reference_paths: list[Path],
+) -> int:
+    requested: dict[str, tuple[str, dict[str, str]]] = {}
+    for table_path, uniform_row in _output_agent_uniform_rows(rows_by_table):
+        model = _fixed_unique_model_for_uniform_row(uniform_row)
+        if not model:
+            continue
+        requested[model["fixed_definition"]] = (table_path, model)
+    if not requested:
+        return 0
+
+    source_paths: list[str] = []
+    destination_paths: list[dict[str, str]] = []
+    for fixed_definition, (table_path, model) in requested.items():
+        source_definition_path = _normalize_pack_path(
+            "variantmeshes/variantmeshdefinitions/"
+            f"{model['source_definition']}.variantmeshdefinition"
+        )
+        target_definition_path = _normalize_pack_path(
+            "variantmeshes/variantmeshdefinitions/"
+            f"{fixed_definition}.variantmeshdefinition"
+        )
+        fixed_text: str | None = None
+        for source_pack in _uniform_model_source_candidates(
+            session,
+            table_path,
+            reference_paths,
+        ):
+            try:
+                index = read_pfh_index(source_pack)
+                entry = next(
+                    entry
+                    for entry in index.entries
+                    if _normalize_pack_path(entry.path).lower() == source_definition_path.lower()
+                )
+                source_text = read_entry_bytes(source_pack, entry).decode("utf-8")
+            except (OSError, StopIteration, UnicodeDecodeError, ValueError):
+                continue
+            fixed_text = _freeze_variant_mesh_body_slot(source_text)
+            break
+        if fixed_text is None:
+            raise ValueError(
+                "Source variant mesh definition not found for equipment-independent model: "
+                f"{source_definition_path}"
+            )
+
+        TEMP_MODEL_ASSET_ROOT.mkdir(parents=True, exist_ok=True)
+        local_path = TEMP_MODEL_ASSET_ROOT / f"{fixed_definition}.variantmeshdefinition"
+        local_path.write_text(fixed_text, encoding="utf-8", newline="\n")
+        source_paths.append(str(local_path))
+        destination_paths.append({"File": target_definition_path})
+
+    response = session.client.send({
+        "AddPackedFiles": [target_key, source_paths, destination_paths, None]
+    })
+    _raise_rpfm_error(response)
+    data = response.get("data", {})
+    added = data.get("VecContainerPathOptionString", [destination_paths, None])[0]
+    return len(added)
+
+
+def _freeze_variant_mesh_body_slot(source_text: str) -> str:
+    pattern = re.compile(
+        r"(?im)^[ \t]*<SLOT\s+name=[\"']set_body[\"']\s*/>\s*\r?\n?"
+    )
+    body_slot_count = len(pattern.findall(source_text))
+    if body_slot_count != 1:
+        raise ValueError(
+            "Variant mesh definition does not contain exactly one removable set_body slot."
+        )
+    if not re.search(
+        r"<SLOT\s+name=[\"']body[\"'][^>]*>\s*<VARIANT_MESH\s+model=",
+        source_text,
+        re.IGNORECASE,
+    ):
+        raise ValueError(
+            "Variant mesh definition has no explicit body model; removing set_body would hide the character."
+        )
+    fixed_text = pattern.sub("", source_text, count=1)
+    return fixed_text
+
+
+def _fixed_unique_model_for_uniform_row(
+    uniform_row: dict[str, Any],
+) -> dict[str, str] | None:
+    values = {
+        str(uniform_row.get(field) or "")
+        for field in (
+            "uniform_name",
+            "filename",
+            "battle_filename",
+            "campaign_porthole_filename",
+        )
+    }
+    for model in EQUIPMENT_INDEPENDENT_UNIQUE_MODELS.values():
+        if model["fixed_uniform"] in values or model["fixed_variant"] in values:
+            return dict(model)
+    return None
+
+
 def _output_agent_uniform_rows(
     rows_by_table: dict[str, list[dict[str, Any]]],
 ) -> list[tuple[str, dict[str, Any]]]:
@@ -5243,6 +5646,14 @@ def _definition_name_candidates(name: Any) -> list[str]:
     if not raw:
         return []
     candidates = [raw]
+    for model in EQUIPMENT_INDEPENDENT_UNIQUE_MODELS.values():
+        fixed_names = {
+            model["fixed_uniform"].lower(),
+            model["fixed_variant"].lower(),
+            model["fixed_definition"].lower(),
+        }
+        if raw in fixed_names:
+            candidates.append(model["source_definition"].lower())
     for prefix in (
         "3k_mtu_",
         "3k_main_",
@@ -6010,7 +6421,7 @@ def _legacy_campaign_start_spawn_script(
         '        output("MTU Pack Editor: MTU template spawn API not ready.")',
         '        return "failed"',
         "    end",
-        "    local create_ok, result = pcall(function() return modify_faction:create_character_from_template(\"general\", subtype_key, template_key, true) end)",
+        "    local create_ok, result = pcall(function() return modify_faction:create_character_from_template(\"general\", subtype_key, template_key, false) end)",
         "    if not create_ok or result == false then",
         '        output("MTU Pack Editor: generated character spawn API failed: " .. tostring(template_key))',
         '        return "failed"',

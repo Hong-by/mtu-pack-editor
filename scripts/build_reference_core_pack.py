@@ -44,6 +44,7 @@ REFERENCE_TABLE_FOLDERS = {
     "missile_weapons_tables",
     "projectiles_tables",
     "unit_armour_types_tables",
+    "variants_tables",
 }
 
 TR_REFERENCE_RE = re.compile(r"\{\{tr:([^}]+)\}\}")

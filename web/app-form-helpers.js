@@ -185,14 +185,26 @@ function birthYearFromInput(id, fallback = '') {
   if (!raw) return fallback === undefined || fallback === null ? '' : fallback;
   const value = Number(raw);
   if (!Number.isFinite(value)) return fallback === undefined || fallback === null ? '' : fallback;
-  return Math.max(0, Math.min(999, Math.trunc(value)));
+  return Math.trunc(value);
+}
+
+function rejectInvalidBirthYear(birthYear) {
+  if (birthYear === '' || birthYear === undefined || birthYear === null) return false;
+  if (Number.isFinite(Number(birthYear)) && Number(birthYear) > 0 && Number(birthYear) < 999) return false;
+  state.serverMessages = [validationItem(
+    'error',
+    '\uCD9C\uC0DD\uB144\uB3C4 \uC624\uB958',
+    '\uCD9C\uC0DD\uB144\uB3C4\uB294 1~998 \uC0AC\uC774\uB85C \uC785\uB825\uD558\uC138\uC694. 999\uB294 \uAC8C\uC784 DB\uC758 \uBB34\uAE30\uD55C \uAC12\uC774\uB77C \uB79C\uB364 \uB098\uC774\uB85C \uC0DD\uC131\uB429\uB2C8\uB2E4.',
+  )];
+  renderValidation();
+  return true;
 }
 
 function ageRangePatch(baseKey, birthYear, slug, itemNumber) {
   if (birthYear === '' || birthYear === undefined || birthYear === null) return null;
   const sourceKey = baseKey && baseKey !== '-' ? baseKey : ((state.options?.ageRanges || [])[0]?.key || '');
   if (!sourceKey) return null;
-  const year = Math.max(0, Math.min(999, Math.trunc(Number(birthYear))));
+  const year = Math.trunc(Number(birthYear));
   const baseRow = ageRangeByKey(sourceKey) || {};
   if (Number(baseRow.birthYear) === year) {
     return { sourceKey, newKey: sourceKey, overrides: {}, changed: false };
@@ -206,6 +218,7 @@ function ageRangePatch(baseKey, birthYear, slug, itemNumber) {
       max_spawn_year: 999,
       min_spawn_year_round: 0,
       max_spawn_year_round: 999,
+      has_valid_birth_year: true,
     },
     changed: true,
   };
