@@ -111,6 +111,56 @@ function defaultCharacterEquipmentCeos(character, equipmentSet = null) {
   return uniqueCeoKeys([character?.weaponCeo, character?.missileWeaponCeo, character?.armourCeo]);
 }
 
+function characterInitialCeoKey(character) {
+  const details = character?.details || [];
+  return details.find((item) => item.gameMode === 'historical')?.initialCeos
+    || details.find((item) => item.gameMode === 'romance')?.initialCeos
+    || details[0]?.initialCeos
+    || '';
+}
+
+function usedDedicatedArmourSlotIds() {
+  return new Set(
+    state.queue
+      .filter((_, index) => index !== state.editingQueueIndex)
+      .map((item) => item?.payload?.dedicatedArmour?.slotId)
+      .filter(Boolean),
+  );
+}
+
+function availableDedicatedArmourSlot(character) {
+  if (
+    !character?.armourCeo
+    || !character?.armourStatKey
+    || !characterInitialCeoKey(character)
+    || !Number.isFinite(Number(character?.baseDefense))
+  ) return null;
+  return { slotId: 'hidden-skill-adjustment' };
+}
+
+function dedicatedArmourSelection(character) {
+  const enabled = Boolean($('sourceDedicatedArmourEnabled')?.checked);
+  if (!enabled) return null;
+  const slot = availableDedicatedArmourSlot(character);
+  const bonus = Number($('sourceDedicatedArmourValue')?.value);
+  if (!slot) return null;
+  if (!Number.isInteger(bonus) || bonus < -500 || bonus > 500) return null;
+  const sourceArmourValue = Number(character.baseDefense);
+  return {
+    poolId: '',
+    slotId: slot.slotId,
+    sourceCeoKey: character.armourCeo,
+    sourceInitialCeoKey: characterInitialCeoKey(character),
+    sourceArmourTypeKey: character.armourStatKey,
+    sourceArmourValue,
+    armourBonus: bonus,
+    armourCeoKey: '',
+    initialCeoKey: '',
+    armourTypeKey: '',
+    armourValue: sourceArmourValue + bonus,
+  };
+}
+
 function ceoSetOptionLabel(set) {
   if (!set || set.key === CEO_SET_BASE_VALUE) return set?.label || '';
   const total = (set.items || []).length;

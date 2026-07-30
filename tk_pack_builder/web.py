@@ -20,6 +20,16 @@ from .analyzer import analyze_pack
 from .builder import build_pack
 from .character_clone import CHARACTER_TABLE_ALIASES, resolve_character_table_name
 from . import delta_builder as delta_builder_module
+from .dedicated_armour_pool import (
+    DedicatedArmourPool,
+    DedicatedArmourPoolError,
+    DedicatedArmourPoolStatus,
+    load_dedicated_armour_pools,
+    ordered_active_ccd_pack_paths,
+    resolve_pool_status,
+    validate_pool_assignments,
+    verify_pool_asset,
+)
 from .internal_materials import MaterialPackSession
 from .korea_addon import korea_character_metadata, korea_display_name_hint
 from .korean_names import korean_character_name
@@ -37,17 +47,25 @@ PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
 _BUILD_LOCK = threading.Lock()
 REFERENCE_SNAPSHOT = ROOT / "work" / "reference_snapshot.json"
 REFERENCE_SNAPSHOT_VERSION = 23
-OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 23
+OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 24
 INTERNAL_CHARACTER_CATALOG = ROOT / "work" / "internal_dbs" / "character_catalog.json"
 INTERNAL_MATERIALS_PATH = ROOT / "work" / "internal_materials" / "materials.v015.json"
 INTERNAL_ASSET_MANIFEST = ROOT / "work" / "internal_materials" / "asset_manifest.v015.json"
 INTERNAL_MATERIAL_SUMMARY = ROOT / "work" / "internal_materials" / "materials.v015.summary.json"
-PACKAGED_TITLE_EFFECT_CATALOG = Path(__file__).resolve().parent / "data" / "title_effects.ko.json"
-PACKAGED_BACKGROUND_TITLE_EFFECT_CATALOG = Path(__file__).resolve().parent / "data" / "background_title_effects.ko.json"
-PACKAGED_SKILL_EFFECT_CATALOG = Path(__file__).resolve().parent / "data" / "skill_effects.ko.json"
-TITLE_EFFECT_CATALOG = ROOT / "work" / "internal_materials" / "title_effects.ko.json"
-SKILL_EFFECT_CATALOG = ROOT / "work" / "internal_materials" / "skill_effects.ko.json"
+PACKAGED_ASSEMBLY_KIT_TITLE_EFFECT_CATALOG = (
+    Path(__file__).resolve().parent / "data" / "assembly_kit_title_effects.ko.json"
+)
+PACKAGED_ASSEMBLY_KIT_SKILL_EFFECT_CATALOG = (
+    Path(__file__).resolve().parent / "data" / "assembly_kit_skill_effects.ko.json"
+)
 EXTRACTED_ASSET_ROOT = ROOT / "work" / "assets"
+DEDICATED_ARMOUR_POOL_ROOTS = (
+    Path(__file__).resolve().parent / "data" / "dedicated_armour_pools",
+    ROOT / "work" / "dedicated_armour_pools",
+)
+# Only Assembly Kit/BOB-precompiled CCD pools whose exact hash matches the
+# active CEO data are exposed. Runtime CCD mutation remains forbidden.
+DEDICATED_ARMOUR_ENGINE_ENABLED = True
 IMAGE_ONLY_ASSET_PREFIX = "__image_only_reference__"
 _ROMANIZED_NAME_LOOKUP_CACHE: dict[tuple[int, int], dict[str, str]] = {}
 
@@ -544,78 +562,6 @@ _SKILL_PHRASE_LABELS: dict[str, str] = {
     "majesty": "위엄",
 }
 
-_MANUAL_SKILL_EFFECTS: dict[str, dict[str, str]] = {
-    "abundance": {"name": "풍부", "effectSummary": "결의 +8 · 파견 임무 해금: 보급품 보충 · 식량 생산 +5(관리 중인 군)"},
-    "adamant_resolve": {"name": "금강 같은 결의", "effectSummary": "전문성 +4 · 결의 +4 · 능력: 금강 같은 결의"},
-    "binding_fury": {"name": "속박하는 분노", "effectSummary": "결의 +4 · 본능 +4 · 능력: 속박하는 분노"},
-    "bravery": {"name": "용맹", "effectSummary": "전문성 +8 · 돌격 무효화 사용 가능(아군 수행원) · 공포와 섬뜩함 면역(아군 수행원)"},
-    "charisma": {"name": "카리스마", "effectSummary": "결의 +3 · 본능 +5 · 깨달음 +2 · 공공질서 +2(현지 군) · 부대 사기 +2(아군 수행원)"},
-    "clarity": {"name": "명료", "effectSummary": "권위 +8 · 건물 유지비 -25%(관리 중인 군) · 캠페인 시야 +50%"},
-    "commanding_shout": {"name": "지휘 함성", "effectSummary": "능력: 지휘 함성 · 결의 +5 · 본능 +3 · 깨달음 +2"},
-    "composure": {"name": "침착", "effectSummary": "책략 +8 · 화염 화살 사용 가능(아군 수행원) · 야간 전투 가능(해당 군단)"},
-    "condemn": {"name": "규탄", "effectSummary": "능력: 규탄 · 전문성 +5 · 권위 +3 · 깨달음 +2"},
-    "consideration": {"name": "배려", "effectSummary": "결의 +8 · 지원군 범위 +50%(지휘 중) · 능력: 격려"},
-    "defiance": {"name": "저항", "effectSummary": "결의 +3 · 본능 +5 · 깨달음 +2 · 갑옷 +10%(아군 수행원) · 적 영토 군수품 +5(지휘 중)"},
-    "dignity": {"name": "품위", "effectSummary": "본능 +8 · 규율 사용 가능(아군 수행원) · 세력 지지도 +5(지도자/후계자/상국일 때)"},
-    "diligence": {"name": "근면", "effectSummary": "전문성 +8 · 근접 보병 근접 회피 +5(아군 수행원) · 부대 계절당 추가 경험치 +25(지도자/후계자/상국일 때)"},
-    "disorientate": {"name": "교란", "effectSummary": "능력: 교란 · 결의 +5 · 본능 +3 · 깨달음 +2"},
-    "earthen_rampart": {"name": "흙벽", "effectSummary": "결의 +4 · 권위 +4 · 능력: 흙벽"},
-    "effortless_flow": {"name": "자연스러운 흐름", "effectSummary": "결의 +3 · 본능 +5 · 깨달음 +2 · 캠페인 이동 거리 +10%(아군 군단) · 속도 +10%(아군 수행원)"},
-    "endurance": {"name": "인내", "effectSummary": "결의 +8 · 군수품 부족 소모 피해 -50%(지휘 중) · 피로 저항 사용 가능(아군 수행원)"},
-    "fanaticism": {"name": "광신", "effectSummary": "결의 +5 · 책략 +3 · 깨달음 +2 · 근접 관통 피해 +10%(아군 수행원) · 근접 기본 피해 +10%(아군 수행원) · 충원 +5%(아군 군단)"},
-    "final_rush": {"name": "최후의 돌격", "effectSummary": "전문성 +4 · 본능 +4 · 능력: 최후의 돌격"},
-    "flames_of_the_phoenix": {"name": "봉황의 불꽃", "effectSummary": "전문성 +4 · 본능 +4 · 능력: 봉황의 불꽃"},
-    "flexibility": {"name": "유연", "effectSummary": "결의 +8 · 재배치 비용 -25%(지도자/후계자/상국일 때) · 충원 +5%(지휘 중)"},
-    "focus": {"name": "집중", "effectSummary": "결의 +5 · 책략 +3 · 깨달음 +2 · 원거리 관통 피해 +10%(아군 수행원) · 원거리 기본 피해 +10%(아군 수행원) · 산업 수입 +3%(세력 전체)"},
-    "fury": {"name": "격노", "effectSummary": "본능 +8 · 적 영토 사기 +2(지휘 중) · 돌격 보너스 +25(아군 수행원)"},
-    "guile": {"name": "기만", "effectSummary": "책략 +8 · 유격 배치 사용 가능(아군 수행원) · 매복 확률 +25%(해당 군단)"},
-    "hamstring": {"name": "힘줄 끊기", "effectSummary": "전문성 +4 · 결의 +4 · 능력: 힘줄 끊기"},
-    "inner_fire": {"name": "내면의 불꽃", "effectSummary": "능력: 내면의 불꽃 · 전문성 +5 · 권위 +3 · 깨달음 +2"},
-    "insight": {"name": "식견", "effectSummary": "전문성 +5 · 권위 +3 · 깨달음 +2 · 연구 속도 +10% · 원거리 방어 확률 +8%"},
-    "inspiration": {"name": "고무", "effectSummary": "전문성 +5 · 권위 +3 · 깨달음 +2 · 격려 사용 가능 · 상업 수입 +6%(세력 전체)"},
-    "inspiring_surge": {"name": "고무의 쇄도", "effectSummary": "책략 +4 · 본능 +4 · 능력: 고무의 쇄도"},
-    "integrity": {"name": "청렴", "effectSummary": "전문성 +5 · 권위 +3 · 깨달음 +2 · 만족도 +20 · 부패 -20%(현지 군)"},
-    "intensity": {"name": "격렬", "effectSummary": "본능 +8 · 강력한 넉백 사용 가능 · 돌격 속도 +25(아군 수행원)"},
-    "intuition": {"name": "직감", "effectSummary": "전문성 +8 · 전투 후 포로 회피 확률 +25% · 산업 수입 +15%(관리 중인 군)"},
-    "judgement": {"name": "판단", "effectSummary": "책략 +8 · 원거리 피해 +25%(아군 수행원) · 사용 가능 교역 협정 +1(지도자/후계자/상국일 때)"},
-    "judgment": {"name": "판단", "effectSummary": "책략 +8 · 원거리 피해 +25%(아군 수행원) · 사용 가능 교역 협정 +1(지도자/후계자/상국일 때)"},
-    "knowledge_of_the_body": {"name": "신체의 지식", "effectSummary": "능력: 신체의 지식 · 결의 +3 · 본능 +5 · 깨달음 +2"},
-    "knowledge_of_the_mind": {"name": "정신의 지식", "effectSummary": "능력: 정신의 지식 · 결의 +3 · 본능 +5 · 깨달음 +2"},
-    "knowledge_of_the_spirit": {"name": "영혼의 지식", "effectSummary": "능력: 영혼의 지식 · 결의 +3 · 본능 +5 · 깨달음 +2"},
-    "majesty": {"name": "위엄", "effectSummary": "권위 +8 · 세력/사기 보조"},
-    "meditation": {"name": "명상", "effectSummary": "권위 +8 · 불굴 사용 가능 · 방어 시 사기 +2(지휘 중)"},
-    "mobility": {"name": "기동", "effectSummary": "권위 +8 · 공격 시 사기 +2(지휘 중) · 전투 달리기 속도 +25%(아군 수행원)"},
-    "nature_s_ally": {"name": "자연의 벗", "effectSummary": "책략 +4 · 권위 +4 · 능력: 자연의 벗"},
-    "natures_ally": {"name": "자연의 벗", "effectSummary": "책략 +4 · 권위 +4 · 능력: 자연의 벗"},
-    "nobility": {"name": "고귀", "effectSummary": "권위 +8 · 사용 가능 파견 임무 +1(지도자/후계자/상국일 때) · 격려 사용 가능 · 근접 기병 원거리 방어 확률 +20%(아군 수행원)"},
-    "opportunism": {"name": "기회주의", "effectSummary": "결의 +5 · 책략 +3 · 깨달음 +2 · 화염 화살 사용 가능(아군 수행원) · 전투 후 전리품 수입 +50%(참전 시) · 근접/원거리 관통 피해 +5%(아군 수행원)"},
-    "passion": {"name": "열정", "effectSummary": "본능 +8 · 파견 임무 해금: 징병 · 충격 기병 근접 피해 +25%(아군 수행원)"},
-    "patience": {"name": "인내", "effectSummary": "결의 +8 · 전투 후 적 장수 포획 확률 +25% · 공성 중 성벽/정착지 피해 증가(지휘 중)"},
-    "perception": {"name": "통찰", "effectSummary": "권위 +8 · 숲 제약 무시 사용 가능(아군 수행원) · 매복 회피 확률 +25%(아군 군단)"},
-    "preach": {"name": "설교", "effectSummary": "능력: 설교 · 전문성 +5 · 권위 +3 · 깨달음 +2"},
-    "precision": {"name": "정밀", "effectSummary": "전문성 +8 · 원거리 관통 피해 +10%(아군 군단) · 원거리 사격 속도 +10%(지휘 중)"},
-    "reach": {"name": "도달", "effectSummary": "본능 +8 · 사용 가능 군단 +1(지도자/후계자/상국일 때) · 캠페인 이동 거리 +25%(지휘 중)"},
-    "resolution": {"name": "결단", "effectSummary": "전문성 +5 · 권위 +3 · 깨달음 +2 · 건설 시간 -1(현지 군) · 근접 회피 +15"},
-    "resourcefulness": {"name": "수완", "effectSummary": "책략 +8 · 화염 사격 사용 가능(아군 수행원) · 적 영토 군수품 +10(지휘 중)"},
-    "roar_of_the_beast": {"name": "야수의 포효", "effectSummary": "결의 +4 · 본능 +4 · 능력: 야수의 포효"},
-    "scholarship": {"name": "학식", "effectSummary": "책략 +8 · 인물 경험치 +10%(해당 군단) · 상업/비단/향신료 수입 +40%(관리 중인 군)"},
-    "stability": {"name": "안정", "effectSummary": "권위 +8 · 파견 임무 해금: 부패 방지 · 공공질서 +5(관리 중인 군)"},
-    "stength_sic_of_the_land": {"name": "대지의 힘", "effectSummary": "결의 +5 · 본능 +3 · 능력: 대지의 힘 · 깨달음 +2"},
-    "strength_of_the_land": {"name": "대지의 힘", "effectSummary": "결의 +5 · 본능 +3 · 능력: 대지의 힘 · 깨달음 +2"},
-    "stifling_deluge": {"name": "숨막히는 격류", "effectSummary": "책략 +4 · 본능 +4 · 능력: 숨막히는 격류"},
-    "stone_bulwark": {"name": "석벽", "effectSummary": "결의 +4 · 권위 +4 · 능력: 석벽"},
-    "subtlety": {"name": "교묘함", "effectSummary": "결의 +5 · 책략 +3 · 깨달음 +2 · 유격 배치 사용 가능(아군 수행원) · 야간 전투 가능(해당 군단)"},
-    "tempered_deflection": {"name": "단련된 회피", "effectSummary": "전문성 +4 · 결의 +4 · 능력: 단련된 회피"},
-    "tenacity_of_steel": {"name": "강철 같은 끈기", "effectSummary": "전문성 +4 · 결의 +4 · 능력: 강철 같은 끈기"},
-    "tranquility": {"name": "평온", "effectSummary": "능력: 회복 · 결의 +3 · 본능 +5 · 깨달음 +2 · 농업 수입 +3%(세력 전체)"},
-    "trust": {"name": "신뢰", "effectSummary": "결의 +8 · 창 보병 갑옷 +10%(아군 수행원) · 농업 수입 +20%(관리 중인 군)"},
-    "understanding": {"name": "이해심", "effectSummary": "전문성 +8 · 파견 임무 해금: 공업 착취 · 모든 신병 시작 등급 +1(지도자/후계자/상국일 때)"},
-    "unyielding_earth": {"name": "불굴의 대지", "effectSummary": "결의 +4 · 권위 +4 · 능력: 불굴의 대지"},
-    "vengeance": {"name": "복수", "effectSummary": "본능 +8 · 공포 유발 사용 가능 · 아군 영토 사기 +2(지휘 중)"},
-    "wisdom": {"name": "지혜", "effectSummary": "책략 +8 · 파견 임무 해금: 효자와 청렴한 자 포상 · 예비 병력 +15(관리 중인 군)"},
-    "wisdom_of_the_river": {"name": "강의 지혜", "effectSummary": "책략 +4 · 권위 +4 · 능력: 강의 지혜"},
-    "zeal": {"name": "열의", "effectSummary": "전문성 +8 · 근접 관통 피해 +10%(아군 군단) · 근접 공격 속도 +40%"},
-}
 
 _LABEL_SKIP_TOKENS = {
     "3k",
@@ -1135,6 +1081,57 @@ def _fallback_pack_path(pack_path: Path) -> Path | None:
     return next((path for path in candidates if path.is_file()), None)
 
 
+def _dedicated_armour_pool_status(
+    payload: dict[str, Any],
+) -> DedicatedArmourPoolStatus:
+    if not DEDICATED_ARMOUR_ENGINE_ENABLED:
+        return DedicatedArmourPoolStatus(
+            available=False,
+            reason=(
+                "전용 갑옷 복제 기능은 실제 게임 시작 충돌이 확인되어 "
+                "안전을 위해 비활성화되었습니다."
+            ),
+            active_ccd=None,
+            pool=None,
+        )
+    try:
+        pools = load_dedicated_armour_pools(DEDICATED_ARMOUR_POOL_ROOTS)
+    except DedicatedArmourPoolError as error:
+        return DedicatedArmourPoolStatus(
+            available=False,
+            reason=f"전용 갑옷 슬롯 풀을 읽지 못했습니다: {error}",
+            active_ccd=None,
+            pool=None,
+        )
+    input_path = payload.get("inputPath")
+    source_pack = _resolve_user_path(input_path) if input_path else None
+    pack_paths = ordered_active_ccd_pack_paths(
+        source_pack,
+        _reference_pack_paths(payload),
+    )
+    status = resolve_pool_status(pools, pack_paths)
+    if status.available and status.pool is not None:
+        try:
+            verify_pool_asset(status.pool)
+        except DedicatedArmourPoolError as error:
+            return DedicatedArmourPoolStatus(
+                available=False,
+                reason=str(error),
+                active_ccd=status.active_ccd,
+                pool=None,
+            )
+    return status
+
+
+def _validated_dedicated_armour_pool(
+    payload: dict[str, Any],
+    recipe: Recipe,
+) -> DedicatedArmourPool | None:
+    # Armour edits are implemented as generated-character-only hidden skill
+    # effects. They no longer consume a precompiled CEO/CCD armour slot.
+    return None
+
+
 def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
     started_at = time.perf_counter()
     timings: dict[str, float] = {}
@@ -1158,7 +1155,9 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
         cached = PACK_CACHE.get_open_payload(pack_path, include_vanilla, reference_paths, open_cache_token) if pack_path.exists() else None
         timings["cacheLookup"] = _elapsed(cache_started)
         if cached is not None:
+            _enrich_korea_addon_character_data(cached.get("characters", {}))
             _normalize_character_data_runtime_equipment_keys(cached.get("characters"))
+            cached["dedicatedArmour"] = _dedicated_armour_pool_status(payload).to_dict()
             cached["timings"] = {**timings, "total": _elapsed(started_at)}
             cached["assetCacheToken"] = asset_cache_token
             cached["openCacheToken"] = open_cache_token
@@ -1173,6 +1172,7 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
         )
         timings["snapshotLookup"] = _elapsed(snapshot_started)
         if snapshot is not None:
+            snapshot["dedicatedArmour"] = _dedicated_armour_pool_status(payload).to_dict()
             snapshot["timings"] = {**timings, "total": _elapsed(started_at)}
             snapshot["assetCacheToken"] = asset_cache_token
             snapshot["openCacheToken"] = open_cache_token
@@ -1213,6 +1213,7 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "ok": True,
             "analysis": analysis,
             "characters": character_data,
+            "dedicatedArmour": _dedicated_armour_pool_status(payload).to_dict(),
             "cache": {
                 "hit": False,
                 "path": str(PACK_CACHE.db_path),
@@ -1349,6 +1350,7 @@ def _load_reference_snapshot(
     if pack_path is not None and payload.get("inputPack") != _pack_snapshot_fingerprint(pack_path, include_vanilla):
         return None
     characters = payload.get("characters", {})
+    _enrich_korea_addon_character_data(characters)
     _normalize_character_data_runtime_equipment_keys(characters)
     return {
         "ok": True,
@@ -1413,7 +1415,7 @@ def _clear_stale_korea_metadata(character: dict[str, Any]) -> None:
 
 def _character_enrichment_token() -> str:
     payload = {
-        "version": 13,
+        "version": 14,
         "internalMaterialToken": _internal_material_cache_token(),
     }
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
@@ -1672,16 +1674,15 @@ def _open_compact_internal_material_session(path: Path) -> MaterialPackSession:
 
 def _internal_material_cache_token() -> dict[str, Any]:
     catalog_paths = _title_effect_catalog_paths()
-    skill_catalog_path = _skill_effect_catalog_path()
+    skill_catalog_paths = _skill_effect_catalog_paths()
     paths = [
         INTERNAL_MATERIALS_PATH,
         INTERNAL_ASSET_MANIFEST,
         *catalog_paths,
+        *skill_catalog_paths,
     ]
-    if skill_catalog_path is not None:
-        paths.append(skill_catalog_path)
     return {
-        "version": 25,
+        "version": 30,
         "localAssets": _local_asset_cache_token(),
         "sources": {
             str(path): _file_cache_fingerprint(path)
@@ -1870,7 +1871,39 @@ def _merge_skill_tree_summary(target: dict[str, Any], source: dict[str, Any]) ->
     source_index = source_trees.get("skillIndex", {})
     if isinstance(target_index, dict) and isinstance(source_index, dict):
         for key, value in source_index.items():
-            target_index.setdefault(key, value)
+            existing = target_index.get(key)
+            if not isinstance(existing, dict):
+                target_index[key] = value
+                continue
+            if not isinstance(value, dict):
+                continue
+            _merge_localized_skill_index_entry(existing, value)
+        _add_catalog_skill_index_entries(target_index)
+
+
+def _merge_localized_skill_index_entry(target: dict[str, Any], source: dict[str, Any]) -> None:
+    """Overlay fresher Korean metadata without replacing the real DB skill row."""
+    for field in ("name", "description", "effectSummary"):
+        incoming = str(source.get(field) or "").strip()
+        current = str(target.get(field) or "").strip()
+        if incoming and (
+            not current
+            or (_contains_hangul(incoming) and not _contains_hangul(current))
+            or (
+                field == "effectSummary"
+                and _has_raw_english_effect_name(current)
+                and not _has_raw_english_effect_name(incoming)
+            )
+        ):
+            target[field] = source[field]
+
+    for field in ("effectRows", "effectDataSource", "element", "source", "owner"):
+        incoming = source.get(field)
+        if incoming not in (None, "", [], {}) and target.get(field) in (None, "", [], {}):
+            target[field] = incoming
+
+    if source.get("exclusive"):
+        target["exclusive"] = True
 
 
 def _merge_list_by_key(target: dict[str, Any], source: dict[str, Any], field: str) -> None:
@@ -2291,8 +2324,6 @@ def _build_attribute_set_catalog(
 def _build_title_catalog(characters: list[dict[str, Any]]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     effects_by_title, _effect_entries = _load_title_effect_catalog()
-    for effect_info in _background_title_catalog_entries(_effect_entries):
-        candidates.append(effect_info)
     for character in characters:
         if not isinstance(character, dict):
             continue
@@ -2345,6 +2376,8 @@ def _build_title_catalog(characters: list[dict[str, Any]]) -> list[dict[str, Any
                 "effects": effect_info.get("effects") or [],
                 "effectSummary": effect_info.get("effectSummary") or "",
                 "effectTitle": effect_info.get("title") or "",
+                "effectRows": effect_info.get("effectRows") or [],
+                "effectDataSource": effect_info.get("sourceKind") or "",
                 "ownerKey": common_title_info.get("canonicalTitleGroup") or character.get("key") or "",
                 "ownerName": "기본 칭호" if common_title_info else character.get("displayName") or character.get("label") or "",
                 "initialCeoKey": title_info.get("initialCeoKey") or "",
@@ -2368,40 +2401,6 @@ def _build_title_catalog(characters: list[dict[str, Any]]) -> list[dict[str, Any
     return sorted(deduped, key=lambda item: (str(item.get("ownerName") or ""), str(item.get("label") or "")))
 
 
-def _background_title_catalog_entries(effect_entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
-    for effect_info in effect_entries:
-        key = str(effect_info.get("key") or "")
-        if not _is_background_title_key(key):
-            continue
-        elements = effect_info.get("elements") or []
-        entries.append(
-            {
-                "key": key,
-                "label": effect_info.get("title") or _localized_label(key, context="title"),
-                "description": "",
-                "hasDescription": False,
-                "effects": effect_info.get("effects") or [],
-                "effectSummary": effect_info.get("effectSummary") or "",
-                "effectTitle": effect_info.get("title") or "",
-                "ownerKey": "",
-                "ownerName": effect_info.get("owner") or effect_info.get("category") or "공용 칭호",
-                "initialCeoKey": "",
-                "ceoNodeKey": key,
-                "titleCeoKey": key,
-                "element": elements[0] if elements else "",
-                "elements": elements,
-                "locTitleKey": "",
-                "descriptionKey": "",
-                "referenceSourcePath": str(PACKAGED_BACKGROUND_TITLE_EFFECT_CATALOG),
-                "sourceTablePath": "",
-                "sourceRank": 5,
-                "sourceTag": "DATA",
-                "displayOnlyTitle": True,
-                "titleSourceKind": "background",
-            }
-        )
-    return entries
 
 
 def _title_effect_lookup_key(value: Any) -> str:
@@ -2467,12 +2466,8 @@ def _load_title_effect_catalog() -> tuple[dict[str, dict[str, Any]], list[dict[s
 
 def _title_effect_catalog_paths() -> list[Path]:
     catalog_paths = []
-    if TITLE_EFFECT_CATALOG.is_file():
-        catalog_paths.append(TITLE_EFFECT_CATALOG)
-    elif PACKAGED_TITLE_EFFECT_CATALOG.is_file():
-        catalog_paths.append(PACKAGED_TITLE_EFFECT_CATALOG)
-    if PACKAGED_BACKGROUND_TITLE_EFFECT_CATALOG.is_file():
-        catalog_paths.append(PACKAGED_BACKGROUND_TITLE_EFFECT_CATALOG)
+    if PACKAGED_ASSEMBLY_KIT_TITLE_EFFECT_CATALOG.is_file():
+        catalog_paths.append(PACKAGED_ASSEMBLY_KIT_TITLE_EFFECT_CATALOG)
     return catalog_paths
 
 
@@ -2511,8 +2506,6 @@ def _title_effect_entry_from_row(row: Any) -> dict[str, Any]:
     if not title or not isinstance(effects, list):
         return {}
     effect_lines = [str(item).strip() for item in effects if str(item).strip()]
-    if not effect_lines:
-        return {}
     key = str(row.get("key") or row.get("ceoKey") or "").strip()
     extra_keys = row.get("keys") or row.get("aliases") or []
     if not isinstance(extra_keys, list):
@@ -2530,17 +2523,16 @@ def _title_effect_entry_from_row(row: Any) -> dict[str, Any]:
         "elements": elements,
         "effects": effect_lines,
         "effectSummary": " / ".join(effect_lines),
+        "description": str(row.get("description") or "").strip(),
+        "sourceKind": str(row.get("sourceKind") or "").strip(),
+        "effectRows": row.get("effectRows") if isinstance(row.get("effectRows"), list) else [],
     }
 
 
 def _title_effect_entry_priority(entry: dict[str, Any]) -> int:
-    category = str(entry.get("category") or "").lower()
-    key_text = " ".join(str(value or "") for value in [entry.get("key"), *(entry.get("keys") or [])]).lower()
-    if category.startswith("mtu") or "_mtu_" in key_text or key_text.startswith("bg_mtu_"):
+    if entry.get("sourceKind") == "assembly_kit":
         return 100
-    if entry.get("key") or entry.get("keys"):
-        return 80
-    return 50
+    return 0
 
 
 def _title_effect_entry_lookup_keys(entry: dict[str, Any]) -> list[str]:
@@ -2646,7 +2638,21 @@ def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             recipe = recipe_from_dict(payload.get("recipe", {}))
             messages = validate(session, recipe, payload.get("outputPath"))
-            return {"ok": not has_errors(messages), "messages": messages_to_dicts(messages)}
+            message_dicts = messages_to_dicts(messages)
+            try:
+                _validated_dedicated_armour_pool(payload, recipe)
+            except DedicatedArmourPoolError as error:
+                message_dicts.append(
+                    {
+                        "level": "error",
+                        "code": "invalid_dedicated_armour_pool",
+                        "message": str(error),
+                    }
+                )
+            return {
+                "ok": not any(item.get("level") == "error" for item in message_dicts),
+                "messages": message_dicts,
+            }
         finally:
             _close_session(session)
     session = _open_session(payload)
@@ -2655,7 +2661,21 @@ def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         messages = validate(session, recipe, payload.get("outputPath"))
         if _reference_pack_paths(payload):
             messages = allow_reference_backed_clone_sources(messages)
-        return {"ok": not has_errors(messages), "messages": messages_to_dicts(messages)}
+        message_dicts = messages_to_dicts(messages)
+        try:
+            _validated_dedicated_armour_pool(payload, recipe)
+        except DedicatedArmourPoolError as error:
+            message_dicts.append(
+                {
+                    "level": "error",
+                    "code": "invalid_dedicated_armour_pool",
+                    "message": str(error),
+                }
+            )
+        return {
+            "ok": not any(item.get("level") == "error" for item in message_dicts),
+            "messages": message_dicts,
+        }
     finally:
         _close_session(session)
 
@@ -2681,6 +2701,7 @@ def _build_payload_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
         if not payload.get("delta"):
             raise ValueError("Internal materials build is only available for patch pack output.")
         recipe = recipe_from_dict(payload.get("recipe", {}))
+        _validated_dedicated_armour_pool(payload, recipe)
         output_path = _resolve_user_path(payload["outputPath"]) if payload.get("outputPath") else None
         if output_path is None:
             raise ValueError("Patch pack output path is required.")
@@ -2692,12 +2713,13 @@ def _build_payload_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("coreAssetSourceId"):
             delta_builder_module.CORE_ASSET_SOURCE_ID = str(payload["coreAssetSourceId"])
         try:
+            reference_paths = _build_reference_pack_paths(payload, recipe)
             build_messages = delta_builder_module.build_delta_pack_from_materials(
                 source_session,
                 writer_session,
                 recipe,
                 output_path,
-                _reference_pack_paths(payload),
+                reference_paths,
             )
         finally:
             delta_builder_module.CORE_ASSET_SOURCE_ID = previous_core
@@ -2712,16 +2734,18 @@ def _build_payload_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     session = _open_session(payload)
     try:
         recipe = recipe_from_dict(payload.get("recipe", {}))
+        _validated_dedicated_armour_pool(payload, recipe)
         output_path = _resolve_user_path(payload["outputPath"]) if payload.get("outputPath") else None
         if output_path is not None:
             output_path.parent.mkdir(parents=True, exist_ok=True)
+        reference_paths = _build_reference_pack_paths(payload, recipe)
         build_messages = build_pack(
             session,
             recipe,
             output_path,
             in_place=bool(payload.get("inPlace")),
             delta=bool(payload.get("delta")),
-            reference_paths=_reference_pack_paths(payload),
+            reference_paths=reference_paths,
         )
         target_path = Path(payload["inputPath"]) if payload.get("inPlace") else output_path
         verify_messages = _verify_saved_pack_image_chain(target_path, recipe) if target_path and payload.get("verifyAfterSave") else []
@@ -3561,6 +3585,7 @@ def _summarize_skill_trees(
             links_by_set.setdefault(set_key, []).append(row)
 
     effects_by_skill: dict[str, list[dict[str, Any]]] = {}
+    ability_summaries = _material_ability_effect_summaries(tables, loc_text)
     effects = {str(row.get("key")): row for row in tables.get("effects", []) if row.get("key")}
     for row in tables.get("character_skill_level_to_effects_junctions", []):
         skill_key = str(row.get("character_skill_key") or "")
@@ -3574,6 +3599,7 @@ def _summarize_skill_trees(
             "scope": row.get("effect_scope"),
             "level": row.get("level"),
             "value": row.get("value"),
+            "abilitySummary": ability_summaries.get(effect_key, ""),
         })
 
     owners_by_skill: dict[str, list[dict[str, str]]] = {}
@@ -3680,20 +3706,22 @@ def _skill_node_summary(
 
 def _skill_index_entry(skill_key: str, loc_text: dict[str, str], effects: list[dict[str, Any]]) -> dict[str, Any]:
     name = _skill_name_for_key(skill_key, loc_text)
-    manual = _manual_skill_effect_info(skill_key, name)
+    catalog = _catalog_skill_effect_info(skill_key, name)
     description = _skill_description_for_key(skill_key, loc_text)
     if description and not _contains_hangul(description):
         description = ""
     return {
         "key": skill_key,
-        "name": manual.get("name") or name,
-        "description": description or manual.get("description") or "",
+        "name": catalog.get("name") or name,
+        "description": description or catalog.get("description") or "",
         "effects": effects,
-        "effectSummary": manual.get("effectSummary") or _effect_summary(effects),
-        "element": manual.get("element") or _skill_element(skill_key),
-        "source": manual.get("source") or _skill_source_label(skill_key),
-        "owner": manual.get("owner") or "",
-        "exclusive": bool(manual.get("exclusive")),
+        "effectSummary": catalog.get("effectSummary") or _effect_summary(effects),
+        "effectRows": catalog.get("effectRows") or [],
+        "effectDataSource": catalog.get("sourceKind") or "",
+        "element": catalog.get("element") or _skill_element(skill_key),
+        "source": catalog.get("source") or _skill_source_label(skill_key),
+        "owner": catalog.get("owner") or "",
+        "exclusive": bool(catalog.get("exclusive")),
         "sources": [],
     }
 
@@ -3706,14 +3734,14 @@ def _skill_name_for_key(skill_key: str, loc_text: dict[str, str]) -> str:
     ):
         if loc_text.get(loc_key):
             label = loc_text[loc_key]
-            manual = _manual_skill_effect_info(label, skill_key)
-            if manual:
-                return manual.get("name") or label
+            catalog = _catalog_skill_effect_info(label, skill_key)
+            if catalog:
+                return catalog.get("name") or label
             if _contains_hangul(label):
                 return label
             return _localized_label(label, skill_key, context="skill", loc_text=loc_text)
-    manual = _manual_skill_effect_info(skill_key)
-    return manual.get("name") or _friendly_skill_key(skill_key)
+    catalog = _catalog_skill_effect_info(skill_key)
+    return catalog.get("name") or _friendly_skill_key(skill_key)
 
 
 def _skill_description_for_key(skill_key: str, loc_text: dict[str, str]) -> str:
@@ -3751,6 +3779,16 @@ def _contains_hangul(value: str) -> bool:
     return any("\uac00" <= char <= "\ud7a3" for char in str(value or ""))
 
 
+def _has_raw_english_effect_name(value: Any) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:skill|effect|ability)[ _-]+[a-z][a-z0-9 _-]*\s+[+-]?\d",
+            str(value or ""),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _contains_cjk(value: str) -> bool:
     return any("\u4e00" <= char <= "\u9fff" for char in str(value or ""))
 
@@ -3760,42 +3798,61 @@ def _normalize_label_key(value: Any) -> str:
 
 
 def _load_skill_effect_catalog() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
-    catalog_path = _skill_effect_catalog_path()
-    return _load_skill_effect_catalog_for_cache_key(_file_cache_key([catalog_path] if catalog_path else []))
+    catalog_paths = _skill_effect_catalog_paths()
+    return _load_skill_effect_catalog_for_cache_key(_file_cache_key(catalog_paths))
 
 
-def _skill_effect_catalog_path() -> Path | None:
-    if SKILL_EFFECT_CATALOG.is_file():
-        return SKILL_EFFECT_CATALOG
-    if PACKAGED_SKILL_EFFECT_CATALOG.is_file():
-        return PACKAGED_SKILL_EFFECT_CATALOG
-    return None
+def _skill_effect_catalog_paths() -> list[Path]:
+    paths: list[Path] = []
+    if PACKAGED_ASSEMBLY_KIT_SKILL_EFFECT_CATALOG.is_file():
+        paths.append(PACKAGED_ASSEMBLY_KIT_SKILL_EFFECT_CATALOG)
+    return paths
 
 
 @lru_cache(maxsize=8)
 def _load_skill_effect_catalog_for_cache_key(_cache_key: str) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
     by_key: dict[str, dict[str, Any]] = {}
     entries: list[dict[str, Any]] = []
-    catalog_path = _skill_effect_catalog_path()
-    if catalog_path is None or not catalog_path.is_file():
-        return by_key, entries
-    try:
-        rows = json.loads(catalog_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return by_key, entries
-    if not isinstance(rows, list):
-        return by_key, entries
-    for row in rows:
-        entry = _skill_effect_entry_from_row(row)
-        if not entry:
+    for catalog_path in _skill_effect_catalog_paths():
+        try:
+            rows = json.loads(catalog_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
             continue
-        entries.append(entry)
-        for lookup_key in _skill_effect_lookup_keys(entry):
-            by_key.setdefault(lookup_key, entry)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            entry = _skill_effect_entry_from_row(row)
+            if not entry:
+                continue
+            entries.append(entry)
+            for lookup_key in _skill_effect_lookup_keys(entry):
+                by_key.setdefault(lookup_key, entry)
     return by_key, entries
 
 
 _load_skill_effect_catalog.cache_clear = _load_skill_effect_catalog_for_cache_key.cache_clear  # type: ignore[attr-defined]
+
+
+def _catalog_effect_label(effect_key: str) -> str:
+    labels = _load_effect_label_catalog_for_cache_key(
+        _file_cache_key(_skill_effect_catalog_paths())
+    )
+    return labels.get(str(effect_key or ""), "")
+
+
+@lru_cache(maxsize=8)
+def _load_effect_label_catalog_for_cache_key(_cache_key: str) -> dict[str, str]:
+    _by_key, entries = _load_skill_effect_catalog()
+    labels: dict[str, str] = {}
+    for entry in entries:
+        for row in entry.get("effectRows") or []:
+            if not isinstance(row, dict):
+                continue
+            effect_key = str(row.get("effectKey") or "")
+            name = _clean_game_ui_text(row.get("name"))
+            if effect_key and name and _contains_hangul(name):
+                labels.setdefault(effect_key, name)
+    return labels
 
 
 def _skill_effect_entry_from_row(row: Any) -> dict[str, Any]:
@@ -3803,7 +3860,12 @@ def _skill_effect_entry_from_row(row: Any) -> dict[str, Any]:
         return {}
     key = str(row.get("key") or "").strip()
     name = str(row.get("name") or "").strip()
-    effect_summary = str(row.get("effectSummary") or row.get("effects") or "").strip()
+    raw_effects = row.get("effects") or []
+    if isinstance(raw_effects, list):
+        effect_lines = [str(item).strip() for item in raw_effects if str(item).strip()]
+    else:
+        effect_lines = [str(raw_effects).strip()] if str(raw_effects).strip() else []
+    effect_summary = str(row.get("effectSummary") or " / ".join(effect_lines)).strip()
     if not key or not name:
         return {}
     aliases = row.get("aliases") or []
@@ -3819,6 +3881,9 @@ def _skill_effect_entry_from_row(row: Any) -> dict[str, Any]:
         "owner": str(row.get("owner") or "").strip(),
         "exclusive": bool(row.get("exclusive")),
         "aliases": [str(item).strip() for item in aliases if str(item).strip()],
+        "effects": effect_lines,
+        "effectRows": row.get("effectRows") if isinstance(row.get("effectRows"), list) else [],
+        "sourceKind": str(row.get("sourceKind") or "").strip(),
     }
 
 
@@ -3854,69 +3919,61 @@ def _skill_effect_lookup_keys(entry: dict[str, Any]) -> list[str]:
 
 
 def _catalog_skill_effect_info(*values: Any) -> dict[str, Any]:
-    by_key, _ = _load_skill_effect_catalog()
+    by_key, entries = _load_skill_effect_catalog()
     candidates: list[str] = []
     for value in values:
         candidates.extend(_skill_effect_lookup_variants(value))
+    selected: dict[str, Any] = {}
     for candidate in candidates:
         if candidate in by_key:
-            return by_key[candidate]
-    for lookup_key in sorted(by_key, key=len, reverse=True):
-        if any(lookup_key in candidate for candidate in candidates):
-            return by_key[lookup_key]
-    return {}
-
-
-def _manual_skill_effect_info(*values: Any) -> dict[str, str]:
-    catalog = _catalog_skill_effect_info(*values)
-    if catalog:
-        return catalog
-    candidates: list[str] = []
-    for value in values:
-        normalized = _normalize_label_key(value)
-        if not normalized:
-            continue
-        candidates.append(normalized)
-        candidates.append(re.sub(r"^(?:3k_(?:main|dlc\d+|mtu)_)?(?:character_)?(?:skill|skills|ability)_", "", normalized))
-        candidates.append(re.sub(r"^(?:3k_(?:main|dlc\d+|mtu)_)?(?:skill_node|skill_nodes|character_skill_node)_", "", normalized))
-    for candidate in candidates:
-        if candidate in _MANUAL_SKILL_EFFECTS:
-            return _MANUAL_SKILL_EFFECTS[candidate]
-    for key in sorted(_MANUAL_SKILL_EFFECTS, key=len, reverse=True):
-        if any(key in candidate for candidate in candidates):
-            return _MANUAL_SKILL_EFFECTS[key]
-    return {}
+            selected = by_key[candidate]
+            break
+    if not selected:
+        for lookup_key in sorted(by_key, key=len, reverse=True):
+            if any(lookup_key in candidate for candidate in candidates):
+                selected = by_key[lookup_key]
+                break
+    return selected
 
 
 def _add_catalog_skill_index_entries(skill_index: dict[str, dict[str, Any]]) -> None:
-    _, entries = _load_skill_effect_catalog()
-    for entry in entries:
-        key = str(entry.get("key") or "")
-        if not key:
+    # The catalog is descriptive metadata, not a DB source.  Older builds added
+    # every catalog key as a selectable skill even when the key did not exist in
+    # character_skill_nodes/character_skill_level_to_effects_junctions.  Writing
+    # one of those synthetic keys into a cloned node produced a skill with none
+    # of its required DB relations and could crash campaigns with several
+    # generated characters.
+    #
+    # Only enrich skills that were discovered from real source rows.  This keeps
+    # the Korean names/effect summaries while guaranteeing that every UI choice
+    # has an actual DB key behind it.
+    for key, existing in skill_index.items():
+        entry = _catalog_skill_effect_info(key, existing.get("name"))
+        if not entry:
             continue
-        existing = skill_index.get(key)
-        if existing:
-            for field in ("name", "description", "effectSummary", "element", "source", "owner"):
-                if entry.get(field) and not existing.get(field):
-                    existing[field] = entry[field]
-            existing["exclusive"] = bool(existing.get("exclusive") or entry.get("exclusive"))
-            continue
-        description_parts = [entry.get("source") or ""]
-        if entry.get("owner"):
-            description_parts.append(f"{entry['owner']} 전용" if entry.get("exclusive") else str(entry["owner"]))
-        skill_index[key] = {
-            "key": key,
-            "name": entry.get("name") or _friendly_skill_key(key),
-            "description": " · ".join(part for part in description_parts if part),
-            "effects": [],
-            "effectSummary": entry.get("effectSummary") or "",
-            "element": entry.get("element") or _skill_element(key),
-            "source": entry.get("source") or "",
-            "owner": entry.get("owner") or "",
-            "exclusive": bool(entry.get("exclusive")),
-            "manualCatalog": True,
-            "sources": [],
-        }
+        for field in ("name", "description", "effectSummary", "element", "source", "owner"):
+            incoming = entry.get(field)
+            current = existing.get(field)
+            if incoming and (
+                not current
+                or (
+                    field in {"name", "description", "effectSummary"}
+                    and _contains_hangul(str(incoming))
+                    and not _contains_hangul(str(current))
+                )
+                or (
+                    field == "effectSummary"
+                    and _has_raw_english_effect_name(current)
+                    and not _has_raw_english_effect_name(incoming)
+                )
+            ):
+                existing[field] = incoming
+        if entry.get("effectRows") and not existing.get("effectRows"):
+            existing["effectRows"] = entry["effectRows"]
+        if entry.get("sourceKind") and not existing.get("effectDataSource"):
+            existing["effectDataSource"] = entry["sourceKind"]
+        existing["exclusive"] = bool(existing.get("exclusive") or entry.get("exclusive"))
+        existing["catalogMetadata"] = True
 
 
 def _label_tokens(value: Any) -> list[str]:
@@ -4164,7 +4221,13 @@ def _effect_label(key: str, row: dict[str, Any], loc_text: dict[str, str]) -> st
             label = _clean_game_ui_text(loc_text[loc_key])
             if _contains_hangul(label):
                 return label
+            catalog_label = _catalog_effect_label(key)
+            if catalog_label:
+                return catalog_label
             return _clean_game_ui_text(_localized_label(label, key, context="effect", loc_text=loc_text))
+    catalog_label = _catalog_effect_label(key)
+    if catalog_label:
+        return catalog_label
     for field in ("description", "onscreen_name", "name", "icon"):
         value = row.get(field)
         if value and loc_text.get(str(value)):
@@ -4215,6 +4278,10 @@ def _effect_summary(effects: list[dict[str, Any]]) -> str:
         return "효과 정보 없음"
     pieces = []
     for effect in useful_effects[:4]:
+        ability_summary = _clean_game_ui_text(effect.get("abilitySummary"))
+        if ability_summary:
+            pieces.append(ability_summary)
+            continue
         label = _visible_effect_label(effect)
         value = effect.get("value")
         suffix = f" {value:+g}" if isinstance(value, (int, float)) else f" {value}" if value not in {None, ""} else ""
@@ -4222,6 +4289,375 @@ def _effect_summary(effects: list[dict[str, Any]]) -> str:
     if len(useful_effects) > 4:
         pieces.append(f"외 {len(useful_effects) - 4}개")
     return " · ".join(pieces)
+
+
+_MATERIAL_ABILITY_STAT_LABELS = {
+    "scalar_charge_speed": "돌격 속도",
+    "scalar_speed": "이동 속도",
+    "stat_melee_attack_interval": "근접 공격 간격",
+    "stat_morale": "사기",
+    "stat_melee_defence": "근접 방어",
+    "stat_spotting_forest": "숲 탐지 거리",
+    "stat_spotting_range_min_modifier": "최소 탐지 거리",
+    "stat_spotting_scrub": "관목 탐지 거리",
+    "stat_visibility_sight": "시야 거리",
+    "stat_melee_damage_ap": "관통 무기 피해",
+    "stat_melee_damage_base": "일반 무기 피해",
+}
+
+_MATERIAL_ABILITY_PERCENT_MULTIPLIERS = {
+    "scalar_charge_speed",
+    "scalar_speed",
+}
+
+
+def _material_ability_effect_summaries(
+    tables: dict[str, list[dict[str, Any]]],
+    loc_text: dict[str, str],
+) -> dict[str, str]:
+    grants = [
+        row
+        for row in tables.get("effect_bonus_value_unit_ability_junctions", [])
+        if str(row.get("bonus_value_id") or "").lower() == "enable"
+        and row.get("effect")
+        and row.get("unit_ability")
+    ]
+    if not grants:
+        return {}
+
+    ability_rows = _preferred_material_rows(tables.get("unit_abilities", []), "key")
+    special_rows = _preferred_material_rows(tables.get("unit_special_abilities", []), "key")
+    phase_rows = _preferred_material_rows(tables.get("special_ability_phases", []), "id")
+
+    phase_links: dict[str, list[tuple[int, str]]] = {}
+    seen_phase_links: set[tuple[str, str]] = set()
+    for row in sorted(
+        tables.get("special_ability_to_special_ability_phase_junctions", []),
+        key=lambda item: (_catalog_source_rank(item), _number_or_zero(item.get("order"))),
+        reverse=True,
+    ):
+        ability_key = str(row.get("special_ability") or "")
+        phase_key = str(row.get("phase") or "")
+        identity = (ability_key, phase_key)
+        if not ability_key or not phase_key or identity in seen_phase_links:
+            continue
+        seen_phase_links.add(identity)
+        phase_links.setdefault(ability_key, []).append(
+            (int(_number_or_zero(row.get("order"))), phase_key)
+        )
+
+    stat_rows_by_phase = _material_rows_by_field(
+        tables.get("special_ability_phase_stat_effects", []),
+        "phase",
+        ("phase", "stat", "how", "value"),
+    )
+    attribute_rows_by_phase = _material_rows_by_field(
+        tables.get("special_ability_phase_attribute_effects", []),
+        "phase",
+        ("phase", "attribute", "attribute_type"),
+    )
+
+    summaries_by_ability: dict[str, str] = {}
+    for ability_key in sorted({str(row.get("unit_ability") or "") for row in grants}):
+        phases = [
+            phase_rows[phase_key]
+            for _, phase_key in sorted(phase_links.get(ability_key, []))
+            if phase_key in phase_rows
+        ]
+        summaries_by_ability[ability_key] = _material_ability_summary(
+            ability_key,
+            ability_rows.get(ability_key, {}),
+            special_rows.get(ability_key, {}),
+            phases,
+            stat_rows_by_phase,
+            attribute_rows_by_phase,
+            loc_text,
+        )
+
+    result: dict[str, str] = {}
+    for row in grants:
+        effect_key = str(row.get("effect") or "")
+        ability_key = str(row.get("unit_ability") or "")
+        summary = summaries_by_ability.get(ability_key, "")
+        if effect_key and summary:
+            result[effect_key] = summary
+    return result
+
+
+def _preferred_material_rows(
+    rows: list[dict[str, Any]],
+    key_field: str,
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for row in sorted(rows, key=_catalog_source_rank):
+        key = str(row.get(key_field) or "")
+        if key:
+            result[key] = row
+    return result
+
+
+def _material_rows_by_field(
+    rows: list[dict[str, Any]],
+    group_field: str,
+    identity_fields: tuple[str, ...],
+) -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
+    seen: set[tuple[Any, ...]] = set()
+    for row in sorted(rows, key=_catalog_source_rank, reverse=True):
+        group = str(row.get(group_field) or "")
+        identity = tuple(row.get(field) for field in identity_fields)
+        if not group or identity in seen:
+            continue
+        seen.add(identity)
+        result.setdefault(group, []).append(row)
+    return result
+
+
+def _material_ability_summary(
+    ability_key: str,
+    ability_row: dict[str, Any],
+    special_row: dict[str, Any],
+    phases: list[dict[str, Any]],
+    stat_rows_by_phase: dict[str, list[dict[str, Any]]],
+    attribute_rows_by_phase: dict[str, list[dict[str, Any]]],
+    loc_text: dict[str, str],
+) -> str:
+    name = _first_localized_text(
+        loc_text,
+        (
+            f"unit_abilities_onscreen_name_{ability_key}",
+            f"unit_ability_types_localised_description_{ability_key}",
+        ),
+    ) or _friendly_effect_key(ability_key)
+    ability_type = _first_localized_text(
+        loc_text,
+        (f"unit_ability_types_onscreen_name_{ability_key}",),
+    ).replace("발동시", "발동 시")
+    if not ability_type:
+        ability_type = "상시 강화" if _truthy_value(special_row.get("passive")) else "발동 시 강화"
+
+    details: list[str] = []
+    if ability_type:
+        details.append(ability_type)
+    target = _material_ability_target_text(special_row)
+    if target:
+        details.append(target)
+
+    phase_details: list[str] = []
+    for index, phase in enumerate(phases, start=1):
+        phase_key = str(phase.get("id") or "")
+        mechanics = [
+            text
+            for text in (
+                *(
+                    _material_ability_stat_text(row, loc_text)
+                    for row in stat_rows_by_phase.get(phase_key, [])
+                ),
+                *(
+                    _material_ability_attribute_text(row, loc_text)
+                    for row in attribute_rows_by_phase.get(phase_key, [])
+                ),
+                *_material_phase_mechanics(phase),
+            )
+            if text
+        ]
+        mechanics = _dedupe_text(mechanics)
+        duration = _numeric_value(phase.get("duration"))
+        duration_text = (
+            f"{_format_ui_number(duration)}초"
+            if duration is not None and duration > 0
+            else ""
+        )
+        if len(phases) > 1:
+            heading = f"{index}단계"
+            if duration_text:
+                heading += f"({duration_text})"
+            phase_details.append(
+                f"{heading}: {', '.join(mechanics)}" if mechanics else heading
+            )
+        else:
+            if duration_text and not _truthy_value(special_row.get("passive")):
+                details.append(f"지속 {duration_text}")
+            phase_details.extend(mechanics)
+
+    details.extend(phase_details)
+    recharge = max(
+        [
+            value
+            for value in (
+                _numeric_value(special_row.get("recharge_time")),
+                *(_numeric_value(phase.get("recharge_time")) for phase in phases),
+            )
+            if value is not None and value > 0
+        ],
+        default=None,
+    )
+    if recharge is not None and not _truthy_value(special_row.get("passive")):
+        details.append(f"재사용 대기시간 {_format_ui_number(recharge)}초")
+    hp_cost = _numeric_value(special_row.get("hp_cost"))
+    if hp_cost is not None and hp_cost > 0:
+        suffix = "%" if _truthy_value(special_row.get("hp_cost_is_percentage")) else ""
+        details.append(f"체력 비용 {_format_ui_number(hp_cost)}{suffix}")
+
+    details = _dedupe_text(details)
+    summary = f"능력: {name}"
+    if details:
+        summary += " — " + " · ".join(details)
+    return summary
+
+
+def _material_ability_stat_text(
+    row: dict[str, Any],
+    loc_text: dict[str, str],
+) -> str:
+    stat_key = str(row.get("stat") or "")
+    value = _numeric_value(row.get("value"))
+    if not stat_key or value is None:
+        return ""
+    label = _MATERIAL_ABILITY_STAT_LABELS.get(stat_key) or _first_localized_text(
+        loc_text,
+        (
+            f"unit_stat_localisations_onscreen_name_{stat_key}",
+            f"unit_stat_localisations_abbreviated_name_{stat_key}",
+        ),
+    )
+    if not label:
+        label = _friendly_effect_key(stat_key)
+    how = str(row.get("how") or "").lower()
+    if how == "mult":
+        if stat_key in _MATERIAL_ABILITY_PERCENT_MULTIPLIERS:
+            percent = (value - 1.0) * 100.0
+            return f"{label} {_format_signed_ui_number(percent)}%"
+        return f"{label} ×{_format_ui_number(value)}"
+    return f"{label} {_format_signed_ui_number(value)}"
+
+
+def _material_ability_attribute_text(
+    row: dict[str, Any],
+    loc_text: dict[str, str],
+) -> str:
+    attribute = str(row.get("attribute") or "")
+    if not attribute:
+        return ""
+    label = _first_localized_text(
+        loc_text,
+        (
+            f"unit_attributes_imued_effect_text_{attribute}",
+            f"unit_attributes_bullet_text_{attribute}",
+        ),
+    ) or _friendly_effect_key(attribute)
+    if str(row.get("attribute_type") or "").lower() == "negative":
+        return f"{label} 제거"
+    return label
+
+
+def _material_phase_mechanics(phase: dict[str, Any]) -> list[str]:
+    result: list[str] = []
+    fatigue = _numeric_value(phase.get("fatigue_change_ratio"))
+    if fatigue not in (None, 0):
+        result.append(f"피로 변화 {_format_signed_ui_number(fatigue)}")
+    damage = _numeric_value(phase.get("damage_amount"))
+    if damage not in (None, 0):
+        result.append(f"피해 {_format_signed_ui_number(damage)}")
+    heal = _numeric_value(phase.get("heal_amount"))
+    if heal not in (None, 0):
+        result.append(f"회복량 {_format_signed_ui_number(heal)}")
+    if _truthy_value(phase.get("unbreakable")):
+        result.append("불굴")
+    if _truthy_value(phase.get("cant_move")):
+        result.append("이동 불가")
+    if _truthy_value(phase.get("freeze_fatigue")):
+        result.append("피로 고정")
+    return result
+
+
+def _material_ability_target_text(special_row: dict[str, Any]) -> str:
+    if not special_row:
+        return ""
+    effect_range = _numeric_value(special_row.get("effect_range"))
+    if effect_range is None or effect_range <= 0:
+        effect_range = _numeric_value(special_row.get("target_intercept_range"))
+    range_text = (
+        f"{_format_ui_number(effect_range)}m"
+        if effect_range is not None and effect_range > 0
+        else ""
+    )
+    affect_self = _truthy_value(special_row.get("affect_self"))
+    target_friends = _truthy_value(special_row.get("target_friends"))
+    friendly_count = _numeric_value(special_row.get("num_effected_friendly_units"))
+    if target_friends:
+        count = (
+            f" {int(friendly_count)}개 부대"
+            if friendly_count is not None and friendly_count > 0
+            else ""
+        )
+        within = f" ({range_text} 이내)" if range_text else ""
+        return f"지정 아군{count}{within}"
+    affects_friendlies = friendly_count is not None and friendly_count != 0
+    if range_text and affects_friendlies:
+        return (
+            f"자신 및 반경 {range_text} 내 아군"
+            if affect_self
+            else f"반경 {range_text} 내 아군"
+        )
+    if affect_self:
+        return "자신"
+    return ""
+
+
+def _first_localized_text(
+    loc_text: dict[str, str],
+    keys: tuple[str, ...],
+) -> str:
+    for key in keys:
+        value = _clean_game_ui_text(loc_text.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _number_or_zero(value: Any) -> float:
+    return _numeric_value(value) or 0.0
+
+
+def _numeric_value(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _truthy_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _format_ui_number(value: float) -> str:
+    return f"{value:g}"
+
+
+def _format_signed_ui_number(value: float) -> str:
+    return f"{value:+g}"
+
+
+def _dedupe_text(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        clean = _clean_game_ui_text(value)
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        result.append(clean)
+    return result
 
 
 def _clean_game_ui_text(value: Any) -> str:
@@ -6293,6 +6729,54 @@ def _reference_pack_paths(payload: dict[str, Any]) -> list[Path]:
     if not paths and core_reference.is_file():
         paths.append(core_reference)
     paths.extend(default_game_local_pack_paths())
+    paths = _dedupe_paths(paths)
+    return [
+        path
+        for _, path in sorted(
+            enumerate(paths),
+            key=lambda item: (_reference_pack_priority(item[1]), item[0]),
+        )
+    ]
+
+
+def _build_reference_pack_paths(
+    payload: dict[str, Any],
+    recipe: Recipe,
+) -> list[Path]:
+    paths = _reference_pack_paths(payload)
+    if not any(
+        any(
+            int(value)
+            for value in (
+                clone.armour_bonus,
+                clone.melee_attack_bonus,
+                clone.melee_damage_bonus,
+                clone.ap_melee_damage_bonus,
+                clone.charge_bonus,
+                clone.missile_defence_bonus,
+            )
+        )
+        for clone in recipe.skill_set_clones
+    ):
+        return paths
+    if any(path.name.lower() == "database.pack" for path in paths):
+        return paths
+
+    candidates: list[Path] = []
+    input_path = payload.get("inputPath")
+    if input_path:
+        try:
+            candidates.append(_resolve_user_path(input_path).parent / "database.pack")
+        except (OSError, ValueError):
+            pass
+    candidates.extend(root / "database.pack" for root in DEFAULT_GAME_DATA_DIRS)
+    database_path = next((path.resolve() for path in candidates if path.is_file()), None)
+    if database_path is None:
+        raise ValueError(
+            "방어력 보정 스킬을 생성할 바닐라 database.pack을 찾지 못했습니다. "
+            "게임 data 폴더의 database.pack 경로를 참조 pack 목록에 추가해주세요."
+        )
+    paths.append(database_path)
     paths = _dedupe_paths(paths)
     return [
         path

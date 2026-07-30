@@ -215,11 +215,23 @@ class RecipeFromDictTest(unittest.TestCase):
                 "replacements": [
                     {"nodeKey": "node_a", "skillKey": "skill_b"},
                 ],
+                "armourBonus": 1,
+                "meleeAttackBonus": 2,
+                "meleeDamageBonus": 3,
+                "apMeleeDamageBonus": 4,
+                "chargeBonus": 5,
+                "missileDefenceBonus": 6,
             }]
         })
         clone = recipe.skill_set_clones[0]
         self.assertEqual(clone.new_set_key, "hby_new_set")
         self.assertEqual(clone.replacements, {"node_a": "skill_b"})
+        self.assertEqual(clone.armour_bonus, 1)
+        self.assertEqual(clone.melee_attack_bonus, 2)
+        self.assertEqual(clone.melee_damage_bonus, 3)
+        self.assertEqual(clone.ap_melee_damage_bonus, 4)
+        self.assertEqual(clone.charge_bonus, 5)
+        self.assertEqual(clone.missile_defence_bonus, 6)
 
     def test_skill_set_clone_skips_empty_node_keys(self) -> None:
         recipe = recipe_from_dict({
@@ -279,6 +291,38 @@ class RecipeFromDictTest(unittest.TestCase):
         })
         clone = recipe.character_clones[0]
         self.assertEqual(clone.detail_source_template_key, "src_template")
+
+    def test_character_armour_adjustment_accepts_the_bonus_directly(self) -> None:
+        recipe = recipe_from_dict({
+            "characterCloneRecipes": [{
+                "newTemplateKey": "hby_template",
+                "sourceTemplateKey": "src_template",
+                "detailOverrides": {},
+                "dedicatedArmour": {
+                    "sourceCeoKey": "source_armour",
+                    "sourceInitialCeoKey": "source_initial",
+                    "sourceArmourTypeKey": "source_armour_type",
+                    "sourceArmourValue": 45,
+                    "armourBonus": -12,
+                    "meleeAttackBonus": 7,
+                    "meleeDamageBonus": 8,
+                    "apMeleeDamageBonus": 9,
+                    "chargeBonus": 10,
+                    "missileDefenceBonus": 11,
+                },
+            }],
+        })
+
+        adjustment = recipe.character_clones[0].dedicated_armour
+        self.assertIsNotNone(adjustment)
+        assert adjustment is not None
+        self.assertEqual(adjustment.source_armour_value, 45)
+        self.assertEqual(adjustment.armour_value, 33)
+        self.assertEqual(adjustment.melee_attack_bonus, 7)
+        self.assertEqual(adjustment.melee_damage_bonus, 8)
+        self.assertEqual(adjustment.ap_melee_damage_bonus, 9)
+        self.assertEqual(adjustment.charge_bonus, 10)
+        self.assertEqual(adjustment.missile_defence_bonus, 11)
 
     def test_character_patch_is_parsed(self) -> None:
         recipe = recipe_from_dict({

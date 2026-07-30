@@ -98,6 +98,7 @@ REQUIRED_TABLE_FOLDERS = {
     "character_generation_spawn_age_ranges_tables",
     "character_generation_template_game_mode_details_tables",
     "character_generation_templates_tables",
+    "character_skills_tables",
     "character_skill_level_to_effects_junctions_tables",
     "character_skill_node_links_tables",
     "character_skill_node_sets_tables",

@@ -132,8 +132,7 @@ def validate_character_clone(session: PackSession, clone: CharacterClone) -> Non
         )
         if clone.new_initial_ceo_key and clone.new_initial_ceo_key != source_ceo:
             raise ValueError(
-                "Creating new initial CEO keys is not supported because "
-                "`ceo_initial_datas` is a key-only table. "
+                "Creating new initial CEO keys is not supported. "
                 f"requested={clone.new_initial_ceo_key}, source={source_ceo}"
             )
 
@@ -323,8 +322,7 @@ def apply_character_clones(session: PackSession, clones: list[CharacterClone]) -
             if raw_initial_ceo:
                 if clone.new_initial_ceo_key and clone.new_initial_ceo_key != raw_initial_ceo:
                     raise ValueError(
-                        "Creating new initial CEO keys is not supported because "
-                        "`ceo_initial_datas` is a key-only table. "
+                        "Creating new initial CEO keys is not supported. "
                         f"requested={clone.new_initial_ceo_key}, source={raw_initial_ceo}"
                     )
                 compatible_initial_ceo = _clone_initial_ceo_key(

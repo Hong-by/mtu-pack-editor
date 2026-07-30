@@ -825,7 +825,47 @@ function syncEquipmentSummary(prefix, sourceId) {
   const character = characters().find((item) => item.key === $(sourceId).value);
   if (!character) return;
   $(`${prefix}EquipmentSummary`).innerHTML = equipmentSummaryMarkup(character, prefix);
+  if (prefix === 'source') syncDedicatedArmourControls(character);
   renderValidation();
+}
+
+function syncDedicatedArmourControls(character) {
+  const toggle = $('sourceDedicatedArmourEnabled');
+  const bonusInputs = [
+    ['sourceDedicatedArmourValue', '방어력'],
+  ];
+  const statusNode = $('sourceDedicatedArmourStatus');
+  if (!toggle || !statusNode) return;
+  const resolvedInputs = bonusInputs
+    .map(([id, label]) => [$(id), label])
+    .filter(([input]) => input);
+
+  const slot = availableDedicatedArmourSlot(character);
+  const hasSourceData = Boolean(
+    character?.armourCeo
+    && character?.armourStatKey
+    && characterInitialCeoKey(character)
+    && Number.isFinite(Number(character?.baseDefense))
+  );
+  const available = Boolean(slot && hasSourceData);
+  toggle.disabled = !available;
+  if (!available) toggle.checked = false;
+  for (const [input] of resolvedInputs) {
+    input.disabled = !available || !toggle.checked;
+    if (input.value === '') input.value = 0;
+  }
+  if (!hasSourceData || !slot) {
+    statusNode.textContent = '선택한 장수의 기존 갑옷과 기본 방어력을 확인할 수 없습니다.';
+  } else {
+    const summary = resolvedInputs
+      .map(([input, label]) => {
+        const value = Number(input.value);
+        const bonus = Number.isFinite(value) ? value : 0;
+        return `${label} ${bonus >= 0 ? '+' : ''}${bonus}`;
+      })
+      .join(' · ');
+    statusNode.textContent = `기존 장비 유지 · 숨김 장수 효과 · ${summary}`;
+  }
 }
 
 function syncUnitSummary(prefix, sourceId) {

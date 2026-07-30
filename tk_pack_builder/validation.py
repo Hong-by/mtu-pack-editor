@@ -227,6 +227,7 @@ def has_errors(messages: list[ValidationMessage]) -> bool:
 
 def allow_reference_backed_clone_sources(messages: list[ValidationMessage]) -> list[ValidationMessage]:
     allowed_fragments = (
+        "Source character template not found:",
         "Source initial CEO not found:",
         "Source age range not found:",
         "Source character art rows not found:",

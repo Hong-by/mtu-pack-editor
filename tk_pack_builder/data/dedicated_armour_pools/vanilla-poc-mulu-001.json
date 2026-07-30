@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "poolId": "vanilla-poc-mulu-001",
+  "label": "Vanilla dedicated armour POC (Mulu source)",
+  "baseCcdSha256": "bef28b7802dfdc91899aebe846863bd001dab64cc4e8a1294004278570311345",
+  "compiledCcdSha256": "b9a7bcb5d446e65e5e877509e4df8f91c2372ba87f623adbfa616641ec036827",
+  "ccdFile": "vanilla-poc-mulu-001.ccd",
+  "slots": [
+    {
+      "slotId": "slot-001",
+      "sourceCeoKey": "3k_dlc06_ancillary_armour_nanman_king_mulu_unique",
+      "sourceInitialCeoKey": "3k_dlc06_initial_data_character_historical_nanman_king_mulu",
+      "sourceArmourTypeKey": "3k_dlc06_hero_medium_nanman_unique",
+      "armourCeoKey": "hby_poc_ancillary_armour_mulu_dedicated_001",
+      "initialCeoKey": "hby_poc_ceo_initial_data_character_mulu_dedicated_001",
+      "armourTypeKey": "hby_poc_armour_mulu_dedicated_001"
+    }
+  ]
+}

@@ -11,6 +11,14 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tk_pack_builder.rpfm_runtime import (
+    ensure_rpfm_config_redirect,
+    rpfm_process_environment,
+)
+
 DEFAULT_RPFM_SERVER = (
     ROOT / "work" / "rpfm-dist" / "rpfm_server.exe"
     if os.name == "nt"
@@ -99,13 +107,14 @@ def start_rpfm(binary: Path, host: str, port: int) -> subprocess.Popen[bytes]:
         raise SystemExit(
             f"RPFM server binary not found: {binary}\n"
             "Build it first from work/rpfm-master, or pass --rpfm-server."
-    )
-    redirect_root = ROOT / "work" / "rpfm-runtime-config"
-    redirect_root.mkdir(parents=True, exist_ok=True)
-    redirect_path = redirect_root / f"config-{int(time.time() * 1000)}"
-    (binary.parent / "config_folder.txt").write_text(str(redirect_path), encoding="utf-8")
+        )
+    ensure_rpfm_config_redirect(ROOT)
     print(f"Starting RPFM server: {binary}")
-    return subprocess.Popen([str(binary)], cwd=binary.parent)
+    return subprocess.Popen(
+        [str(binary)],
+        cwd=binary.parent,
+        env=rpfm_process_environment(ROOT),
+    )
 
 
 def stop_stale_rpfm_processes(process_name: str) -> None:

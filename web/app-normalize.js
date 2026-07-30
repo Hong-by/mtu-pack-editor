@@ -4,6 +4,7 @@ function hydrateFromPackData(characterData, responseEnvelope = {}) {
   const summary = characterData?.pack;
   if (!summary?.characters?.length) return;
   state.options = summary;
+  state.dedicatedArmour = responseEnvelope.dedicatedArmour || null;
   state.characters = summary.characters.map((item) => normalizePackCharacter(item, summary));
   bumpDataVersion();
   state.assetCacheVersion = responseEnvelope.assetCacheToken
@@ -12,7 +13,6 @@ function hydrateFromPackData(characterData, responseEnvelope = {}) {
     || `data-${state.dataVersion}`;
   const firstBrowsable = browsableCharacters()[0] || selectableFallbackCharacters()[0] || state.characters.find(hasRealTemplateRow);
   state.selectedKey = realTemplateKey(firstBrowsable) || '';
-  state.queue = [];
   state.editingQueueIndex = null;
   state.skillTreeDrafts = {};
   state.activeSkillNode = null;

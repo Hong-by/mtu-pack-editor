@@ -39,7 +39,7 @@ def main() -> None:
     parser.add_argument(
         "--eligible-only",
         action="store_true",
-        help="Print only rows with one removable set_body slot and an explicit body model.",
+        help="Print only rows whose baked geometry can render without set_body injection.",
     )
     args = parser.parse_args()
 
@@ -87,6 +87,34 @@ def main() -> None:
                 text,
                 re.I,
             ))
+            model_count = len(re.findall(
+                r"<VARIANT_MESH\b[^>]*\bmodel\s*=",
+                text,
+                re.I,
+            ))
+            has_head = bool(re.search(
+                r'<SLOT\s+name=["\']head["\'][^>]*>\s*<VARIANT_MESH\b[^>]*\bmodel\s*=',
+                text,
+                re.I,
+            ))
+            has_torso = bool(re.search(
+                r'<SLOT\s+name=["\'](?:chest_armour|tunic_top|tunic_bottom|collar)["\'][^>]*>'
+                r'\s*<VARIANT_MESH\b[^>]*\bmodel\s*=',
+                text,
+                re.I,
+            ))
+            already_independent = set_body_slots == 0 and model_count > 0
+            removable_injection = (
+                set_body_slots == 1
+                and (
+                    explicit_body_models > 0
+                    or (has_head and has_torso)
+                )
+            )
+            eligible = bool(
+                entry is not None
+                and (already_independent or removable_injection)
+            )
             rows.append({
                 "template": template_key,
                 "isMale": bool(template.get("is_male")),
@@ -98,7 +126,15 @@ def main() -> None:
                 "vmdFound": entry is not None,
                 "setBodySlots": set_body_slots,
                 "explicitBodyModels": explicit_body_models,
-                "eligible": bool(entry is not None and set_body_slots == 1 and explicit_body_models > 0),
+                "modelCount": model_count,
+                "freezeMode": (
+                    "already-independent"
+                    if already_independent
+                    else "remove-set-body"
+                    if removable_injection
+                    else ""
+                ),
+                "eligible": eligible,
             })
 
     output_rows = [row for row in rows if row["eligible"]] if args.eligible_only else rows

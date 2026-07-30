@@ -37,6 +37,12 @@ function ceoSetDescription(kind, selection) {
   return selection?.label || ceoSetBaseLabel(kind);
 }
 
+function combatAdjustmentDescription(adjustment) {
+  if (!adjustment) return '';
+  const value = Number(adjustment.armourBonus || 0);
+  return `방어력 ${value >= 0 ? '+' : ''}${value}`;
+}
+
 function commitQueueItem(item) {
   const editingKind = currentQueueEditKind();
   if (editingKind === item.kind) {
@@ -49,6 +55,53 @@ function commitQueueItem(item) {
   setWorkView('queue');
   refreshStageButtons();
   renderValidation();
+}
+
+function syncQueuedDedicatedArmourFromEditor() {
+  const toggle = $('sourceDedicatedArmourEnabled');
+  const combatKey = $('sourceCombatProfile')?.value || '';
+  const baseKey = $('sourceBase')?.value || '';
+  if (!toggle || !combatKey) return;
+
+  const cloneIndexes = state.queue
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item?.kind === 'clone_character');
+  let targetIndex = (
+    state.editingQueueIndex !== null
+    && state.queue[state.editingQueueIndex]?.kind === 'clone_character'
+  )
+    ? state.editingQueueIndex
+    : null;
+
+  if (targetIndex === null) {
+    const exactMatches = cloneIndexes.filter(({ item }) => (
+      item?.payload?.sourceKeys?.combatProfile === combatKey
+      && (!baseKey || item?.payload?.sourceKeys?.base === baseKey)
+    ));
+    if (exactMatches.length === 1) {
+      targetIndex = exactMatches[0].index;
+    } else if (cloneIndexes.length === 1) {
+      targetIndex = cloneIndexes[0].index;
+    }
+  }
+
+  if (targetIndex === null) {
+    if (toggle.checked) {
+      throw new Error(
+        '방어력 보정값을 반영할 신규 장수 작업을 특정할 수 없습니다. '
+        + '작업 목록에서 대상 장수를 연 뒤 다시 저장해주세요.',
+      );
+    }
+    return;
+  }
+
+  const combat = characters().find((item) => item.key === combatKey);
+  const adjustment = toggle.checked ? dedicatedArmourSelection(combat) : null;
+  if (toggle.checked && !adjustment) {
+    throw new Error('전투 보정값은 각각 -500~500의 정수로 입력해주세요.');
+  }
+  state.queue[targetIndex].payload.dedicatedArmour = adjustment;
+  persistWorkQueue();
 }
 
 function clearEditorDraftState() {
@@ -172,6 +225,16 @@ function stageCreate() {
   const createBirthYear = birthYearFromInput('createAgeRange');
   if (rejectInvalidBirthYear(createBirthYear)) return;
   const createAgeRange = ageRangePatch(spawnAgeSourceKey, createBirthYear, createSlug, itemNumber);
+  const dedicatedArmour = dedicatedArmourSelection(combat);
+  if ($('sourceDedicatedArmourEnabled').checked && !dedicatedArmour) {
+    state.serverMessages = [validationItem(
+      'error',
+      '전투 보정 설정 실패',
+      '기준 갑옷 연결과 각 보정치(-500~500 정수)를 확인해주세요.',
+    )];
+    renderValidation();
+    return;
+  }
   const unitStatClone = null;
   const payload = {
     newName: $('createName').value.trim(),
@@ -192,6 +255,7 @@ function stageCreate() {
     attributeSetClone,
     equipmentSet,
     defaultEquipmentCeos: defaultCharacterEquipmentCeos(combat, equipmentSet),
+    dedicatedArmour,
     unitStatClone,
     spawn: {
       ageRange: createAgeRange?.newKey || spawnAgeSourceKey,
@@ -210,12 +274,13 @@ function stageCreate() {
     kind: 'clone_character',
     type: '신규 생성',
     title: `${$('createName').value || '새 장수'} 생성`,
-    description: `기본 ${base?.name || '-'} · 원본 성별 ${genderLabel(characterGenderKey(base))} · 칭호 ${titleSource?.titleName || titleSource?.name || '-'} · 트레잇 ${ceoSetDescription('trait', traitSet)} · 이미지 ${imageSet?.name || '-'} · 모델 고정(${base?.name || '-'}) · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 ${ceoSetDescription('equipment', equipmentSet)} · 장비 수치 참조(${equipmentBrief(combat)}) · 병종 ${unit?.name || '-'} · 스킬셋 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
+    description: `기본 ${base?.name || '-'} · 원본 성별 ${genderLabel(characterGenderKey(base))} · 칭호 ${titleSource?.titleName || titleSource?.name || '-'} · 트레잇 ${ceoSetDescription('trait', traitSet)} · 이미지 ${imageSet?.name || '-'} · 모델 고정(${base?.name || '-'}) · 능력치 ${attribute?.name || '-'}${attributePatchDescription(attributeSetClone)} · 장비 ${ceoSetDescription('equipment', equipmentSet)} · 장비 수치 참조(${equipmentBrief(combat)})${dedicatedArmour ? ` · 기존 장비 유지 · ${combatAdjustmentDescription(dedicatedArmour)}` : ''} · 병종 ${unit?.name || '-'} · 스킬셋 ${skill?.name || '-'} · 등장 ${spawn?.name || '-'} · 이벤트 ${spawnEvent.name}`,
     payload,
   });
 }
 
 function renderQueue() {
+  persistWorkQueue();
   $('queueCount').textContent = `${state.queue.length}개`;
   if ($('queueModeButton')) $('queueModeButton').textContent = `작업 목록 ${state.queue.length ? state.queue.length : ''}`.trim();
   $('workQueue').innerHTML = state.queue.length
@@ -393,6 +458,14 @@ function loadCloneQueueItem(item) {
   syncCeoSetSummary('source', 'equipment', 'sourceEquipmentSet');
   setSelectValue('sourceCombatProfile', payload.sourceKeys?.combatProfile);
   syncEquipmentSummary('source', 'sourceCombatProfile');
+  $('sourceDedicatedArmourEnabled').checked = Boolean(payload.dedicatedArmour);
+  $('sourceDedicatedArmourValue').value = payload.dedicatedArmour
+    ? (payload.dedicatedArmour.armourBonus
+      ?? Number(payload.dedicatedArmour.armourValue) - Number(payload.dedicatedArmour.sourceArmourValue))
+    : '';
+  syncDedicatedArmourControls(
+    characters().find((item) => item.key === $('sourceCombatProfile').value),
+  );
   setSelectValue('sourceUnitProfile', payload.sourceKeys?.unitProfile || payload.sourceKeys?.base);
   syncUnitSummary('source', 'sourceUnitProfile');
   applyLandUnitCloneToInputs('source', payload.unitStatClone);

@@ -94,6 +94,7 @@ function renderValidation() {
 }
 
 function previewRecipe() {
+  syncQueuedDedicatedArmourFromEditor();
   const actualRecipe = recipeFromQueue();
   state.lastRecipe = actualRecipe;
   const saveMode = $('saveModeSelect').value;
@@ -130,6 +131,7 @@ function materialBuildOptions(saveMode = $('saveModeSelect').value) {
 }
 
 function serverPayload() {
+  syncQueuedDedicatedArmourFromEditor();
   const saveMode = $('saveModeSelect').value;
   const inPlace = saveMode === 'in_place';
   const materialBuild = materialBuildOptions(saveMode);

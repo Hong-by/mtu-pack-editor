@@ -3,8 +3,16 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from tk_pack_builder.character_clone import apply_character_clones, apply_character_patches
-from tk_pack_builder.recipe import CharacterClone, CharacterPatch
+from tk_pack_builder.character_clone import (
+    apply_character_clones,
+    apply_character_patches,
+    validate_character_clone,
+)
+from tk_pack_builder.recipe import (
+    CharacterClone,
+    CharacterPatch,
+    DedicatedArmourAssignment,
+)
 
 
 class FakePackSession:
@@ -88,6 +96,54 @@ class CharacterCloneLegacyPathTest(unittest.TestCase):
         ]
         self.assertEqual({row["game_mode"] for row in details}, {"historical", "romance"})
         self.assertEqual({row["initial_ceos"] for row in details}, {"source_initial"})
+
+    def test_armour_adjustment_preserves_source_initial_ceo(self) -> None:
+        session = _legacy_character_session()
+        dedicated = DedicatedArmourAssignment(
+            pool_id="test-precompiled-pool",
+            slot_id="slot-001",
+            source_ceo_key="source_armour",
+            source_initial_ceo_key="source_initial",
+            source_armour_type_key="source_armour_type",
+            armour_ceo_key="hby_armour_001",
+            initial_ceo_key="hby_initial_001",
+            armour_type_key="hby_armour_type_001",
+            armour_value=88,
+        )
+        clone = CharacterClone(
+            new_template_key="hby_template_dedicated",
+            source_template_key="source_template",
+            detail_source_template_key="source_template",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=dedicated.source_initial_ceo_key,
+            template_overrides={},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            image_assets=[],
+            dedicated_armour=dedicated,
+        )
+
+        validate_character_clone(session, clone)
+        apply_character_clones(session, [clone])
+
+        details = [
+            row
+            for row in session.read_table(
+                "db/character_generation_template_game_mode_details_tables/_mtu_characters"
+            )
+            if row["character_generation_template"] == clone.new_template_key
+        ]
+        self.assertEqual({row["game_mode"] for row in details}, {"historical", "romance"})
+        self.assertEqual(
+            {row["initial_ceos"] for row in details},
+            {dedicated.source_initial_ceo_key},
+        )
 
     def test_apply_character_patches_fills_missing_romance_detail(self) -> None:
         session = _legacy_character_session()

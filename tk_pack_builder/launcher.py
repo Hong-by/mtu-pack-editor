@@ -10,7 +10,11 @@ import time
 import webbrowser
 from pathlib import Path
 
-from tk_pack_builder.rpfm_runtime import resolve_rpfm_server
+from tk_pack_builder.rpfm_runtime import (
+    prepare_rpfm_config_redirect,
+    resolve_rpfm_server,
+    rpfm_process_environment,
+)
 
 
 def main() -> int:
@@ -25,6 +29,12 @@ def main() -> int:
 
     root = _app_root()
     os.environ["TK_PACK_EDITOR_ROOT"] = str(root)
+    url = f"http://{args.host}:{args.port}/"
+    if _port_open(args.host, args.port):
+        print(f"MTU Pack Editor is already running: {url}")
+        if not args.no_browser:
+            webbrowser.open(url)
+        return 0
 
     from tk_pack_builder.web import run_server
 
@@ -42,7 +52,6 @@ def main() -> int:
             thread.start()
 
         _wait_for_port(args.host, args.port, "Web UI")
-        url = f"http://{args.host}:{args.port}/"
         print(f"MTU Pack Editor ready: {url}")
         if not args.no_browser:
             webbrowser.open(url)
@@ -72,6 +81,7 @@ def _start_rpfm(root: Path) -> subprocess.Popen[bytes] | None:
     if not binary.is_file():
         print(f"RPFM server not bundled: {binary}")
         return None
+    prepare_rpfm_config_redirect(root, binary.parent)
     print(f"Starting RPFM server: {binary}")
     creationflags = 0
     if os.name == "nt":
@@ -79,6 +89,7 @@ def _start_rpfm(root: Path) -> subprocess.Popen[bytes] | None:
     return subprocess.Popen(
         [str(binary)],
         cwd=binary.parent,
+        env=rpfm_process_environment(root),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         creationflags=creationflags,

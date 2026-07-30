@@ -1,0 +1,311 @@
+{
+  "schemaVersion": 2,
+  "poolId": "korea-addon-dedicated-armour-032",
+  "label": "Korea Add-On dedicated armour slots (32)",
+  "mode": "precompiled",
+  "baseCcdSha256": "f78cabc40ae85b29183eda232a56ee252898363f0e907b9980f399ba6141cf8c",
+  "compiledCcdSha256": "73bae7229778d539e2594d4d85a1f85d43bb4ac718753d26c230e61c3e6a7c4f",
+  "ccdFile": "korea-addon-dedicated-armour-032.ccd",
+  "target": {
+    "kind": "pack",
+    "name": "!!190expande_korea_addon.pack",
+    "packedPath": "campaigns/ceo_data.ccd"
+  },
+  "assemblyKitDelta": {
+    "baseCcdSha256": "bef28b7802dfdc91899aebe846863bd001dab64cc4e8a1294004278570311345",
+    "augmentedCcdSha256": "e1700e8cbb1c0933d8315e7b2f64de96ecadee7b7f622647f8f0ef059284b426",
+    "groupsAdded": 352,
+    "stringValuesAdded": 128,
+    "arrayItemsAdded": 8
+  },
+  "slots": [
+    {
+      "slotId": "slot-001",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_001",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_001",
+      "armourTypeKey": "hby_mtu_armour_dedicated_001"
+    },
+    {
+      "slotId": "slot-002",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_002",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_002",
+      "armourTypeKey": "hby_mtu_armour_dedicated_002"
+    },
+    {
+      "slotId": "slot-003",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_003",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_003",
+      "armourTypeKey": "hby_mtu_armour_dedicated_003"
+    },
+    {
+      "slotId": "slot-004",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_004",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_004",
+      "armourTypeKey": "hby_mtu_armour_dedicated_004"
+    },
+    {
+      "slotId": "slot-005",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_005",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_005",
+      "armourTypeKey": "hby_mtu_armour_dedicated_005"
+    },
+    {
+      "slotId": "slot-006",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_006",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_006",
+      "armourTypeKey": "hby_mtu_armour_dedicated_006"
+    },
+    {
+      "slotId": "slot-007",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_007",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_007",
+      "armourTypeKey": "hby_mtu_armour_dedicated_007"
+    },
+    {
+      "slotId": "slot-008",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_008",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_008",
+      "armourTypeKey": "hby_mtu_armour_dedicated_008"
+    },
+    {
+      "slotId": "slot-009",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_009",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_009",
+      "armourTypeKey": "hby_mtu_armour_dedicated_009"
+    },
+    {
+      "slotId": "slot-010",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_010",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_010",
+      "armourTypeKey": "hby_mtu_armour_dedicated_010"
+    },
+    {
+      "slotId": "slot-011",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_011",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_011",
+      "armourTypeKey": "hby_mtu_armour_dedicated_011"
+    },
+    {
+      "slotId": "slot-012",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_012",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_012",
+      "armourTypeKey": "hby_mtu_armour_dedicated_012"
+    },
+    {
+      "slotId": "slot-013",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_013",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_013",
+      "armourTypeKey": "hby_mtu_armour_dedicated_013"
+    },
+    {
+      "slotId": "slot-014",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_014",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_014",
+      "armourTypeKey": "hby_mtu_armour_dedicated_014"
+    },
+    {
+      "slotId": "slot-015",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_015",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_015",
+      "armourTypeKey": "hby_mtu_armour_dedicated_015"
+    },
+    {
+      "slotId": "slot-016",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_016",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_016",
+      "armourTypeKey": "hby_mtu_armour_dedicated_016"
+    },
+    {
+      "slotId": "slot-017",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_017",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_017",
+      "armourTypeKey": "hby_mtu_armour_dedicated_017"
+    },
+    {
+      "slotId": "slot-018",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_018",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_018",
+      "armourTypeKey": "hby_mtu_armour_dedicated_018"
+    },
+    {
+      "slotId": "slot-019",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_019",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_019",
+      "armourTypeKey": "hby_mtu_armour_dedicated_019"
+    },
+    {
+      "slotId": "slot-020",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_020",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_020",
+      "armourTypeKey": "hby_mtu_armour_dedicated_020"
+    },
+    {
+      "slotId": "slot-021",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_021",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_021",
+      "armourTypeKey": "hby_mtu_armour_dedicated_021"
+    },
+    {
+      "slotId": "slot-022",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_022",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_022",
+      "armourTypeKey": "hby_mtu_armour_dedicated_022"
+    },
+    {
+      "slotId": "slot-023",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_023",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_023",
+      "armourTypeKey": "hby_mtu_armour_dedicated_023"
+    },
+    {
+      "slotId": "slot-024",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_024",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_024",
+      "armourTypeKey": "hby_mtu_armour_dedicated_024"
+    },
+    {
+      "slotId": "slot-025",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_025",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_025",
+      "armourTypeKey": "hby_mtu_armour_dedicated_025"
+    },
+    {
+      "slotId": "slot-026",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_026",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_026",
+      "armourTypeKey": "hby_mtu_armour_dedicated_026"
+    },
+    {
+      "slotId": "slot-027",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_027",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_027",
+      "armourTypeKey": "hby_mtu_armour_dedicated_027"
+    },
+    {
+      "slotId": "slot-028",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_028",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_028",
+      "armourTypeKey": "hby_mtu_armour_dedicated_028"
+    },
+    {
+      "slotId": "slot-029",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_029",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_029",
+      "armourTypeKey": "hby_mtu_armour_dedicated_029"
+    },
+    {
+      "slotId": "slot-030",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_030",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_030",
+      "armourTypeKey": "hby_mtu_armour_dedicated_030"
+    },
+    {
+      "slotId": "slot-031",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_031",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_031",
+      "armourTypeKey": "hby_mtu_armour_dedicated_031"
+    },
+    {
+      "slotId": "slot-032",
+      "sourceCeoKey": "*",
+      "sourceInitialCeoKey": "*",
+      "sourceArmourTypeKey": "*",
+      "armourCeoKey": "hby_mtu_ancillary_armour_dedicated_032",
+      "initialCeoKey": "hby_mtu_ceo_initial_data_character_dedicated_032",
+      "armourTypeKey": "hby_mtu_armour_dedicated_032"
+    }
+  ]
+}

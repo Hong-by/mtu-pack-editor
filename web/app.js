@@ -128,7 +128,20 @@ for (const button of document.querySelectorAll('[data-title-filter-prefix]')) {
   button.addEventListener('click', () => applyTitleFilter(button.dataset.titleFilterPrefix, button.dataset.titleFilter));
 }
 bind('editCombatProfile', 'change', () => syncEquipmentSummary('edit', 'editCombatProfile'));
-bind('sourceCombatProfile', 'change', () => syncEquipmentSummary('source', 'sourceCombatProfile'));
+bind('sourceCombatProfile', 'change', () => {
+  $('sourceDedicatedArmourValue').value = '';
+  syncEquipmentSummary('source', 'sourceCombatProfile');
+});
+bind('sourceDedicatedArmourEnabled', 'change', () => {
+  const character = characters().find((item) => item.key === $('sourceCombatProfile').value);
+  syncDedicatedArmourControls(character);
+  renderValidation();
+});
+bind('sourceDedicatedArmourValue', 'input', () => {
+  const character = characters().find((item) => item.key === $('sourceCombatProfile').value);
+  syncDedicatedArmourControls(character);
+  renderValidation();
+});
 bind('editEquipmentSet', 'change', () => syncCeoSetSummary('edit', 'equipment', 'editEquipmentSet'));
 bind('sourceEquipmentSet', 'change', () => syncCeoSetSummary('source', 'equipment', 'sourceEquipmentSet'));
 bind('editTraitSet', 'change', () => syncCeoSetSummary('edit', 'trait', 'editTraitSet'));
@@ -356,4 +369,5 @@ function bootstrapApp() {
   }
 }
 
+window.addEventListener('beforeunload', persistWorkQueue);
 bootstrapApp();

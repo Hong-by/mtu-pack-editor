@@ -65,14 +65,36 @@ function mergeSkillSetOverrides(detailOverrides, skillSource) {
 function skillSetCloneFromPayload(recipe, snapshot, ownerKey, index, options = {}) {
   const replacements = Object.entries(snapshot?.replacements || {})
     .filter(([, skillKey]) => skillKey);
-  if (!snapshot?.sourceSetKey || !replacements.length) return '';
-  const newSetKey = options.keepSourceKey
-    ? snapshot.sourceSetKey
-    : `hby_skillset_romance_${slugify(ownerKey)}_${index}`;
+  const armourBonus = Number(options.armourBonus || 0);
+  const meleeAttackBonus = Number(options.meleeAttackBonus || 0);
+  const meleeDamageBonus = Number(options.meleeDamageBonus || 0);
+  const apMeleeDamageBonus = Number(options.apMeleeDamageBonus || 0);
+  const chargeBonus = Number(options.chargeBonus || 0);
+  const missileDefenceBonus = Number(options.missileDefenceBonus || 0);
+  const hasCombatBonuses = Boolean(
+    armourBonus
+    || meleeAttackBonus
+    || meleeDamageBonus
+    || apMeleeDamageBonus
+    || chargeBonus
+    || missileDefenceBonus
+  );
+  if (!snapshot?.sourceSetKey || (!replacements.length && !hasCombatBonuses)) return '';
+  const newSetKey = options.newSetKey || (
+    options.keepSourceKey
+      ? snapshot.sourceSetKey
+      : `hby_skillset_romance_${slugify(ownerKey)}_${index}`
+  );
   recipe.skillSetClones.push({
     sourceSetKey: snapshot.sourceSetKey,
     newSetKey,
     replacements: replacements.map(([nodeKey, skillKey]) => ({ nodeKey, skillKey })),
+    armourBonus,
+    meleeAttackBonus,
+    meleeDamageBonus,
+    apMeleeDamageBonus,
+    chargeBonus,
+    missileDefenceBonus,
   });
   return newSetKey;
 }
@@ -480,6 +502,21 @@ function recipeFromQueue() {
         })
         : {};
       const finalTemplateGender = baseTemplate.is_male;
+      const legacyArmourBonus = payload.dedicatedArmour
+        ? Number(payload.dedicatedArmour.armourValue) - Number(payload.dedicatedArmour.sourceArmourValue)
+        : 0;
+      const armourBonus = payload.dedicatedArmour
+        ? Number(payload.dedicatedArmour.armourBonus ?? legacyArmourBonus)
+        : 0;
+      const combatBonuses = {
+        armourBonus,
+        meleeAttackBonus: Number(payload.dedicatedArmour?.meleeAttackBonus || 0),
+        meleeDamageBonus: Number(payload.dedicatedArmour?.meleeDamageBonus || 0),
+        apMeleeDamageBonus: Number(payload.dedicatedArmour?.apMeleeDamageBonus || 0),
+        chargeBonus: Number(payload.dedicatedArmour?.chargeBonus || 0),
+        missileDefenceBonus: Number(payload.dedicatedArmour?.missileDefenceBonus || 0),
+      };
+      const hasCombatBonuses = Object.values(combatBonuses).some((value) => value);
       const cloneInitialCeoForMode = (mode) => {
         const rawInitialCeo = baseDetails[mode]?.initialCeos
           || baseDetails.historical?.initialCeos
@@ -495,11 +532,41 @@ function recipeFromQueue() {
           max_rank: 3,
         });
       }
-      const clonedSkillSetOverride = skillSetCloneFromPayload(recipe, payload.skillTree, customTemplateKey, itemNumber);
+      const romanceSkillSetSource = detailOverridesWithSkill.romance?.skill_set_override;
+      const clonedSkillSetOverride = skillSetCloneFromPayload(
+        recipe,
+        {
+          ...(payload.skillTree || {}),
+          sourceSetKey: romanceSkillSetSource || payload.skillTree?.sourceSetKey,
+        },
+        customTemplateKey,
+        itemNumber,
+        combatBonuses,
+      );
       if (clonedSkillSetOverride) {
         detailOverridesWithSkill.romance = compactObject({
           ...detailOverridesWithSkill.romance,
           skill_set_override: clonedSkillSetOverride,
+        });
+      }
+      const historicalSkillSetSource = detailOverridesWithSkill.historical?.skill_set_override;
+      if (hasCombatBonuses && historicalSkillSetSource) {
+        const historicalSkillSetOverride = skillSetCloneFromPayload(
+          recipe,
+          {
+            sourceSetKey: historicalSkillSetSource,
+            replacements: {},
+          },
+          customTemplateKey,
+          itemNumber,
+          {
+            ...combatBonuses,
+            newSetKey: `hby_skillset_historical_${slugify(customTemplateKey)}_${itemNumber}`,
+          },
+        );
+        detailOverridesWithSkill.historical = compactObject({
+          ...detailOverridesWithSkill.historical,
+          skill_set_override: historicalSkillSetOverride,
         });
       }
       recipe.characterCloneRecipes.push({
@@ -512,6 +579,7 @@ function recipeFromQueue() {
         ageRangeSourceKey: null,
         newInitialCeoKey: null,
         initialCeoSourceKey: null,
+        dedicatedArmour: payload.dedicatedArmour || null,
         spawnEvent: spawnPlan.event,
         displayName: payload.newName,
         imageAssets: customImageAssets,

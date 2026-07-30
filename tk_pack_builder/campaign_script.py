@@ -50,14 +50,32 @@ def build_campaign_start_script(
             f'add_ceos = {string_list(list(entry.get("addCeos") or []))} '
             "},"
         )
-    lines.extend(["}", "", "local hby_equipment_items = {"])
-    for entry in equipment_entries:
+    existing_equipment_entries = [
+        entry for entry in equipment_entries if entry.get("existingOnly")
+    ]
+    regular_equipment_entries = [
+        entry for entry in equipment_entries if not entry.get("existingOnly")
+    ]
+    lines.extend(["}", "", "local hby_existing_equipment_items = {"])
+    for entry in existing_equipment_entries:
         lines.append(
             "    { "
             f'template = "{escape(str(entry["template"]))}", '
             f'save_key = "{escape(str(entry["saveKey"]))}", '
             f'grant_key = "{escape(str(entry["grantKey"]))}", '
-            f'ceos = {string_list(list(entry.get("grantEquipmentCeos") or []))} '
+            f'ceos = {string_list(list(entry.get("grantEquipmentCeos") or []))}, '
+            f'best_effort = {"true" if entry.get("bestEffort") else "false"} '
+            "},"
+        )
+    lines.extend(["}", "", "local hby_equipment_items = {"])
+    for entry in regular_equipment_entries:
+        lines.append(
+            "    { "
+            f'template = "{escape(str(entry["template"]))}", '
+            f'save_key = "{escape(str(entry["saveKey"]))}", '
+            f'grant_key = "{escape(str(entry["grantKey"]))}", '
+            f'ceos = {string_list(list(entry.get("grantEquipmentCeos") or []))}, '
+            f'best_effort = {"true" if entry.get("bestEffort") else "false"} '
             "},"
         )
     lines.extend([
@@ -149,12 +167,36 @@ def build_campaign_start_script(
         "end",
         "",
         "local function hby_add_ceo(ceo_manager, ceo_key)",
-        "    local ok, result = pcall(function() return ceo_manager:add_ceos(ceo_key) end)",
-        "    if ok and result ~= false then",
-        "        return true",
-        "    end",
-        "    ok, result = pcall(function() return ceo_manager:add_ceo(ceo_key) end)",
+        "    local ok, result = pcall(function() return ceo_manager:add_ceo(ceo_key) end)",
         "    return ok and result ~= false",
+        "end",
+        "",
+        "local function hby_remove_ceo(ceo_manager, ceo_key)",
+        # Three Kingdoms exposes the plural remove_ceos API. MTU's own
+        # campaign scripts use this exact method. Calling the singular form
+        # fails inside pcall and used to leave the retry listener active on
+        # every subsequent human FactionTurnStart.
+        "    local ok, result = pcall(function() return ceo_manager:remove_ceos(ceo_key) end)",
+        "    return ok and result ~= false",
+        "end",
+        "",
+        "local function hby_add_ancillary_to_faction(faction_key, ancillary_key)",
+        "    local query_ok, faction = pcall(function()",
+        "        return cm:query_faction(faction_key)",
+        "    end)",
+        "    if not query_ok or not faction then",
+        "        return false",
+        "    end",
+        "    local null_ok, is_null = pcall(function() return faction:is_null_interface() end)",
+        "    if null_ok and is_null then",
+        "        return false",
+        "    end",
+        "    local ok = pcall(function()",
+        # CA's campaign manager API requires a FACTION_SCRIPT_INTERFACE here,
+        # not the faction key string used by modify_faction.
+        "        cm:add_ancillary_to_faction(faction, ancillary_key, false)",
+        "    end)",
+        "    return ok",
         "end",
         "",
         "local function hby_grant_equipment(item, faction_key)",
@@ -166,10 +208,7 @@ def build_campaign_start_script(
         "        local item_save_key = item.grant_key .. \"_\" .. tostring(i)",
         "        if not cm:get_saved_value(item_save_key) then",
         "            local ceo_key = item.ceos[i]",
-        "            local manager_ok, ceo_manager = pcall(function()",
-        "                return cm:modify_faction(faction_key):ceo_management()",
-        "            end)",
-        "            local added = manager_ok and ceo_manager and hby_add_ceo(ceo_manager, ceo_key)",
+        "            local added = hby_add_ancillary_to_faction(faction_key, ceo_key)",
         "            if added then",
         "                cm:set_saved_value(item_save_key, true)",
         "            else",
@@ -185,6 +224,16 @@ def build_campaign_start_script(
         "    return all_added",
         "end",
         "",
+        "local function hby_migrate_existing_equipment(item, faction_key)",
+        "    if cm:get_saved_value(item.save_key) then",
+        "        return true",
+        "    end",
+        "    if not hby_character(item.template) then",
+        "        return false",
+        "    end",
+        "    return hby_grant_equipment(item, faction_key)",
+        "end",
+        "",
         "local function hby_apply_ceos(item)",
         "    if cm:get_saved_value(item.save_key) then",
         "        return true",
@@ -193,27 +242,42 @@ def build_campaign_start_script(
         "    if not character then",
         "        return false",
         "    end",
-        "    local ok = pcall(function()",
-        "        local manager = cm:modify_character(character):ceo_management()",
-        "        for i = 1, #item.remove_ceos do",
-        "            manager:remove_ceos(item.remove_ceos[i])",
-        "        end",
-        '        if item.title_ceo ~= "" then',
-        "            hby_add_ceo(manager, item.title_ceo)",
-        "        end",
-        "        for i = 1, #item.add_ceos do",
-        "            hby_add_ceo(manager, item.add_ceos[i])",
-        "        end",
+        "    local manager_ok, manager = pcall(function()",
+        "        return cm:modify_character(character):ceo_management()",
         "    end)",
-        "    if ok then",
-        "        cm:set_saved_value(item.save_key, true)",
-        "    else",
+        "    if not manager_ok or not manager then",
+        '        output("MTU Pack Editor: character CEO manager unavailable: " .. tostring(item.template))',
+        "        return false",
+        "    end",
+        "    local all_applied = true",
+        "    for i = 1, #item.remove_ceos do",
+        "        if not hby_remove_ceo(manager, item.remove_ceos[i]) then",
+        "            all_applied = false",
+        "        end",
+        "    end",
+        '    if item.title_ceo ~= "" and not hby_add_ceo(manager, item.title_ceo) then',
+        "        all_applied = false",
+        "    end",
+        "    for i = 1, #item.add_ceos do",
+        "        if not hby_add_ceo(manager, item.add_ceos[i]) then",
+        "            all_applied = false",
+        "        end",
+        "    end",
+        "    if not all_applied then",
         '        output("MTU Pack Editor: character CEO update failed: " .. tostring(item.template))',
         "    end",
-        "    return ok",
+        # A valid character/CEO manager means every operation above was a
+        # deterministic one-shot attempt. Do not retry an invalid optional CEO
+        # forever; repeated title mutation on every faction turn is less safe
+        # than reporting the failed key once and finalising this work item.
+        "    cm:set_saved_value(item.save_key, true)",
+        "    return true",
         "end",
         "",
         "local function hby_pending()",
+        "    for i = 1, #hby_existing_equipment_items do",
+        "        if not cm:get_saved_value(hby_existing_equipment_items[i].save_key) then return true end",
+        "    end",
         "    for i = 1, #hby_spawn_items do",
         "        if not cm:get_saved_value(hby_spawn_items[i].save_key) then return true end",
         "    end",
@@ -232,6 +296,9 @@ def build_campaign_start_script(
         "        return",
         "    end",
         "    local turn_number = cm:turn_number() or 0",
+        "    for i = 1, #hby_existing_equipment_items do",
+        "        hby_migrate_existing_equipment(hby_existing_equipment_items[i], faction_key)",
+        "    end",
         "    for i = 1, #hby_spawn_items do",
         "        hby_spawn_one(hby_spawn_items[i], faction_key, turn_number)",
         "    end",

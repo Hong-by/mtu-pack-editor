@@ -17,6 +17,7 @@ from tk_pack_builder.delta_builder import (
     _collect_character_clone_rows,
     _collect_character_patch_rows,
     _collect_land_unit_clone_rows,
+    _collect_skill_set_clone_rows,
     _collect_stat_patch_rows,
     _db_with_rows,
     _copy_skill_dependency,
@@ -28,10 +29,254 @@ from tk_pack_builder.delta_builder import (
     _write_db_file,
 )
 from tk_pack_builder.internal_materials import MaterialPackSession
-from tk_pack_builder.recipe import ArmourTypeClone, AttributeSetClone, CharacterClone, CharacterPatch, LandUnitClone, Recipe, StatPatch, recipe_from_dict
+from tk_pack_builder.recipe import (
+    ArmourTypeClone,
+    AttributeSetClone,
+    CharacterClone,
+    CharacterPatch,
+    DedicatedArmourAssignment,
+    LandUnitClone,
+    Recipe,
+    SkillSetClone,
+    StatPatch,
+    recipe_from_dict,
+)
 
 
 class DeltaBuilderMaterialRowsTest(unittest.TestCase):
+    def test_armour_bonus_skills_are_shared_by_value_across_separate_work_items(self) -> None:
+        def table(rows: list[dict[str, object]]) -> dict[str, object]:
+            return {
+                "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                "rows": rows,
+            }
+
+        payload = {
+            "tables": {
+                "db/character_skill_node_sets_tables/_mtu_characters_skills": table([
+                    {"key": "source_skill_set"},
+                ]),
+                "db/character_skill_nodes_tables/_mtu_characters_skills_nodes_01_earth_commander": table([
+                    {
+                        "campaign_key": "3k_main_campaign_map",
+                        "character_skill_key": "source_skill",
+                        "character_skill_node_set_key": "source_skill_set",
+                        "faction_key": "",
+                        "indent": 1.0,
+                        "key": "source_node",
+                        "tier": 1.0,
+                        "subculture": "",
+                        "points_on_creation": 0,
+                        "required_num_parents": 0,
+                        "visible_in_ui": True,
+                        "game_mode": "",
+                        "can_meet_parent_requirment_with_children": True,
+                    },
+                ]),
+                "db/character_skill_node_links_tables/_mtu_characters_skills": table([]),
+                "db/character_skills_tables/data__": table([
+                    {
+                        "image_path": "source.png",
+                        "key": "3k_main_skill_bodyguard_water_strategist_alt_2",
+                        "localised_description": "source",
+                        "localised_name": "source",
+                        "unlocked_at_rank": 1,
+                        "is_background_skill": False,
+                        "is_female_only_background_skill": False,
+                        "is_male_only_background_skill": False,
+                        "background_weighting": 0.0,
+                    },
+                ]),
+                "db/character_skill_level_to_effects_junctions_tables/data__": table([]),
+                "db/effects_tables/data__": table([
+                    {
+                        "effect": effect_key,
+                        "icon": "",
+                        "icon_negative": "",
+                        "priority": 0,
+                        "category": "battle",
+                        "is_positive_value_good": True,
+                    }
+                    for effect_key in (
+                        "3k_main_effect_character_stat_mod_armour",
+                        "3k_main_skill_attack_rate",
+                        "3k_main_effect_character_stat_mod_melee_damage",
+                        "3k_main_effect_character_stat_mod_ap_damage_melee",
+                        "3k_main_skill_fire_charge_bonus",
+                        "3k_main_effect_character_stat_mod_missile_defence",
+                    )
+                ]),
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+            rows_by_table: dict[str, list[dict[str, object]]] = {}
+            with (
+                patch.object(delta_builder, "_merge_vanilla_dependency_tables"),
+                patch.object(delta_builder, "_merge_reference_dependency_tables"),
+            ):
+                created = _collect_skill_set_clone_rows(
+                    session,
+                    [
+                        SkillSetClone(
+                            source_set_key="source_skill_set",
+                            new_set_key="hby_skill_set_with_armour",
+                            replacements={},
+                            armour_bonus=27,
+                            melee_attack_bonus=11,
+                            melee_damage_bonus=12,
+                            ap_melee_damage_bonus=13,
+                            charge_bonus=14,
+                            missile_defence_bonus=15,
+                        ),
+                        SkillSetClone(
+                            source_set_key="source_skill_set",
+                            new_set_key="hby_second_skill_set_with_armour",
+                            replacements={},
+                            armour_bonus=99,
+                        ),
+                    ],
+                    {},
+                    rows_by_table,
+                )
+                created += _collect_skill_set_clone_rows(
+                    session,
+                    [
+                        SkillSetClone(
+                            source_set_key="source_skill_set",
+                            new_set_key="hby_romance_skill_set_with_armour",
+                            replacements={},
+                            armour_bonus=27,
+                        ),
+                    ],
+                    {},
+                    rows_by_table,
+                )
+
+        self.assertEqual(created, 3)
+        hidden_skills = [
+            row
+            for table_path, rows in rows_by_table.items()
+            if "/character_skills_tables/" in table_path
+            for row in rows
+            if str(row.get("key", "")).startswith("hby_mtu_hidden_armour_adjustment_")
+        ]
+        hidden_nodes = [
+            row
+            for table_path, rows in rows_by_table.items()
+            if "/character_skill_nodes_tables/" in table_path
+            for row in rows
+            if str(row.get("character_skill_key", "")).startswith(
+                "hby_mtu_hidden_armour_adjustment_"
+            )
+        ]
+        hidden_effects = [
+            row
+            for table_path, rows in rows_by_table.items()
+            if "/character_skill_level_to_effects_junctions_tables/" in table_path
+            for row in rows
+            if str(row.get("character_skill_key", "")).startswith(
+                "hby_mtu_hidden_armour_adjustment_"
+            )
+        ]
+        self.assertEqual(len(hidden_skills), 2)
+        self.assertEqual(len(hidden_nodes), 3)
+        self.assertEqual(len(hidden_effects), 2)
+        self.assertEqual(
+            {
+                str(row["character_skill_node_set_key"])
+                for row in hidden_nodes
+            },
+            {
+                "hby_skill_set_with_armour",
+                "hby_second_skill_set_with_armour",
+                "hby_romance_skill_set_with_armour",
+            },
+        )
+        self.assertTrue(all(not row["visible_in_ui"] for row in hidden_nodes))
+        self.assertTrue(all(row["points_on_creation"] == 1 for row in hidden_nodes))
+        skill_by_node_set = {
+            str(row["character_skill_node_set_key"]): str(row["character_skill_key"])
+            for row in hidden_nodes
+        }
+        self.assertEqual(
+            skill_by_node_set["hby_skill_set_with_armour"],
+            skill_by_node_set["hby_romance_skill_set_with_armour"],
+        )
+        self.assertNotEqual(
+            skill_by_node_set["hby_skill_set_with_armour"],
+            skill_by_node_set["hby_second_skill_set_with_armour"],
+        )
+        self.assertEqual(
+            {
+                row["effect_key"]
+                for row in hidden_effects
+            },
+            {"3k_main_effect_character_stat_mod_armour"},
+        )
+        self.assertEqual(
+            {
+                row["effect_scope"]
+                for row in hidden_effects
+            },
+            {"character_to_character_own"},
+        )
+        self.assertEqual(
+            {row["value"] for row in hidden_effects},
+            {27.0, 99.0},
+        )
+
+    def test_hidden_armour_adjustment_requires_a_linked_skill_set(self) -> None:
+        recipe = recipe_from_dict({
+            "skillSetClones": [{
+                "sourceSetKey": "source_skill_set",
+                "newSetKey": "hby_skill_set_with_armour",
+                "replacements": [],
+                "armourBonus": 27,
+                "meleeAttackBonus": 11,
+                "meleeDamageBonus": 12,
+                "apMeleeDamageBonus": 13,
+                "chargeBonus": 14,
+                "missileDefenceBonus": 15,
+            }],
+            "characterCloneRecipes": [{
+                "newTemplateKey": "hby_template",
+                "sourceTemplateKey": "source_template",
+                "detailOverrides": {
+                    "historical": {"skill_set_override": "hby_skill_set_with_armour"},
+                    "romance": {"skill_set_override": "hby_skill_set_with_armour"},
+                },
+                "dedicatedArmour": {
+                    "slotId": "hidden-skill-adjustment",
+                    "sourceCeoKey": "source_armour",
+                    "sourceInitialCeoKey": "source_initial",
+                    "sourceArmourTypeKey": "source_armour_type",
+                    "sourceArmourValue": 45,
+                    "armourBonus": 27,
+                    "meleeAttackBonus": 11,
+                    "meleeDamageBonus": 12,
+                    "apMeleeDamageBonus": 13,
+                    "chargeBonus": 14,
+                    "missileDefenceBonus": 15,
+                },
+            }],
+        })
+
+        delta_builder._validate_hidden_armour_adjustment_links(recipe)
+        broken = Recipe(
+            mod_name=recipe.mod_name,
+            character_clones=recipe.character_clones,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "not linked to the generated character skill set",
+        ):
+            delta_builder._validate_hidden_armour_adjustment_links(broken)
+
     def test_ma_yunlu_custom_image_uses_fixed_unique_model_compatibility(self) -> None:
         image_assets = []
         for panel in ("large_panel", "small_panel"):
@@ -153,18 +398,103 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             "3k_main_ceo_initial_data_character_generic_m_earth_general",
         )
         self.assertTrue(delta_builder._clone_preserves_generic_initial_ceo(compatible))
-        self.assertEqual(len(compatible.image_assets or []), 1)
+        self.assertEqual(
+            len(compatible.image_assets or []),
+            1 + len(delta_builder.GENERIC_MALE_COMPATIBILITY["earth"]["armour_displays"]),
+        )
 
     def test_equipment_independent_unique_model_audit_includes_both_genders(self) -> None:
-        self.assertEqual(len(delta_builder.EQUIPMENT_INDEPENDENT_UNIQUE_MODELS), 26)
-        self.assertIn(
+        self.assertEqual(len(delta_builder.EQUIPMENT_INDEPENDENT_UNIQUE_MODELS), 31)
+        audited_male_templates = {
+            "3k_main_template_historical_lu_bu_hero_fire",
+            "3k_mtu_template_historical_chen_jiu_hero_wood",
             "3k_mtu_template_historical_dong_min_hero_earth",
-            delta_builder.EQUIPMENT_INDEPENDENT_UNIQUE_MODELS,
+            "3k_mtu_template_historical_jian_yong_hero_metal",
+            "3k_main_template_historical_huang_zu_hero_wood",
+            "3k_main_template_historical_hua_xin_hero_water",
+            "3k_mtu_template_historical_qu_gong_hero_wood",
+            "3k_mtu_template_historical_yan_xiang_hero_water",
+            "3k_mtu_template_historical_zhang_xun_hero_earth",
+            "3k_mtu_template_historical_zhang_bao_hero_fire",
+            "3k_main_template_historical_shen_pei_hero_water",
+            "3k_main_template_historical_chunyu_qiong_hero_fire",
+            "3k_dlc04_template_historical_luo_jun_xiaoyuan_wood",
+            "3k_mtu_template_historical_wu_anguo_hero_wood",
+        }
+        self.assertTrue(
+            audited_male_templates.issubset(
+                delta_builder.EQUIPMENT_INDEPENDENT_UNIQUE_MODELS,
+            )
         )
         self.assertIn(
             "3k_mtu_template_historical_lady_ma_lanli_hero_metal",
             delta_builder.EQUIPMENT_INDEPENDENT_UNIQUE_MODELS,
         )
+
+    def test_lu_bu_clone_keeps_full_body_and_portrait_after_generic_armour_change(self) -> None:
+        source_template = "3k_main_template_historical_lu_bu_hero_fire"
+        model = delta_builder.EQUIPMENT_INDEPENDENT_UNIQUE_MODELS[source_template]
+        image_assets = [
+            {
+                "path": f"source/{panel}/{emotion}.png",
+                "targetPath": (
+                    "ui/characters/hby_sima_jing/composites/"
+                    f"{panel}/{emotion}/{emotion}.png"
+                ),
+            }
+            for panel in ("large_panel", "small_panel")
+            for emotion in ("angry", "happy", "norm")
+        ]
+        selected_armour = "3k_main_ancillary_armour_medium_armour_fire_extraordinary"
+        clone = CharacterClone(
+            new_template_key="hby_template_lu_bu_sima_jing",
+            source_template_key=source_template,
+            detail_source_template_key=source_template,
+            new_art_set_id="hby_art_lu_bu_sima_jing",
+            art_set_source_id="3k_main_art_set_historical_lu_bu_general",
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key="3k_main_ceo_initial_data_character_historical_lu_bu",
+            template_overrides={"is_male": True, "subtype": "3k_general_fire"},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={"portrait": "hby_sima_jing/", "card": "hby_sima_jing"},
+            age_range_overrides={},
+            image_assets=image_assets,
+            equipment_ceo_keys=(selected_armour,),
+            default_equipment_ceo_keys=(
+                "3k_main_ancillary_weapon_halberd_unique",
+                "3k_main_ancillary_armour_lu_bus_armour_unique",
+            ),
+        )
+
+        compatible = delta_builder._with_equipment_independent_unique_model_compatibility(
+            clone,
+            {"is_male": True, "subtype": "3k_general_fire"},
+        )
+
+        self.assertEqual(compatible.art_overrides["uniform"], model["fixed_uniform"])
+        self.assertEqual(
+            model["fixed_definition"],
+            "set_hero_skins/chinese_hero_skin_male_lu_bu",
+        )
+        self.assertEqual(
+            compatible.detail_overrides["historical"]["initial_ceos"],
+            "3k_main_ceo_initial_data_character_generic_m_fire_general",
+        )
+        self.assertEqual(compatible.equipment_ceo_keys, (selected_armour,))
+        self.assertEqual(
+            compatible.default_equipment_ceo_keys,
+            ("3k_main_ancillary_weapon_halberd_unique",),
+        )
+        self.assertTrue(any(
+            asset.get("targetPath") == (
+                "ui/characters/hby_sima_jing/composites/"
+                f"{selected_armour}/small_panel/norm/norm.png"
+            )
+            for asset in compatible.image_assets or []
+        ))
 
     def test_fixed_unique_model_removes_only_armour_body_injection_slot(self) -> None:
         source = """<VARIANT_MESH>
@@ -192,7 +522,53 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
 </VARIANT_MESH>
 """
 
-        with self.assertRaisesRegex(ValueError, "no explicit body model"):
+        with self.assertRaisesRegex(ValueError, "no baked model geometry"):
+            delta_builder._freeze_variant_mesh_body_slot(source)
+
+    def test_fixed_unique_model_preserves_already_independent_male_vmd(self) -> None:
+        source = """<VARIANT_MESH>
+  <SLOT name="14">
+    <VARIANT_MESH model="male_head.wsmodel" />
+  </SLOT>
+  <SLOT name="3">
+    <VARIANT_MESH model="male_torso.wsmodel" />
+  </SLOT>
+</VARIANT_MESH>
+"""
+
+        self.assertEqual(
+            delta_builder._freeze_variant_mesh_body_slot(source),
+            source,
+        )
+
+    def test_fixed_unique_model_accepts_custom_male_head_and_torso_assembly(self) -> None:
+        source = """<VARIANT_MESH>
+  <SLOT name="head">
+    <VARIANT_MESH model="male_head.wsmodel" />
+  </SLOT>
+  <SLOT name="chest_armour">
+    <VARIANT_MESH model="male_torso.wsmodel" />
+  </SLOT>
+  <SLOT name="set_body" />
+  <SLOT name="set_melee" />
+</VARIANT_MESH>
+"""
+
+        fixed = delta_builder._freeze_variant_mesh_body_slot(source)
+
+        self.assertNotIn('name="set_body"', fixed)
+        self.assertIn('name="set_melee"', fixed)
+
+    def test_fixed_unique_model_rejects_head_only_equipment_wrapper(self) -> None:
+        source = """<VARIANT_MESH>
+  <SLOT name="head">
+    <VARIANT_MESH model="male_head.wsmodel" />
+  </SLOT>
+  <SLOT name="set_body" />
+</VARIANT_MESH>
+"""
+
+        with self.assertRaisesRegex(ValueError, "no complete baked body model"):
             delta_builder._freeze_variant_mesh_body_slot(source)
 
     def test_fixed_unique_model_registers_isolated_variant_and_uniform_rows(self) -> None:
@@ -980,6 +1356,144 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertIn("db/character_attribute_sets_tables/data__", source_dbs)
         self.assertIn("db/character_attributes_tables/data__", source_dbs)
 
+    def test_stale_catalog_only_skill_replacement_keeps_source_skill(self) -> None:
+        def table(rows: list[dict[str, object]]) -> dict[str, object]:
+            return {
+                "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                "rows": rows,
+            }
+
+        payload = {
+            "tables": {
+                "db/character_skill_node_sets_tables/data__": table([
+                    {"key": "source_skill_set"},
+                ]),
+                "db/character_skill_nodes_tables/data__": table([
+                    {
+                        "key": "source_node",
+                        "character_skill_node_set_key": "source_skill_set",
+                        "character_skill_key": "real_source_skill",
+                    },
+                ]),
+                "db/character_skill_node_links_tables/data__": table([]),
+                "db/character_skill_level_to_effects_junctions_tables/data__": table([]),
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+            rows_by_table: dict[str, list[dict[str, object]]] = {}
+            with (
+                patch.object(delta_builder, "_merge_vanilla_dependency_tables"),
+                patch.object(delta_builder, "_merge_reference_dependency_tables"),
+            ):
+                created = _collect_skill_set_clone_rows(
+                    session,
+                    [
+                        SkillSetClone(
+                            source_set_key="source_skill_set",
+                            new_set_key="generated_skill_set",
+                            replacements={
+                                "source_node": "3k_mtu_skill_special_active_catalog_only",
+                            },
+                        ),
+                    ],
+                    {},
+                    rows_by_table,
+                )
+
+        self.assertEqual(1, created)
+        generated_node = rows_by_table["db/character_skill_nodes_tables/data__"][0]
+        self.assertEqual("real_source_skill", generated_node["character_skill_key"])
+
+    def test_skill_replacement_resolves_across_all_material_table_files(self) -> None:
+        def table(rows: list[dict[str, object]]) -> dict[str, object]:
+            return {
+                "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                "rows": rows,
+            }
+
+        payload = {
+            "tables": {
+                "db/character_skill_node_sets_tables/_mtu_characters_skills": table([
+                    {"key": "source_skill_set"},
+                ]),
+                "db/character_skill_nodes_tables/_mtu_characters_skills_nodes_01_earth_commander": table([
+                    {
+                        "key": "source_node",
+                        "character_skill_node_set_key": "source_skill_set",
+                        "character_skill_key": "real_source_skill",
+                    },
+                ]),
+                "db/character_skill_nodes_tables/dlc": table([
+                    {
+                        "key": "dlc_source_node",
+                        "character_skill_node_set_key": "dlc_source_set",
+                        "character_skill_key": "real_dlc_skill",
+                    },
+                ]),
+                "db/character_skill_node_links_tables/_mtu_characters_skills": table([]),
+                "db/character_skills_tables/dlc": table([
+                    {"key": "real_dlc_skill", "image_path": "dlc.png"},
+                ]),
+                "db/character_skill_level_to_effects_junctions_tables/_mtu_characters_skills": table([]),
+                "db/character_skill_level_to_effects_junctions_tables/dlc": table([
+                    {
+                        "character_skill_key": "real_dlc_skill",
+                        "effect_key": "real_dlc_effect",
+                        "effect_scope": "character_to_character_own",
+                        "level": 1,
+                        "value": 1,
+                    },
+                ]),
+                "db/effects_tables/dlc": table([
+                    {"effect": "real_dlc_effect", "category": "battle"},
+                ]),
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+            rows_by_table: dict[str, list[dict[str, object]]] = {}
+            with (
+                patch.object(delta_builder, "_merge_vanilla_dependency_tables"),
+                patch.object(delta_builder, "_merge_reference_dependency_tables"),
+            ):
+                created = _collect_skill_set_clone_rows(
+                    session,
+                    [
+                        SkillSetClone(
+                            source_set_key="source_skill_set",
+                            new_set_key="generated_skill_set",
+                            replacements={"source_node": "real_dlc_skill"},
+                        ),
+                    ],
+                    {},
+                    rows_by_table,
+                )
+
+        self.assertEqual(1, created)
+        generated_node = rows_by_table[
+            "db/character_skill_nodes_tables/_mtu_characters_skills_nodes_01_earth_commander"
+        ][0]
+        self.assertEqual("real_dlc_skill", generated_node["character_skill_key"])
+        self.assertEqual(
+            "real_dlc_skill",
+            rows_by_table["db/character_skills_tables/dlc"][0]["key"],
+        )
+        self.assertEqual(
+            "real_dlc_effect",
+            rows_by_table[
+                "db/character_skill_level_to_effects_junctions_tables/dlc"
+            ][0]["effect_key"],
+        )
+
     def test_existing_skill_dependency_copies_skill_effect_rows(self) -> None:
         tables = {
             "character_skill_node_sets": [
@@ -994,6 +1508,13 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                 },
             ],
             "character_skill_node_links": [],
+            "character_skills": [
+                {
+                    "key": "skill_a",
+                    "image_path": "skill_a.png",
+                    "_sourceTablePath": "db/character_skills_tables/custom_skills",
+                },
+            ],
             "character_skill_level_to_effects_junctions": [
                 {
                     "character_skill_key": "skill_a",
@@ -1043,6 +1564,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             "character_skill_node_sets": "db/character_skill_node_sets_tables/data__",
             "character_skill_nodes": "db/character_skill_nodes_tables/data__",
             "character_skill_node_links": "db/character_skill_node_links_tables/data__",
+            "character_skills": "db/character_skills_tables/custom_skills",
             "character_skill_level_to_effects_junctions": "db/character_skill_level_to_effects_junctions_tables/data__",
             "effects": "db/effects_tables/data__",
             "effect_bonus_value_ids_unit_sets": "db/effect_bonus_value_ids_unit_sets_tables/data__",
@@ -1055,6 +1577,10 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         _copy_skill_dependency(tables, table_names, rows_by_table, "skillset_a")
 
         self.assertIn("db/character_skill_level_to_effects_junctions_tables/data__", rows_by_table)
+        self.assertEqual(
+            rows_by_table["db/character_skills_tables/custom_skills"][0]["key"],
+            "skill_a",
+        )
         self.assertIn("db/effects_tables/data__", rows_by_table)
         self.assertEqual(rows_by_table["db/effects_tables/data__"][0]["effect"], "effect_a")
         self.assertEqual(rows_by_table["db/effect_bonus_value_ids_unit_sets_tables/data__"][0]["bonus_value_id"], "bonus_a")
@@ -1625,19 +2151,25 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             'add_ceos = { "trait_a" }',
             script or "",
         )
-        self.assertIn("manager:remove_ceos(item.remove_ceos[i])", script or "")
+        self.assertIn("hby_remove_ceo(manager, item.remove_ceos[i])", script or "")
         self.assertIn("hby_add_ceo(manager, item.title_ceo)", script or "")
         self.assertIn("hby_add_ceo(manager, item.add_ceos[i])", script or "")
-        self.assertIn("ceo_manager:add_ceos(ceo_key)", script or "")
-        self.assertIn("hby_mtu_pack_editor_ceo_sets_v6_", script or "")
+        self.assertIn("ceo_manager:remove_ceos(ceo_key)", script or "")
+        self.assertNotIn("ceo_manager:remove_ceo(ceo_key)", script or "")
+        self.assertIn("ceo_manager:add_ceo(ceo_key)", script or "")
+        self.assertNotIn("ceo_manager:add_ceos(ceo_key)", script or "")
+        self.assertIn("cm:set_saved_value(item.save_key, true)", script or "")
+        self.assertIn("return true", script or "")
+        self.assertNotIn("if all_applied then", script or "")
+        self.assertIn("hby_mtu_pack_editor_ceo_sets_v8_", script or "")
         self.assertIn("hby_apply_ceos(hby_ceo_items[i])", script or "")
         self.assertNotIn("force_add_ceo", script or "")
         self.assertNotIn("force_add_trait", script or "")
         self.assertIn('ceos = { "equipment_a" }', script or "")
         self.assertNotIn('"equipment_old"', script or "")
-        self.assertIn("hby_mtu_pack_editor_equipment_v22_", script or "")
-        self.assertIn("hby_mtu_pack_editor_equipment_grant_v22_", script or "")
-        self.assertIn('grant_key = "hby_mtu_pack_editor_equipment_grant_v22_', script or "")
+        self.assertIn("hby_mtu_pack_editor_equipment_v26_", script or "")
+        self.assertIn("hby_mtu_pack_editor_equipment_grant_v26_", script or "")
+        self.assertIn('grant_key = "hby_mtu_pack_editor_equipment_grant_v26_', script or "")
         self.assertIn("local function hby_grant_equipment", script or "")
         self.assertIn('local item_save_key = item.grant_key .. "_" .. tostring(i)', script or "")
         self.assertIn("cm:set_saved_value(item_save_key, true)", script or "")
@@ -1645,11 +2177,197 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertNotIn("cm:force_add_ancillary", script or "")
         self.assertNotIn("cm:force_remove_ancillary", script or "")
         self.assertIn("cm:modify_character(character):ceo_management()", script or "")
-        self.assertIn("return cm:modify_faction(faction_key):ceo_management()", script or "")
-        self.assertIn("hby_add_ceo(ceo_manager, ceo_key)", script or "")
-        self.assertIn("ceo_manager:add_ceos(ceo_key)", script or "")
-        self.assertNotIn("cm:add_ancillary_to_faction", script or "")
+        self.assertIn(
+            "cm:add_ancillary_to_faction(faction, ancillary_key, false)",
+            script or "",
+        )
+        self.assertIn("return cm:query_faction(faction_key)", script or "")
+        self.assertNotIn(
+            "cm:add_ancillary_to_faction(faction_key, ancillary_key, false)",
+            script or "",
+        )
+        self.assertNotIn("hby_faction_has_ancillary", script or "")
+        self.assertNotIn("return manager:add_ceo(ancillary_key)", script or "")
         self.assertNotIn("cm:modify_faction(faction)", script or "")
+
+    def test_dedicated_armour_restores_source_title_and_traits(self) -> None:
+        dedicated = DedicatedArmourAssignment(
+            pool_id="test-pool",
+            slot_id="slot-001",
+            source_ceo_key="source_armour",
+            source_initial_ceo_key="source_initial",
+            source_armour_type_key="source_armour_type",
+            armour_ceo_key="hby_armour_001",
+            initial_ceo_key="hby_initial_001",
+            armour_type_key="hby_armour_type_001",
+            armour_value=80,
+        )
+        clone = CharacterClone(
+            new_template_key="hby_template_test",
+            source_template_key="source",
+            detail_source_template_key="source",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=dedicated.initial_ceo_key,
+            initial_ceo_source_key=dedicated.source_initial_ceo_key,
+            template_overrides={"subtype": "3k_general_metal"},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            spawn_event="campaign_start",
+            dedicated_armour=dedicated,
+        )
+
+        entries = delta_builder._ceo_set_entries_for_characters(
+            [clone],
+            [],
+            source_ceo_defaults={
+                clone.new_template_key: {
+                    "titleCeoKey": "3k_mtu_ceo_career_historical_lady_ma_yunlu",
+                    "traitCeoKeys": [
+                        "3k_ytr_ceo_trait_personality_land_alert",
+                        "3k_main_ceo_trait_personality_brave",
+                        "3k_main_ceo_trait_personality_loyal",
+                    ],
+                }
+            },
+        )
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(
+            entries[0]["titleCeoKey"],
+            "3k_mtu_ceo_career_historical_lady_ma_yunlu",
+        )
+        self.assertEqual(
+            entries[0]["addCeos"],
+            [
+                "3k_ytr_ceo_trait_personality_land_alert",
+                "3k_main_ceo_trait_personality_brave",
+                "3k_main_ceo_trait_personality_loyal",
+            ],
+        )
+
+    def test_dedicated_armour_keeps_proven_source_initial_ceo_at_runtime(self) -> None:
+        payload = {
+            "tables": {
+                "db/character_generation_templates_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "key": "source_template",
+                        "art_set_override": "source_art",
+                        "forename": "1",
+                        "spawn_age_range": "source_age",
+                        "subtype": "3k_general_metal",
+                        "is_male": False,
+                    }],
+                },
+                "db/character_generation_template_game_mode_details_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "character_generation_template": "source_template",
+                        "game_mode": "historical",
+                        "initial_ceos": "source_initial",
+                    }],
+                },
+                "db/campaign_character_art_sets_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"art_set_id": "source_art"}],
+                },
+                "db/campaign_character_arts_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "art_set_id": "source_art",
+                        "age": 16,
+                        "has_come_of_age": True,
+                    }],
+                },
+                "db/character_generation_spawn_age_ranges_tables/_mtu_characters": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"key": "source_age"}],
+                },
+                "db/ceo_initial_datas_tables/data__": {
+                    "db": {"table": {"definition": {"fields": [{"name": "key"}]}, "table_data": []}},
+                    "rows": [{"key": "source_initial"}],
+                },
+                "db/ceos_to_equipment_variants_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "ceos_key": "source_armour",
+                        "armour": "source_armour_type",
+                        "game_mode": "",
+                    }],
+                },
+                "db/unit_armour_types_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{
+                        "key": "source_armour_type",
+                        "armour_value": 45,
+                        "audio_type": "Leather",
+                    }],
+                },
+                "db/names_tables/data__": {
+                    "db": {"table": {"definition": {"fields": []}, "table_data": []}},
+                    "rows": [{"id": "1"}],
+                },
+            },
+            "loc": {},
+            "assets": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "materials.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            session = MaterialPackSession.open(path)
+
+        dedicated = DedicatedArmourAssignment(
+            pool_id="test-pool",
+            slot_id="slot-001",
+            source_ceo_key="source_armour",
+            source_initial_ceo_key="source_initial",
+            source_armour_type_key="source_armour_type",
+            armour_ceo_key="hby_armour_001",
+            initial_ceo_key="hby_initial_001",
+            armour_type_key="hby_armour_type_001",
+            armour_value=80,
+        )
+        rows_by_table: dict[str, list[dict[str, object]]] = {}
+        _collect_character_clone_rows(
+            session,
+            [CharacterClone(
+                new_template_key="hby_template_dedicated",
+                source_template_key="source_template",
+                detail_source_template_key="source_template",
+                new_art_set_id=None,
+                art_set_source_id=None,
+                new_age_range_key=None,
+                age_range_source_key=None,
+                new_initial_ceo_key=None,
+                initial_ceo_source_key=None,
+                template_overrides={},
+                detail_overrides={},
+                art_set_overrides={},
+                art_overrides={},
+                age_range_overrides={},
+                dedicated_armour=dedicated,
+            )],
+            {},
+            rows_by_table,
+            {},
+        )
+
+        details = rows_by_table[
+            "db/character_generation_template_game_mode_details_tables/_mtu_characters"
+        ]
+        self.assertEqual(
+            {row["initial_ceos"] for row in details},
+            {dedicated.source_initial_ceo_key},
+        )
+        self.assertNotIn(
+            dedicated.initial_ceo_key,
+            {row["initial_ceos"] for row in details},
+        )
 
     def test_generic_initial_ceo_does_not_restore_source_unique_armour(self) -> None:
         clone = CharacterClone(
@@ -1953,6 +2671,44 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             ],
         )
         self.assertEqual(entries[0]["removeCeos"], [])
+
+    def test_armour_adjustment_does_not_grant_a_custom_inventory_item(self) -> None:
+        dedicated = DedicatedArmourAssignment(
+            pool_id="test-pool",
+            slot_id="slot-001",
+            source_ceo_key="source_armour",
+            source_initial_ceo_key="source_initial",
+            source_armour_type_key="source_armour_type",
+            armour_ceo_key="hby_armour_001",
+            initial_ceo_key="hby_initial_001",
+            armour_type_key="hby_armour_type_001",
+            armour_value=80,
+        )
+        clone = CharacterClone(
+            new_template_key="hby_template_test",
+            source_template_key="source",
+            detail_source_template_key="source",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=dedicated.initial_ceo_key,
+            initial_ceo_source_key=dedicated.source_initial_ceo_key,
+            template_overrides={"subtype": "3k_general_metal"},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            spawn_event="campaign_start",
+            dedicated_armour=dedicated,
+        )
+
+        entries = delta_builder._equipment_entries_for_characters([clone], [])
+        script = delta_builder._campaign_start_spawn_script([clone])
+
+        self.assertEqual(entries, [])
+        self.assertNotIn("hby_armour_001", script or "")
+        self.assertIn("local hby_equipment_items = {\n}", script or "")
 
     def test_equipment_set_does_not_materialize_custom_initial_ceo_chain(self) -> None:
         tables = {
@@ -2368,13 +3124,63 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertIn('ceos = { "new_weapon", "new_mount" }', script or "")
         self.assertNotIn('"old_weapon"', script or "")
         self.assertIn("hby_grant_equipment(hby_equipment_items[i], faction_key)", script or "")
-        self.assertIn("return cm:modify_faction(faction_key):ceo_management()", script or "")
-        self.assertIn("hby_add_ceo(ceo_manager, ceo_key)", script or "")
-        self.assertIn("ceo_manager:add_ceos(ceo_key)", script or "")
+        self.assertIn(
+            "cm:add_ancillary_to_faction(faction, ancillary_key, false)",
+            script or "",
+        )
+        self.assertIn("return cm:query_faction(faction_key)", script or "")
+        self.assertNotIn("hby_faction_has_ancillary", script or "")
+        self.assertNotIn("return manager:add_ceo(ancillary_key)", script or "")
         self.assertIn('output("MTU Pack Editor: equipment granted to faction inventory:', script or "")
         self.assertNotIn("cm:force_add_ancillary", script or "")
         self.assertNotIn("cm:force_remove_ancillary", script or "")
         self.assertNotIn("force_add_ceo", script or "")
+
+    def test_campaign_script_grants_complete_vanguard_set_to_faction_inventory(self) -> None:
+        vanguard_set = (
+            "3k_main_ancillary_weapon_two_handed_spear_exceptional",
+            "3k_main_ancillary_armour_medium_armour_fire_extraordinary",
+            "3k_main_ancillary_follower_professional_instuctor",
+            "3k_main_ancillary_accessory_book_of_mountains_and_seas",
+            "3k_main_ancillary_mount_red_stallion",
+        )
+        clone = CharacterClone(
+            new_template_key="hby_template_lu_bu_inventory_test",
+            source_template_key="3k_main_template_historical_lu_bu_hero_fire",
+            detail_source_template_key="3k_main_template_historical_lu_bu_hero_fire",
+            new_art_set_id=None,
+            art_set_source_id=None,
+            new_age_range_key=None,
+            age_range_source_key=None,
+            new_initial_ceo_key=None,
+            initial_ceo_source_key=None,
+            template_overrides={"subtype": "3k_general_fire"},
+            detail_overrides={},
+            art_set_overrides={},
+            art_overrides={},
+            age_range_overrides={},
+            spawn_event="campaign_start",
+            equipment_set_key="vanguard",
+            equipment_ceo_keys=vanguard_set,
+        )
+
+        entries = delta_builder._equipment_entries_for_characters([clone], [])
+        script = _campaign_start_spawn_script([clone])
+
+        self.assertEqual(entries[0]["grantEquipmentCeos"], list(vanguard_set))
+        self.assertIn("_v26_", entries[0]["saveKey"])
+        self.assertIn("_v26_", entries[0]["grantKey"])
+        for ancillary_key in vanguard_set:
+            self.assertIn(f'"{ancillary_key}"', script or "")
+        self.assertIn("return cm:query_faction(faction_key)", script or "")
+        self.assertIn(
+            "cm:add_ancillary_to_faction(faction, ancillary_key, false)",
+            script or "",
+        )
+        self.assertNotIn(
+            "cm:add_ancillary_to_faction(faction_key, ancillary_key, false)",
+            script or "",
+        )
 
     def test_lua_ceo_key_list_rejects_object_sentinel_values(self) -> None:
         self.assertEqual(

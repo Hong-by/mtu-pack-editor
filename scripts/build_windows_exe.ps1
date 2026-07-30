@@ -29,9 +29,9 @@ if (Test-Path $appDir) {
     --name "MTU Pack Editor" `
     --console `
     --clean `
-    --add-data "tk_pack_builder\data\title_effects.ko.json;tk_pack_builder\data" `
-    --add-data "tk_pack_builder\data\background_title_effects.ko.json;tk_pack_builder\data" `
-    --add-data "tk_pack_builder\data\skill_effects.ko.json;tk_pack_builder\data" `
+    --add-data "tk_pack_builder\data\assembly_kit_title_effects.ko.json;tk_pack_builder\data" `
+    --add-data "tk_pack_builder\data\assembly_kit_skill_effects.ko.json;tk_pack_builder\data" `
+    --add-data "tk_pack_builder\data\dedicated_armour_pools;tk_pack_builder\data\dedicated_armour_pools" `
     "tk_pack_builder\launcher.py"
 
 if (-not (Test-Path $exePath)) {
@@ -68,10 +68,10 @@ $internalMaterialsSource = Join-Path $root "work\internal_materials"
 $internalMaterialsTarget = Join-Path $workDir "internal_materials"
 $internalMaterialFiles = @(
     "materials.v015.json",
+    "materials.v015.summary.json",
     "asset_manifest.v015.json",
-    "title_effects.ko.json",
-    "background_title_effects.ko.json",
-    "skill_effects.ko.json"
+    "assembly_kit_title_effects.ko.json",
+    "assembly_kit_skill_effects.ko.json"
 )
 $schemaStoreSource = Join-Path $root "work\rpfm-schema-store"
 $schemaStoreTarget = Join-Path $workDir "rpfm-schema-store"
@@ -183,6 +183,11 @@ if (Test-Path $rpfmSource) {
     if ($LASTEXITCODE -gt 7) {
         throw "Failed to copy RPFM runtime. robocopy exit code: $LASTEXITCODE"
     }
+}
+
+& $Python (Join-Path $root "scripts\stamp_windows_runtime_cache.py") --app-dir $appDir
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to stamp the packaged runtime cache."
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $appDir "output") | Out-Null

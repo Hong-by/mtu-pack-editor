@@ -13,6 +13,27 @@ def read_web_script(name: str) -> str:
 
 
 class WebAppConfigTest(unittest.TestCase):
+    def test_work_queue_is_persisted_across_refresh_and_pack_reload(self) -> None:
+        state_js = read_web_script("app-state.js")
+        normalize_js = read_web_script("app-normalize.js")
+        queue_js = read_web_script("app-queue.js")
+        app_js = read_web_script("app.js")
+
+        self.assertIn(
+            "const WORK_QUEUE_STORAGE_KEY = 'mtu-pack-editor.work-queue.v1';",
+            state_js,
+        )
+        self.assertIn("queue: loadPersistedWorkQueue(),", state_js)
+        self.assertIn("function normalizePersistedWorkQueue(value)", state_js)
+        self.assertIn("function persistWorkQueue()", state_js)
+        self.assertIn("window.localStorage?.setItem(", state_js)
+        self.assertNotIn("state.queue = [];", normalize_js)
+        self.assertIn("function renderQueue() {\n  persistWorkQueue();", queue_js)
+        self.assertIn(
+            "window.addEventListener('beforeunload', persistWorkQueue);",
+            app_js,
+        )
+
     def test_index_script_assets_are_served_by_static_router(self) -> None:
         from tk_pack_builder.web import _static_web_file
 
@@ -45,9 +66,74 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertNotIn("(titleChanged ? titleInitialCeoForModeFromChoice(titleSource, mode) : null)", clone_func)
         self.assertNotIn("titleInitialCeoForModeFromChoice(titleSource, mode)", clone_func)
         self.assertIn("return genderCompatibleInitialCeoKey(rawInitialCeo, finalTemplateGender, payload.subtype);", clone_func)
-        self.assertIn("initial_ceos: cloneInitialCeoForMode(mode)", recipe_js)
-        self.assertIn("newInitialCeoKey: null", recipe_js)
-        self.assertIn("initialCeoSourceKey: null", recipe_js)
+        self.assertIn(
+            "initial_ceos: cloneInitialCeoForMode(mode)",
+            recipe_js,
+        )
+        self.assertIn(
+            "newInitialCeoKey: null",
+            recipe_js,
+        )
+        self.assertIn(
+            "initialCeoSourceKey: null",
+            recipe_js,
+        )
+
+    def test_armour_adjustment_ui_uses_single_hidden_skill(self) -> None:
+        index_html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        helpers_js = read_web_script("app-form-helpers.js")
+        editor_js = read_web_script("app-editor.js")
+        queue_js = read_web_script("app-queue.js")
+        recipe_js = read_web_script("app-recipe.js")
+        server_js = read_web_script("app-server.js")
+
+        self.assertIn(
+            'id="sourceDedicatedArmourEnabled" type="checkbox"',
+            index_html,
+        )
+        self.assertNotIn(
+            'id="sourceDedicatedArmourEnabled" type="checkbox" disabled',
+            index_html,
+        )
+        self.assertIn('id="sourceDedicatedArmourValue"', index_html)
+        self.assertNotIn('id="sourceMeleeAttackBonus"', index_html)
+        self.assertNotIn('id="sourceMeleeDamageBonus"', index_html)
+        self.assertNotIn('id="sourceApMeleeDamageBonus"', index_html)
+        self.assertNotIn('id="sourceChargeBonus"', index_html)
+        self.assertNotIn('id="sourceMissileDefenceBonus"', index_html)
+        self.assertNotIn("const unsupportedBonusInputs = [", editor_js)
+        self.assertIn('min="-500" max="500"', index_html)
+        self.assertIn("방어력 보정치", index_html)
+        self.assertIn("기존 갑옷 유지 + 장수 전용 방어력 보정", index_html)
+        self.assertNotIn("첫 번째 대상 장수 1명에게만 생성됩니다", index_html)
+        self.assertNotIn("근접 공격 속도 보정치", index_html)
+        self.assertNotIn("일반 무기 피해 보정치", index_html)
+        self.assertNotIn("관통 무기 피해 보정치", index_html)
+        self.assertNotIn("돌격 보너스 보정치", index_html)
+        self.assertNotIn("원거리 방어 보정치", index_html)
+        self.assertIn('class="reference-path-help"', index_html)
+        self.assertIn("function availableDedicatedArmourSlot(character)", helpers_js)
+        self.assertIn("const sourceArmourValue = Number(character.baseDefense);", helpers_js)
+        self.assertIn("armourBonus: bonus", helpers_js)
+        self.assertNotIn("meleeAttackBonus,", helpers_js)
+        self.assertNotIn("meleeDamageBonus,", helpers_js)
+        self.assertNotIn("apMeleeDamageBonus,", helpers_js)
+        self.assertNotIn("chargeBonus,", helpers_js)
+        self.assertNotIn("missileDefenceBonus,", helpers_js)
+        self.assertIn("armourValue: sourceArmourValue + bonus", helpers_js)
+        self.assertIn("function syncDedicatedArmourControls(character)", editor_js)
+        self.assertIn("기존 장비 유지 · 숨김 장수 효과", editor_js)
+        self.assertNotIn("globalStatus.activeCcd?.packPath", editor_js)
+        self.assertIn("const dedicatedArmour = dedicatedArmourSelection(combat);", queue_js)
+        self.assertIn("dedicatedArmour,", queue_js)
+        self.assertIn("combatAdjustmentDescription", queue_js)
+        self.assertIn("dedicatedArmour: payload.dedicatedArmour || null", recipe_js)
+        self.assertIn("payload.dedicatedArmour.armourBonus ?? legacyArmourBonus", recipe_js)
+        self.assertIn("const combatBonuses = {", recipe_js)
+        self.assertIn("meleeAttackBonus:", recipe_js)
+        self.assertIn("missileDefenceBonus:", recipe_js)
+        self.assertIn("function syncQueuedDedicatedArmourFromEditor()", queue_js)
+        self.assertIn("syncQueuedDedicatedArmourFromEditor();", server_js)
 
     def test_character_recipe_applies_selected_title_ceo_separately(self) -> None:
         recipe_js = read_web_script("app-recipe.js")
@@ -188,7 +274,7 @@ class WebAppConfigTest(unittest.TestCase):
         normalize_js = read_web_script("app-normalize.js")
         server_js = read_web_script("app-server.js")
 
-        self.assertIn("OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 23", web_py)
+        self.assertIn("OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 24", web_py)
         self.assertIn('json.dumps(payload, ensure_ascii=False, separators=(",", ":"))', web_py)
         self.assertIn('"assetCacheToken": asset_cache_token', web_py)
         self.assertIn('cached["assetCacheToken"] = asset_cache_token', web_py)
@@ -203,11 +289,11 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("def _file_cache_fingerprint(path: Path)", web_py)
         self.assertIn("def _file_cache_key(paths: list[Path])", web_py)
         self.assertIn("catalog_paths = _title_effect_catalog_paths()", web_py)
-        self.assertIn("skill_catalog_path = _skill_effect_catalog_path()", web_py)
-        self.assertIn('"version": 25', web_py)
+        self.assertIn("skill_catalog_paths = _skill_effect_catalog_paths()", web_py)
+        self.assertIn('"version": 30', web_py)
         self.assertIn("return _load_title_effect_catalog_for_cache_key(_file_cache_key(_title_effect_catalog_paths()))", web_py)
         self.assertIn("@lru_cache(maxsize=8)\ndef _load_title_effect_catalog_for_cache_key", web_py)
-        self.assertIn("return _load_skill_effect_catalog_for_cache_key(_file_cache_key([catalog_path] if catalog_path else []))", web_py)
+        self.assertIn("return _load_skill_effect_catalog_for_cache_key(_file_cache_key(catalog_paths))", web_py)
         self.assertIn("@lru_cache(maxsize=8)\ndef _load_skill_effect_catalog_for_cache_key", web_py)
 
     def test_image_gallery_ignores_bad_hint_labels(self) -> None:
@@ -268,11 +354,14 @@ class WebAppConfigTest(unittest.TestCase):
         spec = (ROOT / "MTU Pack Editor.spec").read_text(encoding="utf-8")
         build_script = (ROOT / "scripts" / "build_windows_exe.ps1").read_text(encoding="utf-8")
 
-        self.assertIn("tk_pack_builder\\\\data\\\\title_effects.ko.json", spec)
-        self.assertIn("tk_pack_builder\\\\data\\\\background_title_effects.ko.json", spec)
-        self.assertIn("tk_pack_builder\\\\data\\\\skill_effects.ko.json", spec)
-        self.assertIn('"title_effects.ko.json"', build_script)
-        self.assertIn('"skill_effects.ko.json"', build_script)
+        self.assertIn("tk_pack_builder\\\\data\\\\assembly_kit_title_effects.ko.json", spec)
+        self.assertIn("tk_pack_builder\\\\data\\\\assembly_kit_skill_effects.ko.json", spec)
+        self.assertIn("tk_pack_builder\\\\data\\\\dedicated_armour_pools", spec)
+        self.assertIn('"assembly_kit_title_effects.ko.json"', build_script)
+        self.assertIn('"assembly_kit_skill_effects.ko.json"', build_script)
+        self.assertNotIn('"title_effects.ko.json"', build_script)
+        self.assertNotIn('"skill_effects.ko.json"', build_script)
+        self.assertIn('"tk_pack_builder\\data\\dedicated_armour_pools;tk_pack_builder\\data\\dedicated_armour_pools"', build_script)
         self.assertIn('"asset_manifest.v015.json"', build_script)
         self.assertIn("function Convert-LocalBuildPath", build_script)
         self.assertIn("$normalized.Substring($SourceRoot.Length).TrimStart(\"\\\")", build_script)

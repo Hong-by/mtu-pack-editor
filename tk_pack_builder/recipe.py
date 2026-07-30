@@ -38,6 +38,12 @@ class SkillSetClone:
     source_set_key: str
     new_set_key: str
     replacements: dict[str, str]
+    armour_bonus: int = 0
+    melee_attack_bonus: int = 0
+    melee_damage_bonus: int = 0
+    ap_melee_damage_bonus: int = 0
+    charge_bonus: int = 0
+    missile_defence_bonus: int = 0
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,25 @@ class AgeRangeClone:
     source_key: str
     new_key: str
     overrides: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class DedicatedArmourAssignment:
+    source_ceo_key: str
+    source_initial_ceo_key: str
+    source_armour_type_key: str
+    armour_value: int
+    source_armour_value: int | None = None
+    pool_id: str = ""
+    slot_id: str = ""
+    armour_ceo_key: str = ""
+    initial_ceo_key: str = ""
+    armour_type_key: str = ""
+    melee_attack_bonus: int = 0
+    melee_damage_bonus: int = 0
+    ap_melee_damage_bonus: int = 0
+    charge_bonus: int = 0
+    missile_defence_bonus: int = 0
 
 
 @dataclass(frozen=True)
@@ -82,6 +107,7 @@ class CharacterClone:
     equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
     removable_equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
     default_equipment_ceo_keys: tuple[str, ...] = field(default_factory=tuple)
+    dedicated_armour: DedicatedArmourAssignment | None = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +189,12 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
                 for replacement in item.get("replacements", [])
                 if replacement.get("nodeKey") and replacement.get("skillKey")
             },
+            armour_bonus=int(item.get("armourBonus") or 0),
+            melee_attack_bonus=int(item.get("meleeAttackBonus") or 0),
+            melee_damage_bonus=int(item.get("meleeDamageBonus") or 0),
+            ap_melee_damage_bonus=int(item.get("apMeleeDamageBonus") or 0),
+            charge_bonus=int(item.get("chargeBonus") or 0),
+            missile_defence_bonus=int(item.get("missileDefenceBonus") or 0),
         )
         for item in data.get("skillSetClones", [])
     ]
@@ -214,6 +246,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
             equipment_ceo_keys=_string_tuple(item.get("equipmentCeoKeys")),
             removable_equipment_ceo_keys=_string_tuple(item.get("removableEquipmentCeoKeys")),
             default_equipment_ceo_keys=_string_tuple(item.get("defaultEquipmentCeoKeys")),
+            dedicated_armour=_dedicated_armour_assignment(item.get("dedicatedArmour")),
         )
         for item in data.get("characterCloneRecipes", [])
     ]
@@ -277,6 +310,68 @@ def _string_tuple(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list):
         return tuple()
     return tuple(str(item) for item in value if str(item or "").strip())
+
+
+def _dedicated_armour_assignment(value: Any) -> DedicatedArmourAssignment | None:
+    if not isinstance(value, dict):
+        return None
+    source_armour_value_raw = value.get("sourceArmourValue")
+    source_armour_value = (
+        int(source_armour_value_raw)
+        if source_armour_value_raw not in (None, "")
+        else None
+    )
+    armour_bonus_raw = value.get("armourBonus")
+    if armour_bonus_raw not in (None, ""):
+        armour_bonus = int(armour_bonus_raw)
+        if not -500 <= armour_bonus <= 500:
+            raise ValueError("방어력 보정치는 -500~500 사이여야 합니다.")
+        armour_value = (source_armour_value or 0) + armour_bonus
+    else:
+        armour_value = int(value.get("armourValue", 0))
+    if armour_bonus_raw in (None, "") and not 0 <= armour_value <= 500:
+        raise ValueError("전용 갑옷 방어력은 0~500 사이여야 합니다.")
+    combat_bonuses = {
+        "melee_attack_bonus": int(value.get("meleeAttackBonus") or 0),
+        "melee_damage_bonus": int(value.get("meleeDamageBonus") or 0),
+        "ap_melee_damage_bonus": int(value.get("apMeleeDamageBonus") or 0),
+        "charge_bonus": int(value.get("chargeBonus") or 0),
+        "missile_defence_bonus": int(value.get("missileDefenceBonus") or 0),
+    }
+    invalid_bonuses = [
+        name
+        for name, bonus in combat_bonuses.items()
+        if not -500 <= bonus <= 500
+    ]
+    if invalid_bonuses:
+        raise ValueError(
+            "Character combat bonuses must be between -500 and 500: "
+            + ", ".join(invalid_bonuses)
+        )
+    required = {
+        key: str(value.get(key) or "").strip()
+        for key in (
+            "sourceCeoKey",
+            "sourceInitialCeoKey",
+            "sourceArmourTypeKey",
+        )
+    }
+    missing = [key for key, item in required.items() if not item]
+    if missing:
+        raise ValueError("전용 갑옷 설정 필드가 비었습니다: " + ", ".join(missing))
+    return DedicatedArmourAssignment(
+        source_ceo_key=required["sourceCeoKey"],
+        source_initial_ceo_key=required["sourceInitialCeoKey"],
+        source_armour_type_key=required["sourceArmourTypeKey"],
+        source_armour_value=source_armour_value,
+        armour_value=armour_value,
+        pool_id=str(value.get("poolId") or "").strip(),
+        slot_id=str(value.get("slotId") or "").strip(),
+        armour_ceo_key=str(value.get("armourCeoKey") or "").strip(),
+        initial_ceo_key=str(value.get("initialCeoKey") or "").strip(),
+        armour_type_key=str(value.get("armourTypeKey") or "").strip(),
+        **combat_bonuses,
+    )
 
 
 def _normalize_age_range_clones(data: dict[str, Any]) -> dict[str, Any]:

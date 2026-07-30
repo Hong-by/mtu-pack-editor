@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -19,9 +20,26 @@ from .character_rules import (
     gender_compatible_initial_ceo_key as _gender_compatible_initial_ceo_key,
 )
 from .campaign_script import build_campaign_start_script
+from .ceo_ccd import (
+    CeoCcd,
+    initial_ceo_active_ceos,
+    rebase_dedicated_armour_ceo_as_regular,
+    rebase_dedicated_armour_initial_ceo,
+)
+from .dedicated_armour_pool import (
+    CCD_PACK_PATH,
+    DedicatedArmourPool,
+    DedicatedArmourPoolError,
+    load_dedicated_armour_pools,
+    ordered_active_ccd_pack_paths,
+    resolve_effective_ccd,
+    resolve_pool_status,
+    validate_pool_assignments,
+    verify_pool_asset,
+)
 from .korea_addon import korea_related_template_keys
 from .land_units import validate_land_unit_clone
-from .pfh import read_entry_bytes, read_pfh_index
+from .pfh import find_entry, read_entry_bytes, read_pfh_index
 from .recipe import AgeRangeClone, ArmourTypeClone, AttributeSetClone, CharacterClone, CharacterPatch, Recipe, SkillSetClone, recipe_from_dict
 from .stat_tables import TABLE_ALIASES, StatTarget, resolve_stat_target, resolve_table_name
 
@@ -35,9 +53,18 @@ IMAGE_ONLY_ASSET_PREFIX = "__image_only_reference__"
 TEMP_IMAGE_ASSET_ROOT = ROOT / "work" / "tmp_delta_image_assets"
 TEMP_LUA_SCRIPT_ROOT = ROOT / "work" / "tmp_delta_scripts"
 TEMP_MODEL_ASSET_ROOT = ROOT / "work" / "tmp_delta_model_assets"
+TEMP_DEDICATED_ARMOUR_CCD_ROOT = ROOT / "work" / "tmp_dedicated_armour_ccd"
+DEDICATED_ARMOUR_POOL_ROOTS = (
+    Path(__file__).resolve().parent / "data" / "dedicated_armour_pools",
+    ROOT / "work" / "dedicated_armour_pools",
+)
 SPAWN_SCRIPT_SAVE_VERSION = 8
-CEO_SET_SCRIPT_SAVE_VERSION = 6
-EQUIPMENT_SCRIPT_SAVE_VERSION = 22
+CEO_SET_SCRIPT_SAVE_VERSION = 8
+EQUIPMENT_SCRIPT_SAVE_VERSION = 26
+DEDICATED_ARMOUR_MIGRATION_SAVE_VERSION = 6
+DEDICATED_ARMOUR_REGULAR_CEO_SOURCE = (
+    "3k_main_ancillary_armour_medium_armour_metal_extraordinary"
+)
 CAMPAIGN_SPAWN_SCRIPT_PATH = "script/campaign/3k_main_campaign_map/mod/hby_mtu_pack_editor_player_spawn.lua"
 CAMPAIGN_SPAWN_SCRIPT_PATHS = (
     CAMPAIGN_SPAWN_SCRIPT_PATH,
@@ -111,17 +138,111 @@ GENERIC_FEMALE_COMPATIBILITY = {
         ),
     },
 }
+GENERIC_MALE_COMPATIBILITY = {
+    "earth": {
+        "fallback": "3k_main_ancillary_armour_light_armour_earth_metal_and_water_common",
+        "armour_displays": (
+            "3k_main_ancillary_armour_light_armour_earth_metal_and_water_common",
+            "3k_main_ancillary_armour_light_armour_earth_metal_and_water_refined",
+            "3k_main_ancillary_armour_light_armour_earth_extraordinary",
+            "3k_main_ancillary_armour_light_armour_earth_unique",
+            "3k_main_ancillary_armour_medium_armour_earth_and_metal_common",
+            "3k_main_ancillary_armour_medium_armour_earth_and_metal_refined",
+            "3k_main_ancillary_armour_medium_armour_earth_extraordinary",
+            "3k_main_ancillary_armour_medium_armour_earth_unique",
+            "ep_ancillary_armour_light_armour_earth_extraordinary",
+            "ep_ancillary_armour_light_armour_earth_unique",
+            "ep_ancillary_armour_medium_armour_earth_extraordinary",
+            "ep_ancillary_armour_medium_armour_earth_unique",
+        ),
+    },
+    "fire": {
+        "fallback": "3k_main_ancillary_armour_medium_armour_wood_and_fire_common",
+        "armour_displays": (
+            "3k_main_ancillary_armour_medium_armour_wood_and_fire_common",
+            "3k_main_ancillary_armour_medium_armour_wood_and_fire_refined",
+            "3k_main_ancillary_armour_medium_armour_fire_extraordinary",
+            "3k_main_ancillary_armour_medium_armour_fire_unique",
+            "3k_main_ancillary_armour_heavy_armour_wood_and_fire_common",
+            "3k_main_ancillary_armour_heavy_armour_wood_and_fire_refined",
+            "3k_main_ancillary_armour_heavy_armour_fire_extraordinary",
+            "3k_main_ancillary_armour_heavy_armour_fire_unique",
+            "ep_ancillary_armour_medium_armour_fire_extraordinary",
+            "ep_ancillary_armour_medium_armour_fire_unique",
+            "ep_ancillary_armour_heavy_armour_fire_extraordinary",
+            "ep_ancillary_armour_heavy_armour_fire_unique",
+        ),
+    },
+    "wood": {
+        "fallback": "3k_main_ancillary_armour_medium_armour_wood_and_fire_common",
+        "armour_displays": (
+            "3k_main_ancillary_armour_medium_armour_wood_and_fire_common",
+            "3k_main_ancillary_armour_medium_armour_wood_and_fire_refined",
+            "3k_main_ancillary_armour_medium_armour_wood_extraordinary",
+            "3k_main_ancillary_armour_medium_armour_wood_unique",
+            "3k_main_ancillary_armour_heavy_armour_wood_and_fire_common",
+            "3k_main_ancillary_armour_heavy_armour_wood_and_fire_refined",
+            "3k_main_ancillary_armour_heavy_armour_wood_extraordinary",
+            "3k_main_ancillary_armour_heavy_armour_wood_unique",
+            "ep_ancillary_armour_medium_armour_wood_extraordinary",
+            "ep_ancillary_armour_medium_armour_wood_unique",
+            "ep_ancillary_armour_heavy_armour_wood_extraordinary",
+            "ep_ancillary_armour_heavy_armour_wood_unique",
+        ),
+    },
+    "water": {
+        "fallback": "3k_main_ancillary_armour_strategist_light_armour_water_common",
+        "armour_displays": (
+            "3k_main_ancillary_armour_strategist_light_armour_water_common",
+            "3k_main_ancillary_armour_strategist_light_armour_water_refined",
+            "3k_main_ancillary_armour_strategist_light_armour_water_extraordinary",
+            "3k_main_ancillary_armour_strategist_light_armour_water_unique",
+            "3k_main_ancillary_armour_light_armour_earth_metal_and_water_common",
+            "3k_main_ancillary_armour_light_armour_earth_metal_and_water_refined",
+            "ep_ancillary_armour_strategist_light_armour_water_extraordinary",
+            "ep_ancillary_armour_strategist_light_armour_water_unique",
+        ),
+    },
+    "metal": {
+        "fallback": "3k_main_ancillary_armour_light_armour_earth_metal_and_water_common",
+        "armour_displays": (
+            "3k_main_ancillary_armour_light_armour_earth_metal_and_water_common",
+            "3k_main_ancillary_armour_light_armour_earth_metal_and_water_refined",
+            "3k_main_ancillary_armour_light_armour_metal_extraordinary",
+            "3k_main_ancillary_armour_light_armour_metal_unique",
+            "3k_main_ancillary_armour_medium_armour_earth_and_metal_common",
+            "3k_main_ancillary_armour_medium_armour_earth_and_metal_refined",
+            "3k_main_ancillary_armour_medium_armour_metal_extraordinary",
+            "3k_main_ancillary_armour_medium_armour_metal_unique",
+            "ep_ancillary_armour_light_armour_metal_extraordinary",
+            "ep_ancillary_armour_light_armour_metal_unique",
+            "ep_ancillary_armour_medium_armour_metal_extraordinary",
+            "ep_ancillary_armour_medium_armour_metal_unique",
+        ),
+    },
+}
 # Vanilla has generic female campaign art only for earth, metal, and water.
 # Fire and wood initial CEO records exist, but no matching female art family.
 UNSUPPORTED_GENERIC_FEMALE_ELEMENTS = frozenset({"fire", "wood"})
-# A one-time VMD audit found these MTU art uniforms contain an explicit body
-# model plus exactly one empty `set_body` equipment-injection slot.  Generated
-# variants remove only that slot, retaining melee, shield and ranged slots.
-# Both male and female source heroes are included.  Bodyless wrappers and
-# uniforms without a removable slot are deliberately excluded.
+# A VMD audit found these MTU art uniforms already contain enough baked model
+# geometry to render without armour-driven `set_body` injection.  Generated
+# variants remove that one slot when present and otherwise preserve the
+# already-independent VMD verbatim.  Melee, shield and ranged slots remain
+# untouched.  Both male and female source heroes are included; empty
+# equipment wrappers are deliberately excluded.
 _EQUIPMENT_INDEPENDENT_UNIQUE_MODEL_SOURCES = (
+    (
+        "3k_main_template_historical_lu_bu_hero_fire",
+        "3k_main_lu_bu",
+        "3k_main_hero_skin_male_lu_bu",
+        "set_hero_skins/chinese_hero_skin_male_lu_bu",
+    ),
     ("3k_mtu_template_historical_dong_min_hero_earth", "3k_mtu_dong_min", "3k_mtu_hero_earth_dong_min", "hero_earth_dong_min"),
     ("3k_mtu_template_historical_jian_yong_hero_metal", "3k_mtu_jian_yong", "3k_mtu_hero_metal_jian_yong", "hero_metal_jian_yong"),
+    ("3k_mtu_template_historical_chen_jiu_hero_wood", "3k_mtu_chen_jiu", "3k_mtu_hero_wood_chen_jiu", "hero_wood_pang_de"),
+    ("3k_main_template_historical_huang_zu_hero_wood", "3k_mtu_huang_zu", "3k_mtu_hero_wood_huang_zu", "hero_wood_huang_zu"),
+    ("3k_mtu_template_historical_qu_gong_hero_wood", "3k_mtu_qu_gong", "3k_mtu_hero_wood_qu_gong", "hero_wood_qu_gong"),
+    ("3k_mtu_template_historical_zhang_xun_hero_earth", "3k_mtu_gao_shun", "3k_mtu_hero_earth_zhang_xun", "hero_earth_zhang_xun"),
     ("3k_main_template_historical_lady_cai_yan_hero_water", "3k_mtu_lady_cai_yan", "3k_mtu_hero_water_lady_cai_yan", "hero_water_lady_cai_yan"),
     ("3k_mtu_template_historical_lady_dong_peishan_hero_earth", "3k_mtu_lady_dong_peishan", "3k_mtu_hero_earth_lady_dong_peishan", "hero_earth_lady_dong_peishan"),
     ("3k_mtu_template_historical_lady_du_hero_earth", "3k_mtu_lady_bian_huilan", "3k_mtu_hero_earth_lady_bian_huilan", "hero_earth_lady_bian_huilan"),
@@ -150,6 +271,7 @@ _EQUIPMENT_INDEPENDENT_UNIQUE_MODEL_SOURCES = (
 
 
 def _fixed_unique_model_key(source_key: str, *, definition: bool = False) -> str:
+    source_key = source_key.replace("\\", "_").replace("/", "_")
     if source_key.startswith("3k_"):
         return f"hby_{source_key[3:]}_fixed"
     prefix = "hby_mtu_" if definition else "hby_"
@@ -163,7 +285,14 @@ EQUIPMENT_INDEPENDENT_UNIQUE_MODELS = {
         "source_definition": source_definition,
         "fixed_uniform": _fixed_unique_model_key(source_uniform),
         "fixed_variant": _fixed_unique_model_key(source_variant),
-        "fixed_definition": _fixed_unique_model_key(source_definition, definition=True),
+        # Base-game full-body definitions already have no set_body injection
+        # slot and can be referenced directly.  MTU definitions are copied to
+        # an isolated key so their one equipment injection slot can be removed.
+        "fixed_definition": (
+            source_definition
+            if "/" in source_definition or "\\" in source_definition
+            else _fixed_unique_model_key(source_definition, definition=True)
+        ),
     }
     for template, source_uniform, source_variant, source_definition
     in _EQUIPMENT_INDEPENDENT_UNIQUE_MODEL_SOURCES
@@ -204,6 +333,7 @@ def build_delta_pack(
     processed_patches: list[CharacterPatch] = []
 
     for work_recipe in _processing_recipes(recipe):
+        _validate_hidden_armour_adjustment_links(work_recipe)
         patched_skill_set_keys.update(clone.new_set_key for clone in work_recipe.skill_set_clones)
         changed_stats += _collect_stat_patch_rows(
             session,
@@ -283,7 +413,29 @@ def build_delta_pack(
         processed_clones.extend(work_recipe.character_clones)
         processed_patches.extend(work_recipe.character_patches)
 
-    campaign_script = _campaign_start_spawn_script(processed_clones, processed_patches)
+    active_pack_paths = ordered_active_ccd_pack_paths(
+        Path(session.pack_path),
+        reference_paths or [],
+    )
+    source_ceo_defaults: dict[str, dict[str, Any]] = {}
+    ceo_set_entries = _ceo_set_entries_for_characters(
+        processed_clones,
+        processed_patches,
+        source_ceo_defaults=source_ceo_defaults,
+    )
+    equipment_entries = _equipment_entries_for_characters(
+        processed_clones,
+        processed_patches,
+    )
+    campaign_script = build_campaign_start_script(
+        _spawn_entries_for_clones(processed_clones),
+        ceo_set_entries,
+        equipment_entries,
+        escape=_lua_escape,
+        string_list=_lua_string_list,
+    )
+    dedicated_armour_pool = None
+    dedicated_armour_ccd_path = None
     diagnostic_warnings = [
         *_clone_image_asset_target_warnings(processed_clones),
         *_image_asset_path_warnings([*processed_clones, *processed_patches]),
@@ -297,6 +449,8 @@ def build_delta_pack(
         loc_rows,
         campaign_script,
         diagnostic_warnings,
+        ceo_set_entries=ceo_set_entries,
+        equipment_entries=equipment_entries,
     )
 
     target_key = _new_delta_pack(session)
@@ -313,6 +467,14 @@ def build_delta_pack(
                     campaign_script_path,
                     campaign_script,
                 )
+
+        if dedicated_armour_ccd_path is not None:
+            _write_binary_packed_file(
+                session,
+                target_key,
+                CCD_PACK_PATH,
+                dedicated_armour_ccd_path,
+            )
 
         if loc_rows:
             _write_loc_file(
@@ -380,6 +542,7 @@ def build_delta_pack(
                 f"{copied_model_assets} uniform model asset(s), "
                 f"{copied_fixed_model_assets} equipment-independent model asset(s), "
                 f"{copied_equipment_assets} equipment CEO asset(s), "
+                f"0 dedicated armour CEO CCD(s), "
                 f"and {1 if campaign_script else 0} campaign script(s)."
             ),
         }
@@ -441,6 +604,52 @@ def _processing_recipes(recipe: Recipe) -> list[Recipe]:
         work_recipe["modName"] = recipe.mod_name
         recipes.append(recipe_from_dict(work_recipe))
     return recipes
+
+
+def _validate_hidden_armour_adjustment_links(recipe: Recipe) -> None:
+    skill_clones = {
+        clone.new_set_key: clone
+        for clone in recipe.skill_set_clones
+    }
+    for character in recipe.character_clones:
+        assignment = character.dedicated_armour
+        if assignment is None or assignment.slot_id != "hidden-skill-adjustment":
+            continue
+        source_value = assignment.source_armour_value
+        if source_value is None:
+            raise ValueError(
+                "Hidden combat adjustment is missing the source armour value: "
+                f"{character.new_template_key}"
+            )
+        bonuses = {
+            "armour_bonus": int(assignment.armour_value) - int(source_value),
+            "melee_attack_bonus": int(assignment.melee_attack_bonus),
+            "melee_damage_bonus": int(assignment.melee_damage_bonus),
+            "ap_melee_damage_bonus": int(assignment.ap_melee_damage_bonus),
+            "charge_bonus": int(assignment.charge_bonus),
+            "missile_defence_bonus": int(assignment.missile_defence_bonus),
+        }
+        if not any(bonuses.values()):
+            continue
+        linked_set_keys = {
+            str(overrides.get("skill_set_override") or "")
+            for overrides in character.detail_overrides.values()
+            if overrides.get("skill_set_override")
+        }
+        matching_sets = [
+            skill_clones[set_key]
+            for set_key in linked_set_keys
+            if set_key in skill_clones
+            and all(
+                int(getattr(skill_clones[set_key], field_name)) == bonus
+                for field_name, bonus in bonuses.items()
+            )
+        ]
+        if not matching_sets:
+            raise ValueError(
+                "Hidden combat adjustment is not linked to the generated character skill set: "
+                f"template={character.new_template_key}, bonuses={bonuses}"
+            )
 
 
 def _recipe_with_processed_characters(
@@ -939,7 +1148,6 @@ def _collect_attribute_set_clone_rows(
         source_dbs,
         opened_pack_keys,
     )
-
     created = 0
     for clone in clones:
         _ensure_attribute_set_rows_available(tables, source_dbs, clone.source_set_key)
@@ -991,6 +1199,20 @@ def _collect_skill_set_clone_rows(
         for alias, table_name in table_names.items()
     }
     opened_pack_keys = opened_pack_keys or {str(session.pack_path.resolve()): session.pack_key}
+    # Material snapshots contain multiple physical DB files for the same table
+    # folder (vanilla, DLC, MTU, and other supported references).  Reading only
+    # the first resolved path made the web summary advertise real skills that
+    # the pack builder could not later resolve.  Aggregate every matching table
+    # from the active material session before resolving replacements and copying
+    # their dependency graph.
+    _merge_dependency_tables_from_pack(
+        session,
+        session.pack_key,
+        session.list_tables(),
+        aliases,
+        tables,
+        source_dbs,
+    )
     _merge_vanilla_dependency_tables(session, aliases, table_names, tables, source_dbs)
     _merge_reference_dependency_tables(
         session,
@@ -1001,6 +1223,7 @@ def _collect_skill_set_clone_rows(
         source_dbs,
         opened_pack_keys,
     )
+    known_skill_keys = _known_character_skill_keys(tables)
 
     created = 0
     for clone in clones:
@@ -1022,7 +1245,17 @@ def _collect_skill_set_clone_rows(
         used_skill_keys: set[str] = set()
         for source_node in source_nodes:
             old_key = str(source_node.get("key") or "")
-            new_skill_key = clone.replacements.get(old_key, source_node.get("character_skill_key"))
+            source_skill_key = str(source_node.get("character_skill_key") or "")
+            requested_skill_key = str(clone.replacements.get(old_key) or "")
+            # Recipes saved by older UI builds can contain catalog-only pseudo
+            # keys.  Never write those broken references into a pack.  The UI
+            # now exposes only real DB-backed keys; stale recipes safely retain
+            # the source node skill instead of creating a dependency-less node.
+            new_skill_key = (
+                requested_skill_key
+                if requested_skill_key in known_skill_keys
+                else source_skill_key
+            )
             if new_skill_key:
                 used_skill_keys.add(str(new_skill_key))
             new_node = {
@@ -1046,9 +1279,167 @@ def _collect_skill_set_clone_rows(
             }
             _upsert_delta_row(rows_by_table, table_names["character_skill_node_links"], _skill_link_key, new_link)
 
+        if clone.armour_bonus:
+            _add_hidden_armour_bonus_skill(
+                clone,
+                source_nodes,
+                tables,
+                table_names,
+                rows_by_table,
+            )
+
         _copy_skill_effect_dependencies(tables, table_names, rows_by_table, used_skill_keys)
         created += 1
     return created
+
+
+def _known_character_skill_keys(
+    tables: dict[str, list[dict[str, Any]]],
+) -> set[str]:
+    keys = {
+        str(row.get("character_skill_key") or "")
+        for row in tables.get("character_skill_nodes", [])
+    }
+    keys.update(
+        str(row.get("character_skill_key") or "")
+        for row in tables.get("character_skill_level_to_effects_junctions", [])
+    )
+    keys.update(
+        str(row.get("key") or "")
+        for row in tables.get("character_skills", [])
+    )
+    return {key for key in keys if key}
+
+
+def _add_hidden_armour_bonus_skill(
+    clone: SkillSetClone,
+    source_nodes: list[dict[str, Any]],
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+) -> None:
+    bonus_effects = [
+        (
+            "armour",
+            int(clone.armour_bonus),
+            "3k_main_effect_character_stat_mod_armour",
+            "character_to_character_own",
+        ),
+    ]
+    active_effects = [
+        (label, bonus, effect_key, effect_scope)
+        for label, bonus, effect_key, effect_scope in bonus_effects
+        if bonus
+    ]
+    for label, bonus, _effect_key_value, _effect_scope in active_effects:
+        if not -500 <= bonus <= 500:
+            raise ValueError(
+                f"Hidden {label} skill bonus is outside -500..500: {bonus}"
+            )
+    if not source_nodes:
+        raise ValueError(
+            f"Cannot add combat bonuses to empty skill set: {clone.new_set_key}"
+        )
+
+    skill_key, node_key = _hidden_armour_skill_keys(
+        clone.new_set_key,
+        int(clone.armour_bonus),
+    )
+    source_skill = _find_row(
+        tables.get("character_skills", []),
+        "key",
+        "3k_main_skill_bodyguard_water_strategist_alt_2",
+    )
+    if not source_skill:
+        source_skill = next(iter(tables.get("character_skills", [])), None)
+    if not source_skill:
+        raise ValueError("Vanilla character_skills data is required for hidden combat bonuses.")
+    skill_table = str(
+        source_skill.get("_sourceTablePath")
+        or table_names.get("character_skills")
+        or ""
+    )
+    if not skill_table:
+        raise ValueError("Output table for the hidden armour skill was not resolved.")
+    hidden_skill = {
+        **source_skill,
+        "key": skill_key,
+        "image_path": "",
+        "localised_name": "Hidden combat adjustment",
+        "localised_description": "Generated character combat adjustment",
+        "unlocked_at_rank": 0,
+        "is_background_skill": False,
+        "is_female_only_background_skill": False,
+        "is_male_only_background_skill": False,
+        "background_weighting": 0.0,
+    }
+    _upsert_delta_row(
+        rows_by_table,
+        skill_table,
+        "key",
+        _clean_source_row(hidden_skill),
+    )
+
+    hidden_node = {
+        **source_nodes[0],
+        "key": node_key,
+        "character_skill_node_set_key": clone.new_set_key,
+        "character_skill_key": skill_key,
+        "indent": 0.0,
+        "tier": 0.0,
+        "points_on_creation": 1,
+        "required_num_parents": 0,
+        "visible_in_ui": False,
+        "can_meet_parent_requirment_with_children": True,
+    }
+    _upsert_delta_row(
+        rows_by_table,
+        table_names["character_skill_nodes"],
+        "key",
+        _clean_source_row(hidden_node),
+    )
+
+    effect_table = str(table_names.get("character_skill_level_to_effects_junctions") or "")
+    if not effect_table:
+        raise ValueError("Output table for the hidden combat effects was not resolved.")
+    for _label, bonus, effect_key, effect_scope in active_effects:
+        _upsert_delta_row(
+            rows_by_table,
+            effect_table,
+            _skill_effect_key,
+            {
+                "character_skill_key": skill_key,
+                "effect_key": effect_key,
+                "effect_scope": effect_scope,
+                "level": 1,
+                "value": float(bonus),
+            },
+        )
+        _copy_matching_rows(
+            tables,
+            table_names,
+            rows_by_table,
+            "effects",
+            lambda row, expected=effect_key: _effect_key(row) == expected,
+            _effect_key,
+        )
+
+
+def _hidden_armour_skill_keys(
+    skill_set_key: str,
+    armour_bonus: int,
+) -> tuple[str, str]:
+    profile = f"armour:{int(armour_bonus)}"
+    skill_checksum = zlib.crc32(profile.encode("utf-8")) & 0xFFFFFFFF
+    skill_token = f"{skill_checksum:08x}"
+    skill_key = f"hby_mtu_hidden_armour_adjustment_{skill_token}"
+    node_profile = f"{skill_set_key}\0{skill_key}"
+    node_checksum = zlib.crc32(node_profile.encode("utf-8")) & 0xFFFFFFFF
+    node_token = f"{node_checksum:08x}"
+    return (
+        skill_key,
+        f"hby_mtu_hidden_armour_adjustment_node_{node_token}",
+    )
 
 
 def _collect_character_patch_rows(
@@ -1812,7 +2203,8 @@ def _collect_character_clone_rows(
                         f"template={clone.new_template_key}, requested={requested_initial_ceo}, "
                         f"source={raw_initial_ceo}"
                     )
-                new_detail["initial_ceos"] = raw_initial_ceo
+                else:
+                    new_detail["initial_ceos"] = raw_initial_ceo
             compatible_initial_ceo = _clone_initial_ceo_key(
                 clone,
                 new_detail.get("initial_ceos"),
@@ -1863,6 +2255,126 @@ def _preserve_unique_armour_equipment(
             clone,
             default_equipment_ceo_keys=tuple(_unique_strings(defaults)),
         )
+
+
+def _materialize_dedicated_armour_db_rows(
+    tables: dict[str, list[dict[str, Any]]],
+    table_names: dict[str, str],
+    source_dbs: dict[str, dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    loc_rows: dict[str, str],
+    clone: CharacterClone,
+) -> None:
+    assignment = clone.dedicated_armour
+    if assignment is None:
+        return
+
+    initial_rows = tables.setdefault("ceo_initial_datas", [])
+    source_initial = _find_row(
+        initial_rows,
+        "key",
+        assignment.source_initial_ceo_key,
+    )
+    if not source_initial:
+        raise ValueError(
+            "전용 갑옷 기준 초기 CEO DB row를 찾지 못했습니다: "
+            f"{assignment.source_initial_ceo_key}"
+        )
+    initial_table = str(
+        source_initial.get("_sourceTablePath")
+        or table_names.get("ceo_initial_datas")
+        or ""
+    )
+    if not initial_table:
+        raise ValueError("전용 갑옷 ceo_initial_datas 출력 테이블을 찾지 못했습니다.")
+    new_initial = {
+        **source_initial,
+        "key": assignment.initial_ceo_key,
+    }
+    _upsert_delta_row(
+        rows_by_table,
+        initial_table,
+        "key",
+        _clean_source_row(new_initial),
+    )
+    if not _find_row(initial_rows, "key", assignment.initial_ceo_key):
+        initial_rows.append({**new_initial, "_sourceTablePath": initial_table})
+
+    variant_rows = tables.setdefault("equipment_variants_armours", [])
+    source_variants = [
+        row
+        for row in variant_rows
+        if str(row.get("ceos_key") or "") == assignment.source_ceo_key
+        and str(row.get("armour") or "") == assignment.source_armour_type_key
+    ]
+    if not source_variants:
+        raise ValueError(
+            "전용 갑옷 기준 CEO의 장비 variant를 찾지 못했습니다: "
+            f"ceo={assignment.source_ceo_key}, armour={assignment.source_armour_type_key}"
+        )
+    for source_variant in source_variants:
+        variant_table = str(
+            source_variant.get("_sourceTablePath")
+            or table_names.get("equipment_variants_armours")
+            or ""
+        )
+        if not variant_table:
+            raise ValueError("전용 갑옷 equipment variant 출력 테이블을 찾지 못했습니다.")
+        new_variant = {
+            **source_variant,
+            "ceos_key": assignment.armour_ceo_key,
+            "armour": assignment.armour_type_key,
+        }
+        _upsert_delta_row(
+            rows_by_table,
+            variant_table,
+            _equipment_variant_key,
+            _clean_source_row(new_variant),
+        )
+        if not any(
+            _equipment_variant_key(row) == _equipment_variant_key(new_variant)
+            for row in variant_rows
+        ):
+            variant_rows.append({**new_variant, "_sourceTablePath": variant_table})
+
+    armour_rows = tables.setdefault("unit_armour_types", [])
+    source_armour = _find_row(
+        armour_rows,
+        "key",
+        assignment.source_armour_type_key,
+    )
+    if not source_armour:
+        raise ValueError(
+            "전용 갑옷 기준 방어구 stat row를 찾지 못했습니다: "
+            f"{assignment.source_armour_type_key}"
+        )
+    armour_table = str(
+        source_armour.get("_sourceTablePath")
+        or table_names.get("unit_armour_types")
+        or ""
+    )
+    if not armour_table:
+        raise ValueError("전용 갑옷 unit_armour_types 출력 테이블을 찾지 못했습니다.")
+    new_armour = {
+        **source_armour,
+        "key": assignment.armour_type_key,
+        "armour_value": assignment.armour_value,
+    }
+    _upsert_delta_row(
+        rows_by_table,
+        armour_table,
+        "key",
+        _clean_source_row(new_armour),
+    )
+    if not _find_row(armour_rows, "key", assignment.armour_type_key):
+        armour_rows.append({**new_armour, "_sourceTablePath": armour_table})
+
+    owner_name = str(clone.display_name or "").strip()
+    armour_name = f"{owner_name}의 전용 갑옷" if owner_name else "전용 갑옷"
+    loc_rows[f"ceo_nodes_title_{assignment.armour_ceo_key}"] = armour_name
+    loc_rows[f"ceo_nodes_description_{assignment.armour_ceo_key}"] = (
+        "신규 장수를 위해 제작된 전용 갑옷입니다."
+    )
 
 
 def _register_equipment_independent_unique_model_rows(
@@ -1985,9 +2497,9 @@ def _with_equipment_independent_unique_model_compatibility(
 ) -> CharacterClone:
     """Keep an audited unique body while switching its equipment chain to generic.
 
-    The fixed uniform works for both genders.  Female earth, metal and water
-    clones also receive the existing generic image aliases because those
-    armour display families are known to exist in vanilla.
+    The fixed uniform works for both genders.  Custom portraits also receive
+    the generic armour-display aliases for their gender and element so a later
+    equipment change cannot make the campaign panel image disappear.
     """
     model = _equipment_independent_model_for_clone(clone)
     if not model:
@@ -2007,14 +2519,15 @@ def _with_equipment_independent_unique_model_compatibility(
 
     art_overrides["uniform"] = model["fixed_uniform"]
     image_assets = list(clone.image_assets or [])
-    if not is_male:
-        compatibility = GENERIC_FEMALE_COMPATIBILITY.get(_element_from_subtype(subtype))
-        if compatibility:
-            art_overrides["fallback_composite_display"] = str(compatibility["fallback"])
-            image_assets = _generic_female_image_alias_assets(
-                image_assets,
-                tuple(compatibility["armour_displays"]),
-            )
+    compatibility = (
+        GENERIC_MALE_COMPATIBILITY if is_male else GENERIC_FEMALE_COMPATIBILITY
+    ).get(_element_from_subtype(subtype))
+    if compatibility:
+        art_overrides["fallback_composite_display"] = str(compatibility["fallback"])
+        image_assets = _generic_image_alias_assets(
+            image_assets,
+            tuple(compatibility["armour_displays"]),
+        )
 
     detail_overrides = {
         mode: dict(overrides)
@@ -2028,6 +2541,13 @@ def _with_equipment_independent_unique_model_compatibility(
         detail_overrides=detail_overrides,
         art_overrides=art_overrides,
         image_assets=image_assets,
+        # The fixed full-body model uses a safe generic initial CEO.  Do not
+        # grant the source hero's character-bound armour as a separate item;
+        # explicitly selected equipment-set items remain untouched.
+        default_equipment_ceo_keys=tuple(
+            key for key in (clone.default_equipment_ceo_keys or ())
+            if not _is_armour_ceo_key(key)
+        ),
     )
 
 
@@ -2090,6 +2610,13 @@ def _with_generic_female_art_compatibility(
 
 
 def _generic_female_image_alias_assets(
+    image_assets: list[dict[str, str]],
+    armour_displays: tuple[str, ...],
+) -> list[dict[str, str]]:
+    return _generic_image_alias_assets(image_assets, armour_displays)
+
+
+def _generic_image_alias_assets(
     image_assets: list[dict[str, str]],
     armour_displays: tuple[str, ...],
 ) -> list[dict[str, str]]:
@@ -2578,9 +3105,11 @@ def _collect_character_dependency_rows(
                     tables,
                     table_names,
                     source_dbs,
-                    overrides.get("initial_ceos")
-                    or clone.initial_ceo_source_key
-                    or source_detail.get("initial_ceos"),
+                    (
+                        overrides.get("initial_ceos")
+                        or clone.initial_ceo_source_key
+                        or source_detail.get("initial_ceos")
+                    ),
                     clone.source_template_key,
                     preserve_generic=_clone_preserves_generic_initial_ceo(clone),
                 )
@@ -3132,13 +3661,20 @@ def _character_dependency_aliases() -> dict[str, list[str]]:
             "db/character_skill_node_links_tables/_mtu_characters_skills",
             "db/character_skill_node_links_tables/_mtu_characters",
         ],
+        "character_skills": [
+            "character_skills",
+            "db/character_skills_tables/_mtu_characters_skills",
+            "db/character_skills_tables/data__",
+        ],
         "character_skill_level_to_effects_junctions": [
             "character_skill_level_to_effects_junctions",
             "db/character_skill_level_to_effects_junctions_tables/_mtu_characters_skills",
+            "db/character_skill_level_to_effects_junctions_tables/data__",
         ],
         "effects": [
             "effects",
             "db/effects_tables/_mtu_characters_skills_effects",
+            "db/effects_tables/data__",
         ],
         "effect_bonus_value_ids_unit_sets": [
             "effect_bonus_value_ids_unit_sets",
@@ -3825,6 +4361,14 @@ def _copy_skill_effect_dependencies(
 ) -> None:
     if not skill_keys:
         return
+    _copy_matching_rows_once(
+        tables,
+        table_names,
+        rows_by_table,
+        "character_skills",
+        lambda row, keys=skill_keys: str(row.get("key") or "") in keys,
+        "key",
+    )
     effect_keys: set[str] = set()
     for row in tables.get("character_skill_level_to_effects_junctions", []):
         if str(row.get("character_skill_key") or "") not in skill_keys:
@@ -4938,6 +5482,121 @@ def _table_key_for_path(path: str, source_db: dict[str, Any]) -> str | Any | Non
     return None
 
 
+def _dedicated_armour_pool_for_clones(
+    clones: list[CharacterClone],
+    active_pack_paths: list[Path],
+) -> DedicatedArmourPool | None:
+    assignments = [
+        clone.dedicated_armour
+        for clone in clones
+        if clone.dedicated_armour is not None
+    ]
+    if not assignments:
+        return None
+    pool_ids = {assignment.pool_id for assignment in assignments}
+    if len(pool_ids) != 1:
+        raise DedicatedArmourPoolError(
+            "서로 다른 전용 갑옷 CEO 풀을 한 팩에 섞을 수 없습니다."
+        )
+    pools = load_dedicated_armour_pools(DEDICATED_ARMOUR_POOL_ROOTS)
+    pool_id = next(iter(pool_ids))
+    pool = next((item for item in pools if item.pool_id == pool_id), None)
+    if pool is None:
+        raise DedicatedArmourPoolError(
+            f"전용 갑옷 CEO 풀을 찾지 못했습니다: {pool_id}"
+        )
+    status = resolve_pool_status([pool], active_pack_paths)
+    if not status.available:
+        raise DedicatedArmourPoolError(status.reason)
+    validate_pool_assignments(pool, assignments)
+    verify_pool_asset(pool)
+    return pool
+
+
+def _materialize_dedicated_armour_ccd(
+    pool: DedicatedArmourPool | None,
+    clones: list[CharacterClone],
+    active_pack_paths: list[Path],
+) -> Path | None:
+    if pool is None:
+        return None
+    if pool.mode != "precompiled":
+        raise DedicatedArmourPoolError(
+            "런타임 동적 CCD 복제는 비활성화되었습니다. "
+            "Assembly Kit로 미리 컴파일한 전용 갑옷 풀만 사용할 수 있습니다."
+        )
+    if pool.ccd_path is None:
+        raise DedicatedArmourPoolError(
+            f"전용 갑옷 풀 CCD 파일이 없습니다: {pool.pool_id}"
+        )
+    assignments = [
+        clone.dedicated_armour
+        for clone in clones
+        if clone.dedicated_armour is not None
+    ]
+    if not assignments:
+        return pool.ccd_path
+
+    try:
+        ccd = CeoCcd.from_path(pool.ccd_path)
+        for assignment in assignments:
+            rebase_dedicated_armour_ceo_as_regular(
+                ccd,
+                source_ceo_key=DEDICATED_ARMOUR_REGULAR_CEO_SOURCE,
+                destination_ceo_key=assignment.armour_ceo_key,
+            )
+            rebase_dedicated_armour_initial_ceo(
+                ccd,
+                source_initial_ceo_key=assignment.source_initial_ceo_key,
+                destination_initial_ceo_key=assignment.initial_ceo_key,
+                source_armour_ceo_key=assignment.source_ceo_key,
+                destination_armour_ceo_key=assignment.armour_ceo_key,
+            )
+        materialized = ccd.to_bytes()
+        reopened = CeoCcd.from_bytes(materialized)
+        for assignment in assignments:
+            expected = [
+                assignment.armour_ceo_key
+                if key == assignment.source_ceo_key
+                else key
+                for key in initial_ceo_active_ceos(
+                    reopened,
+                    assignment.source_initial_ceo_key,
+                )
+            ]
+            actual = initial_ceo_active_ceos(
+                reopened,
+                assignment.initial_ceo_key,
+            )
+            if actual != expected:
+                raise DedicatedArmourPoolError(
+                    "Dedicated armour initial CEO verification failed after "
+                    f"serialization: {assignment.initial_ceo_key}"
+                )
+    except (OSError, ValueError) as error:
+        raise DedicatedArmourPoolError(
+            f"Failed to materialize dedicated armour CEO data: {pool.pool_id}"
+        ) from error
+
+    seed = "\n".join(
+        (
+            pool.pool_id,
+            *(
+                f"{assignment.slot_id}:{assignment.source_initial_ceo_key}:"
+                f"{assignment.source_ceo_key}:{assignment.initial_ceo_key}:"
+                f"{assignment.armour_ceo_key}"
+                for assignment in assignments
+            ),
+        )
+    ).encode("utf-8")
+    TEMP_DEDICATED_ARMOUR_CCD_ROOT.mkdir(parents=True, exist_ok=True)
+    output_path = (
+        TEMP_DEDICATED_ARMOUR_CCD_ROOT
+        / f"{hashlib.sha256(seed).hexdigest()[:16]}_ceo_data.ccd"
+    )
+    output_path.write_bytes(materialized)
+    return output_path
+
 def _new_delta_pack(session: RpfmPackSession) -> str:
     response = session.client.send("NewPack")
     _raise_rpfm_error(response)
@@ -4954,6 +5613,25 @@ def _write_lua_text_file(session: RpfmPackSession, target_key: str, path: str, c
     source_path.write_text(contents, encoding="utf-8", newline="\n")
     _raise_rpfm_error(session.client.send({
         "AddPackedFiles": [target_key, [str(source_path)], [{"File": normalized_path}], None]
+    }))
+
+
+def _write_binary_packed_file(
+    session: RpfmPackSession,
+    target_key: str,
+    path: str,
+    source_path: Path,
+) -> None:
+    normalized_path = _normalize_pack_path(path)
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Packed file source is missing: {source_path}")
+    _raise_rpfm_error(session.client.send({
+        "AddPackedFiles": [
+            target_key,
+            [str(source_path.resolve())],
+            [{"File": normalized_path}],
+            None,
+        ]
     }))
 
 
@@ -5460,6 +6138,12 @@ def _write_equipment_independent_model_assets(
     source_paths: list[str] = []
     destination_paths: list[dict[str, str]] = []
     for fixed_definition, (table_path, model) in requested.items():
+        if fixed_definition == model["source_definition"]:
+            # The base-game definition is already a complete full-body VMD
+            # with no equipment-injection slot.  The generated variant row can
+            # safely reference it in place; duplicating a vanilla asset would
+            # make the editor depend on the user's install path.
+            continue
         source_definition_path = _normalize_pack_path(
             "variantmeshes/variantmeshdefinitions/"
             f"{model['source_definition']}.variantmeshdefinition"
@@ -5498,6 +6182,9 @@ def _write_equipment_independent_model_assets(
         source_paths.append(str(local_path))
         destination_paths.append({"File": target_definition_path})
 
+    if not source_paths:
+        return 0
+
     response = session.client.send({
         "AddPackedFiles": [target_key, source_paths, destination_paths, None]
     })
@@ -5512,17 +6199,48 @@ def _freeze_variant_mesh_body_slot(source_text: str) -> str:
         r"(?im)^[ \t]*<SLOT\s+name=[\"']set_body[\"']\s*/>\s*\r?\n?"
     )
     body_slot_count = len(pattern.findall(source_text))
-    if body_slot_count != 1:
+    if body_slot_count > 1:
         raise ValueError(
-            "Variant mesh definition does not contain exactly one removable set_body slot."
+            "Variant mesh definition contains more than one set_body slot."
         )
-    if not re.search(
-        r"<SLOT\s+name=[\"']body[\"'][^>]*>\s*<VARIANT_MESH\s+model=",
+
+    model_count = len(re.findall(
+        r"<VARIANT_MESH\b[^>]*\bmodel\s*=",
         source_text,
         re.IGNORECASE,
-    ):
+    ))
+    if model_count == 0:
         raise ValueError(
-            "Variant mesh definition has no explicit body model; removing set_body would hide the character."
+            "Variant mesh definition has no baked model geometry; removing set_body would hide the character."
+        )
+
+    # A zero-slot VMD is already equipment-independent and must be copied
+    # unchanged.  For a removable injection slot, require either the regular
+    # semantic body slot or a complete custom assembly (head plus torso).  The
+    # latter covers MTU male definitions such as Zhang Xun without accepting a
+    # head-only equipment wrapper.
+    if body_slot_count == 0:
+        return source_text
+
+    has_semantic_body = bool(re.search(
+        r"<SLOT\s+name=[\"']body[\"'][^>]*>\s*<VARIANT_MESH\b[^>]*\bmodel\s*=",
+        source_text,
+        re.IGNORECASE,
+    ))
+    has_head = bool(re.search(
+        r"<SLOT\s+name=[\"']head[\"'][^>]*>\s*<VARIANT_MESH\b[^>]*\bmodel\s*=",
+        source_text,
+        re.IGNORECASE,
+    ))
+    has_torso = bool(re.search(
+        r"<SLOT\s+name=[\"'](?:chest_armour|tunic_top|tunic_bottom|collar)[\"'][^>]*>"
+        r"\s*<VARIANT_MESH\b[^>]*\bmodel\s*=",
+        source_text,
+        re.IGNORECASE,
+    ))
+    if not has_semantic_body and not (has_head and has_torso):
+        raise ValueError(
+            "Variant mesh definition has no complete baked body model; removing set_body would hide the character."
         )
     fixed_text = pattern.sub("", source_text, count=1)
     return fixed_text
@@ -6084,6 +6802,9 @@ def _write_delta_diagnostics(
     loc_rows: dict[str, str],
     campaign_script: str | None,
     warnings: list[str] | None = None,
+    *,
+    ceo_set_entries: list[dict[str, Any]] | None = None,
+    equipment_entries: list[dict[str, Any]] | None = None,
 ) -> None:
     diagnostics_path = output_path.with_suffix(".diagnostics.json")
     diagnostics = {
@@ -6104,8 +6825,52 @@ def _write_delta_diagnostics(
         "campaignScriptPaths": list(CAMPAIGN_SPAWN_SCRIPT_PATHS) if campaign_script else [],
         "campaignScript": campaign_script or "",
         "spawnEntries": _spawn_entries_for_clones(recipe.character_clones),
-        "ceoSetEntries": _ceo_set_entries_for_characters(recipe.character_clones, recipe.character_patches),
-        "equipmentEntries": _equipment_entries_for_characters(recipe.character_clones, recipe.character_patches),
+        "ceoSetEntries": (
+            ceo_set_entries
+            if ceo_set_entries is not None
+            else _ceo_set_entries_for_characters(
+                recipe.character_clones,
+                recipe.character_patches,
+            )
+        ),
+        "equipmentEntries": (
+            equipment_entries
+            if equipment_entries is not None
+            else _equipment_entries_for_characters(
+                recipe.character_clones,
+                recipe.character_patches,
+            )
+        ),
+        "dedicatedArmourAssignments": [
+            {
+                "template": clone.new_template_key,
+                "poolId": clone.dedicated_armour.pool_id,
+                "slotId": clone.dedicated_armour.slot_id,
+                "sourceCeoKey": clone.dedicated_armour.source_ceo_key,
+                "sourceInitialCeoKey": (
+                    clone.dedicated_armour.source_initial_ceo_key
+                ),
+                "sourceArmourTypeKey": clone.dedicated_armour.source_armour_type_key,
+                "sourceArmourValue": clone.dedicated_armour.source_armour_value,
+                "armourCeoKey": clone.dedicated_armour.armour_ceo_key,
+                "initialCeoKey": clone.dedicated_armour.initial_ceo_key,
+                "armourTypeKey": clone.dedicated_armour.armour_type_key,
+                "armourValue": clone.dedicated_armour.armour_value,
+                "armourBonus": (
+                    clone.dedicated_armour.armour_value
+                    - clone.dedicated_armour.source_armour_value
+                    if clone.dedicated_armour.source_armour_value is not None
+                    else None
+                ),
+                "meleeAttackBonus": clone.dedicated_armour.melee_attack_bonus,
+                "meleeDamageBonus": clone.dedicated_armour.melee_damage_bonus,
+                "apMeleeDamageBonus": clone.dedicated_armour.ap_melee_damage_bonus,
+                "chargeBonus": clone.dedicated_armour.charge_bonus,
+                "missileDefenceBonus": clone.dedicated_armour.missile_defence_bonus,
+            }
+            for clone in recipe.character_clones
+            if clone.dedicated_armour is not None
+        ],
         "imageAssets": [
             {
                 "owner": getattr(item, "new_template_key", None) or getattr(item, "template_key", None),
@@ -6207,6 +6972,8 @@ def _equipment_entries_for_characters(
                 "3k_mtu_ancillary_lady_ma_yunlus_armour_unique"
             ] if "3k_mtu_ancillary_armour_lady_ma_yunlus_armour_unique" in grant_equipment_ceos else [],
             "removeCeos": remove_ceos,
+            "existingOnly": False,
+            "bestEffort": False,
         })
     return entries
 
@@ -6214,16 +6981,25 @@ def _equipment_entries_for_characters(
 def _ceo_set_entries_for_characters(
     clones: list[CharacterClone],
     patches: list[CharacterPatch],
+    *,
+    source_ceo_defaults: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
+    source_ceo_defaults = source_ceo_defaults or {}
     for item in [*clones, *patches]:
         template_key = getattr(item, "new_template_key", None) or getattr(item, "template_key", "")
         raw_title_ceo_key = getattr(item, "title_ceo_key", "") or ""
+        defaults = source_ceo_defaults.get(template_key) or {}
+        if not raw_title_ceo_key:
+            raw_title_ceo_key = str(defaults.get("titleCeoKey") or "")
         title_ceo_key = raw_title_ceo_key if _is_career_title_ceo_key(raw_title_ceo_key) else ""
         generic_title_ceos = () if not raw_title_ceo_key or title_ceo_key else (raw_title_ceo_key,)
+        selected_trait_ceos = tuple(getattr(item, "trait_ceo_keys", ()))
+        if not selected_trait_ceos and not getattr(item, "trait_set_key", None):
+            selected_trait_ceos = tuple(defaults.get("traitCeoKeys") or ())
         add_ceos = _unique_lua_ceo_keys([
             *generic_title_ceos,
-            *getattr(item, "trait_ceo_keys", ()),
+            *selected_trait_ceos,
         ])
         if not template_key or (not title_ceo_key and not add_ceos):
             continue
@@ -6247,6 +7023,67 @@ def _ceo_set_entries_for_characters(
             "removeCeos": remove_ceos,
         })
     return entries
+
+
+def _source_initial_ceo_defaults_for_clones(
+    clones: list[CharacterClone],
+    active_pack_paths: list[Path],
+) -> dict[str, dict[str, Any]]:
+    dedicated_clones = [
+        clone
+        for clone in clones
+        if clone.dedicated_armour is not None
+    ]
+    if not dedicated_clones:
+        return {}
+
+    effective = resolve_effective_ccd(active_pack_paths)
+    if effective is None:
+        raise DedicatedArmourPoolError(
+            "전용 갑옷 기준 장수의 초기 특성을 읽을 campaigns/ceo_data.ccd가 없습니다."
+        )
+    try:
+        index = read_pfh_index(effective.pack_path)
+        ccd = CeoCcd.from_bytes(
+            read_entry_bytes(
+                effective.pack_path,
+                find_entry(index, effective.packed_path),
+            )
+        )
+    except (OSError, ValueError) as error:
+        raise DedicatedArmourPoolError(
+            "전용 갑옷 기준 장수의 초기 특성을 읽지 못했습니다: "
+            f"{effective.pack_path}"
+        ) from error
+
+    result: dict[str, dict[str, Any]] = {}
+    for clone in dedicated_clones:
+        assignment = clone.dedicated_armour
+        assert assignment is not None
+        active_ceos = initial_ceo_active_ceos(
+            ccd,
+            assignment.source_initial_ceo_key,
+        )
+        title_ceo = next(
+            (
+                key
+                for key in active_ceos
+                if _is_career_title_ceo_key(key)
+                and "_career_childhood_" not in key
+            ),
+            "",
+        )
+        trait_ceos = [
+            key
+            for key in active_ceos
+            if "_ceo_trait_" in key
+        ]
+        if title_ceo or trait_ceos:
+            result[clone.new_template_key] = {
+                "titleCeoKey": title_ceo,
+                "traitCeoKeys": trait_ceos,
+            }
+    return result
 
 
 def _is_career_title_ceo_key(value: Any) -> bool:

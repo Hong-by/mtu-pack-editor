@@ -103,6 +103,16 @@ class AllowReferenceBackedCloneSourcesTest(unittest.TestCase):
         result = allow_reference_backed_clone_sources(msgs)
         self.assertEqual(result, [])
 
+    def test_allows_source_character_template_not_found(self) -> None:
+        msgs = [
+            self._msg(
+                "invalid_character_clone",
+                "Source character template not found: 3k_main_template_historical_lu_bu_hero_fire",
+            )
+        ]
+        result = allow_reference_backed_clone_sources(msgs)
+        self.assertEqual(result, [])
+
     def test_allows_character_template_not_found_for_patch(self) -> None:
         msgs = [self._msg("invalid_character_patch", "Character template not found: some_template")]
         result = allow_reference_backed_clone_sources(msgs)

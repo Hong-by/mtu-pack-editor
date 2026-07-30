@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Cache-Control" content="no-store">
     <title>MTU 장수 제작소</title>
-    <link rel="stylesheet" href="./app.css?v=2.1.1">
+    <link rel="stylesheet" href="./app.css?v=2.1.2-da1">
   </head>
   <body>
     <header class="app-header">
@@ -19,7 +19,10 @@
       <div class="header-actions">
         <input id="inputPackPath" class="path-input" value="work\packs\my_hero.pack" aria-label="입력 pack 경로">
         <input id="outputPackPath" class="path-input" value="output\my_hero_patch.pack" aria-label="출력 pack 경로">
-        <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">work\packs\refs\mtu_reference_core.pack</textarea>
+        <div class="reference-path-group">
+          <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">work\packs\refs\mtu_reference_core.pack</textarea>
+          <small class="reference-path-help">CEO 데이터를 바꾸는 모드는 실제 게임 로드 순서대로 한 줄에 하나씩 추가하세요. 갑옷 방어력 보정은 기존 갑옷을 바꾸지 않습니다.</small>
+        </div>
         <select id="saveModeSelect" class="save-mode" aria-label="저장 방식">
           <option value="patch_pack" selected>패치 pack</option>
           <option value="save_as">Save As 원본 복사</option>
@@ -236,6 +239,17 @@
             <label><span>장비 세트</span><select id="sourceEquipmentSet"></select></label>
             <div id="sourceEquipmentSetSummary" class="equipment-summary"></div>
             <div id="sourceEquipmentSummary" class="equipment-summary"></div>
+            <div class="dedicated-armour-panel">
+              <label class="check-row">
+                <input id="sourceDedicatedArmourEnabled" type="checkbox">
+                <span>기존 갑옷 유지 + 장수 전용 방어력 보정</span>
+              </label>
+              <label>
+                <span>방어력 보정치</span>
+                <input id="sourceDedicatedArmourValue" type="number" min="-500" max="500" step="1" value="0">
+              </label>
+              <div id="sourceDedicatedArmourStatus" class="equipment-note"></div>
+            </div>
             <label><span>기존 부대 프로필</span><select id="sourceUnitProfile"></select></label>
             <div id="sourceUnitSummary" class="equipment-summary"></div>
           </div>
@@ -284,22 +298,22 @@
       <textarea id="recipeText" spellcheck="false"></textarea>
     </dialog>
 
-    <script src="./app-data.js?v=2.1.1"></script>
-    <script src="./reference_names.js?v=2.1.1"></script>
-    <script src="./app-labels.js?v=2.1.1"></script>
-    <script src="./app-catalog.js?v=2.1.1"></script>
-    <script src="./app-appearance.js?v=2.1.1"></script>
-    <script src="./app-state.js?v=2.1.1"></script>
-    <script src="./app-workflow.js?v=2.1.1"></script>
-    <script src="./app-title-effects.js?v=2.1.1"></script>
-    <script src="./app-normalize.js?v=2.1.1"></script>
-    <script src="./app-form-helpers.js?v=2.1.1"></script>
-    <script src="./app-render.js?v=2.1.1"></script>
-    <script src="./app-editor.js?v=2.1.1"></script>
-    <script src="./app-queue.js?v=2.1.1"></script>
-    <script src="./app-skills.js?v=2.1.1"></script>
-    <script src="./app-recipe.js?v=2.1.1"></script>
-    <script src="./app-server.js?v=2.1.1"></script>
-    <script src="./app.js?v=2.1.1"></script>
+    <script src="./app-data.js?v=2.1.2-da1"></script>
+    <script src="./reference_names.js?v=2.1.2-da1"></script>
+    <script src="./app-labels.js?v=2.1.2-da1"></script>
+    <script src="./app-catalog.js?v=2.1.2-da1"></script>
+    <script src="./app-appearance.js?v=2.1.2-da1"></script>
+    <script src="./app-state.js?v=2.1.2-da1"></script>
+    <script src="./app-workflow.js?v=2.1.2-da1"></script>
+    <script src="./app-title-effects.js?v=2.1.2-da1"></script>
+    <script src="./app-normalize.js?v=2.1.2-da1"></script>
+    <script src="./app-form-helpers.js?v=2.1.2-da1"></script>
+    <script src="./app-render.js?v=2.1.2-da1"></script>
+    <script src="./app-editor.js?v=2.1.2-da1"></script>
+    <script src="./app-queue.js?v=2.1.2-da1"></script>
+    <script src="./app-skills.js?v=2.1.2-da1"></script>
+    <script src="./app-recipe.js?v=2.1.2-da1"></script>
+    <script src="./app-server.js?v=2.1.2-da1"></script>
+    <script src="./app.js?v=2.1.2-da1"></script>
   </body>
 </html>

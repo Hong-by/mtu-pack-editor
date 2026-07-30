@@ -1,5 +1,41 @@
 'use strict';
 
+const WORK_QUEUE_STORAGE_KEY = 'mtu-pack-editor.work-queue.v1';
+const WORK_QUEUE_STORAGE_VERSION = 1;
+const MAX_PERSISTED_WORK_QUEUE_ITEMS = 500;
+
+function normalizePersistedWorkQueue(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item) => (
+      item
+      && typeof item === 'object'
+      && !Array.isArray(item)
+      && typeof item.kind === 'string'
+      && typeof item.type === 'string'
+      && typeof item.title === 'string'
+      && (!('payload' in item) || (
+        item.payload
+        && typeof item.payload === 'object'
+        && !Array.isArray(item.payload)
+      ))
+    ))
+    .slice(0, MAX_PERSISTED_WORK_QUEUE_ITEMS);
+}
+
+function loadPersistedWorkQueue() {
+  try {
+    const raw = window.localStorage?.getItem(WORK_QUEUE_STORAGE_KEY);
+    if (!raw) return [];
+    const stored = JSON.parse(raw);
+    const queue = Array.isArray(stored) ? stored : stored?.queue;
+    return normalizePersistedWorkQueue(queue);
+  } catch (error) {
+    console.warn('[MTU Pack Editor] failed to restore work queue', error);
+    return [];
+  }
+}
+
 function loadOperationTimings() {
   try {
     const raw = window.localStorage?.getItem(OPERATION_TIMING_STORAGE_KEY);
@@ -13,6 +49,7 @@ function loadOperationTimings() {
 const state = {
   characters: SAMPLE_CHARACTERS,
   options: null,
+  dedicatedArmour: null,
   selectedKey: SAMPLE_CHARACTERS[0].key,
   filter: 'all',
   mode: 'edit',
@@ -20,7 +57,7 @@ const state = {
   workflowGender: 'male',
   editGender: 'male',
   createGender: 'male',
-  queue: [],
+  queue: loadPersistedWorkQueue(),
   serverMessages: [],
   lastRecipe: null,
   loadingPack: false,
@@ -59,6 +96,23 @@ const INTERNAL_MATERIAL_BUILD = {
 };
 
 const $ = (id) => document.getElementById(id);
+
+function persistWorkQueue() {
+  try {
+    window.localStorage?.setItem(
+      WORK_QUEUE_STORAGE_KEY,
+      JSON.stringify({
+        version: WORK_QUEUE_STORAGE_VERSION,
+        savedAt: new Date().toISOString(),
+        queue: normalizePersistedWorkQueue(state.queue),
+      }),
+    );
+    return true;
+  } catch (error) {
+    console.warn('[MTU Pack Editor] failed to persist work queue', error);
+    return false;
+  }
+}
 
 function invalidateDerivedCaches() {
   state.derivedCache = {};

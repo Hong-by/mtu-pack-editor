@@ -94,6 +94,41 @@ class MaterialLocMergeTest(unittest.TestCase):
         self.assertEqual(selected["plain_key_used_by_ui"], "{{tr:nested_key}}")
         self.assertEqual(selected["nested_key"], "Nested text")
 
+    def test_reference_core_select_loc_files_keeps_ability_mechanic_labels(self) -> None:
+        materials = {
+            "loc": {
+                MERGED_KOREAN_LOC_PATH: {
+                    "sourcePath": "merged",
+                    "locPath": MERGED_KOREAN_LOC_PATH,
+                    "rows": {
+                        "unit_stat_localisations_onscreen_name_stat_resistance_all": "피해 저항",
+                        "unit_attributes_imued_effect_text_fatigue_immune": "피로 면역",
+                        "unit_ability_types_onscreen_name_test_ability": "발동 시 강화",
+                        "effects_description_test_fatigue_resistance": "피로 누적 속도",
+                    },
+                }
+            }
+        }
+
+        selected = select_loc_files(materials, {})[MERGED_KOREAN_LOC_PATH]
+
+        self.assertEqual(
+            selected["unit_stat_localisations_onscreen_name_stat_resistance_all"],
+            "피해 저항",
+        )
+        self.assertEqual(
+            selected["unit_attributes_imued_effect_text_fatigue_immune"],
+            "피로 면역",
+        )
+        self.assertEqual(
+            selected["unit_ability_types_onscreen_name_test_ability"],
+            "발동 시 강화",
+        )
+        self.assertEqual(
+            selected["effects_description_test_fatigue_resistance"],
+            "피로 누적 속도",
+        )
+
     def test_reference_core_select_loc_files_keeps_title_candidates_from_initial_ceo(self) -> None:
         materials = {
             "loc": {

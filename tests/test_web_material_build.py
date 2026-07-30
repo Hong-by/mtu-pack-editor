@@ -340,109 +340,18 @@ class WebMaterialBuildTest(unittest.TestCase):
 
         self.assertEqual("남성 금 장군", info["label"])
 
-    def test_background_title_effects_are_keyed_and_cataloged(self) -> None:
-        web._load_title_effect_catalog.cache_clear()
-        effects_by_title, entries = web._load_title_effect_catalog()
 
-        commander_scholar = web._title_effect_for_key_or_label(
-            effects_by_title,
-            "학자",
-            "bg_3k_main_character_background_commander_scholar",
-        )
-        strategist_academic = web._title_effect_for_key_or_label(
-            effects_by_title,
-            "학자",
-            "bg_3k_main_character_background_strategist_academic",
-        )
-        self.assertIn("권위 +15", commander_scholar["effectSummary"])
-        self.assertIn("지략 +15", strategist_academic["effectSummary"])
 
-        catalog = web._build_title_catalog([])
-        by_key = {item["key"]: item for item in catalog}
-        self.assertIn("bg_3k_main_character_background_commander_officer", by_key)
-        self.assertIn("bg_3k_main_character_background_cao_cao", by_key)
-        self.assertEqual("군관", by_key["bg_3k_main_character_background_commander_officer"]["label"])
-        self.assertEqual(
-            "bg_3k_main_character_background_commander_officer",
-            by_key["bg_3k_main_character_background_commander_officer"]["titleCeoKey"],
-        )
-        self.assertTrue(by_key["bg_3k_main_character_background_commander_officer"]["displayOnlyTitle"])
-        self.assertEqual("background", by_key["bg_3k_main_character_background_commander_officer"]["titleSourceKind"])
-        self.assertTrue(any(item.get("key") == "bg_mtu_character_background_xun_yu" for item in entries))
-
-    def test_mtu_background_title_priority_wins_duplicate_labels(self) -> None:
-        web._load_title_effect_catalog.cache_clear()
-        effects_by_title, _entries = web._load_title_effect_catalog()
-
-        label_lookup = effects_by_title[web._title_effect_lookup_key("백마장군")]
-        self.assertEqual("방덕", label_lookup["owner"])
-        self.assertEqual("bg_3k_main_character_background_pang_de", label_lookup["key"])
-
-        label_only = web._title_effect_for_key_or_label(effects_by_title, "백마장군")
-        self.assertEqual({}, label_only)
-
-        pang_de = web._title_effect_for_key_or_label(
-            effects_by_title,
-            "백마장군",
-            "bg_3k_main_character_background_pang_de",
-        )
-        self.assertEqual("방덕", pang_de["owner"])
-
-    def test_background_title_aliases_are_lookup_keys(self) -> None:
-        web._load_title_effect_catalog.cache_clear()
-        effects_by_title, _entries = web._load_title_effect_catalog()
-
-        primary = effects_by_title[web._title_effect_lookup_key("혈기넘치는 군관")]
-        alias = effects_by_title[web._title_effect_lookup_key("애꾸눈의 망명자")]
-
-        self.assertEqual("하후돈", primary["owner"])
-        self.assertEqual(primary["key"], alias["key"])
-        self.assertEqual("혈기넘치는 군관", alias["title"])
-
-    def test_background_title_elements_follow_stat_bonuses(self) -> None:
-        web._load_title_effect_catalog.cache_clear()
-        _, entries = web._load_title_effect_catalog()
-        by_key = {entry["key"]: entry for entry in entries if entry.get("key")}
-
-        self.assertEqual(
-            ["earth", "fire"],
-            by_key["bg_3k_main_character_background_commander_officer"]["elements"],
-        )
-        self.assertEqual(
-            ["metal", "earth"],
-            by_key["bg_3k_main_character_background_sentinel_clerk"]["elements"],
-        )
-        self.assertEqual(
-            ["wood", "metal"],
-            by_key["bg_3k_main_character_background_champion_farmer"]["elements"],
-        )
-        self.assertEqual(
-            ["fire", "wood"],
-            by_key["bg_3k_main_character_background_vanguard_brawler"]["elements"],
-        )
-        self.assertEqual(
-            ["water", "metal"],
-            by_key["bg_3k_main_character_background_strategist_academic"]["elements"],
-        )
-        self.assertEqual(
-            ["metal", "water"],
-            by_key["bg_3k_main_character_background_recruited_yellow_dragon"]["elements"],
-        )
-
-    def test_skill_effect_catalog_is_keyed_and_added_to_skill_index(self) -> None:
+    def test_assembly_kit_skill_catalog_enriches_only_real_skill_index_entries(self) -> None:
         web._load_skill_effect_catalog.cache_clear()
         by_key, entries = web._load_skill_effect_catalog()
 
-        manipulation = by_key["3k_main_skill_special_active_manipulation"]
-        self.assertEqual("난세의 간웅", manipulation["name"])
-        self.assertEqual("조조", manipulation["owner"])
-        self.assertEqual("earth", manipulation["element"])
-        self.assertTrue(manipulation["exclusive"])
-
-        lu_lingqi = by_key["3k_mtu_skill_special_active_lu_lingqi_fury"]
-        self.assertEqual("여희의 분노", lu_lingqi["name"])
-        self.assertEqual("fire", lu_lingqi["element"])
-        self.assertTrue(any(item["key"] == "3k_mtu_skill_special_active_xun_yu_vision" for item in entries))
+        tranquility = by_key["3k_dlc04_skill_healer_tranquillity"]
+        self.assertEqual("평안", tranquility["name"])
+        self.assertEqual("assembly_kit", tranquility["sourceKind"])
+        self.assertTrue(
+            all(item.get("sourceKind") == "assembly_kit" for item in entries)
+        )
 
         summary = web._summarize_skill_trees(
             {
@@ -455,16 +364,29 @@ class WebMaterialBuildTest(unittest.TestCase):
             {},
             [],
         )
-        self.assertIn("3k_main_skill_special_active_manipulation", summary["skillIndex"])
-        self.assertIn("3k_mtu_skill_special_active_lu_lingqi_fury", summary["skillIndex"])
-        self.assertEqual(
-            "난세의 간웅",
-            summary["skillIndex"]["3k_main_skill_special_active_manipulation"]["name"],
-        )
-        self.assertEqual(
-            "fire",
-            summary["skillIndex"]["3k_mtu_skill_special_active_lu_lingqi_fury"]["element"],
-        )
+        self.assertEqual({}, summary["skillIndex"])
+
+        real_key = "3k_dlc04_skill_healer_tranquillity"
+        real_index = {
+            real_key: {
+                "key": real_key,
+                "name": "",
+                "description": "",
+                "effects": [],
+                "effectSummary": "",
+                "element": "",
+                "source": "",
+                "owner": "",
+                "exclusive": False,
+                "sources": [{"setKey": "actual_set", "nodeKey": "actual_node"}],
+            },
+        }
+        web._add_catalog_skill_index_entries(real_index)
+
+        self.assertEqual({real_key}, set(real_index))
+        self.assertEqual("평안", real_index[real_key]["name"])
+        self.assertEqual("DLC", real_index[real_key]["source"])
+        self.assertTrue(real_index[real_key]["catalogMetadata"])
 
     def test_skill_effect_summary_strips_game_ui_markup(self) -> None:
         summary = web._effect_summary([
@@ -993,7 +915,15 @@ class WebMaterialBuildTest(unittest.TestCase):
                     {"key": "pack_skillset", "nodes": [{"key": "pack_node"}]},
                 ],
                 "nodeCount": 1,
-                "skillIndex": {"pack_skill": {"name": "Pack Skill"}},
+                "skillIndex": {
+                    "pack_skill": {"name": "Pack Skill"},
+                    "localized_skill": {
+                        "name": "Sound Advice",
+                        "description": "English description",
+                        "effectSummary": "권위 +4 · skill loyal advice +1",
+                        "sources": [{"setKey": "pack_skillset"}],
+                    },
+                },
             },
         }
         source = {
@@ -1006,6 +936,12 @@ class WebMaterialBuildTest(unittest.TestCase):
                 "skillIndex": {
                     "pack_skill": {"name": "Duplicate Skill"},
                     "internal_skill": {"name": "Internal Skill"},
+                    "localized_skill": {
+                        "name": "충언",
+                        "description": "비록 듣기에는 쓰지만 도움이 되는 조언입니다.",
+                        "effectSummary": "권위 +4 (해당 인물)",
+                        "sources": [{"setKey": "internal_skillset"}],
+                    },
                 },
             },
         }
@@ -1020,6 +956,106 @@ class WebMaterialBuildTest(unittest.TestCase):
         self.assertEqual(skill_trees["nodeCount"], 2)
         self.assertEqual(skill_trees["skillIndex"]["pack_skill"]["name"], "Pack Skill")
         self.assertEqual(skill_trees["skillIndex"]["internal_skill"]["name"], "Internal Skill")
+        localized = skill_trees["skillIndex"]["localized_skill"]
+        self.assertEqual(localized["name"], "충언")
+        self.assertEqual(localized["description"], "비록 듣기에는 쓰지만 도움이 되는 조언입니다.")
+        self.assertEqual(localized["effectSummary"], "권위 +4 (해당 인물)")
+        self.assertEqual(localized["sources"], [{"setKey": "pack_skillset"}])
+
+    def test_catalog_korean_metadata_replaces_stale_english_skill_labels(self) -> None:
+        skill_index = {
+            "test_skill": {
+                "name": "Words of Encouragement",
+                "description": "English description",
+                "effectSummary": "authority +4",
+                "sources": [],
+            }
+        }
+        catalog = {
+            "name": "격려와 응원",
+            "description": "병사들을 북돋는 따뜻한 격려입니다.",
+            "effectSummary": "권위 +4 (해당 인물)",
+            "effectRows": [{"effectKey": "test_effect"}],
+            "sourceKind": "assembly_kit",
+        }
+
+        with patch.object(web, "_catalog_skill_effect_info", return_value=catalog):
+            web._add_catalog_skill_index_entries(skill_index)
+
+        skill = skill_index["test_skill"]
+        self.assertEqual(skill["name"], "격려와 응원")
+        self.assertEqual(skill["description"], "병사들을 북돋는 따뜻한 격려입니다.")
+        self.assertEqual(skill["effectSummary"], "권위 +4 (해당 인물)")
+        self.assertEqual(skill["effectRows"], [{"effectKey": "test_effect"}])
+        self.assertEqual(skill["effectDataSource"], "assembly_kit")
+
+    def test_material_ability_grant_is_expanded_into_korean_mechanics(self) -> None:
+        tables = {
+            "effect_bonus_value_unit_ability_junctions": [
+                {
+                    "effect": "test_skill_effect",
+                    "bonus_value_id": "enable",
+                    "unit_ability": "test_ability",
+                }
+            ],
+            "unit_abilities": [{"key": "test_ability"}],
+            "unit_special_abilities": [
+                {
+                    "key": "test_ability",
+                    "passive": False,
+                    "effect_range": 50,
+                    "affect_self": False,
+                    "num_effected_friendly_units": -1,
+                    "recharge_time": 60,
+                }
+            ],
+            "special_ability_to_special_ability_phase_junctions": [
+                {
+                    "special_ability": "test_ability",
+                    "phase": "test_phase",
+                    "order": 1,
+                }
+            ],
+            "special_ability_phases": [
+                {
+                    "id": "test_phase",
+                    "duration": 25,
+                    "recharge_time": 60,
+                }
+            ],
+            "special_ability_phase_stat_effects": [
+                {
+                    "phase": "test_phase",
+                    "stat": "scalar_speed",
+                    "how": "mult",
+                    "value": 1.25,
+                }
+            ],
+        }
+        loc_text = {
+            "unit_abilities_onscreen_name_test_ability": "충언",
+            "unit_ability_types_onscreen_name_test_ability": "발동시 강화",
+        }
+
+        summaries = web._material_ability_effect_summaries(tables, loc_text)
+
+        self.assertEqual(
+            summaries["test_skill_effect"],
+            "능력: 충언 — 발동 시 강화 · 반경 50m 내 아군 · 지속 25초 · 이동 속도 +25% · "
+            "재사용 대기시간 60초",
+        )
+        rendered = web._effect_summary(
+            [
+                {
+                    "effectKey": "test_skill_effect",
+                    "name": "skill loyal advice",
+                    "value": 1,
+                    "abilitySummary": summaries["test_skill_effect"],
+                }
+            ]
+        )
+        self.assertNotIn("skill loyal advice", rendered)
+        self.assertIn("이동 속도 +25%", rendered)
 
     def test_skill_index_infers_source_from_key_prefix(self) -> None:
         dlc = web._skill_index_entry("3k_dlc05_skill_special_active_dance_of_steel", {}, [])
@@ -1203,6 +1239,98 @@ class WebMaterialBuildTest(unittest.TestCase):
 
         self.assertIn(core.resolve(), paths)
         self.assertIn(local_kr.resolve(), paths)
+
+    def test_armour_bonus_build_automatically_adds_vanilla_database_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            core = root / "mtu_reference_core.pack"
+            game_dir = root / "data"
+            game_dir.mkdir()
+            database = game_dir / "database.pack"
+            input_pack = game_dir / "my_hero.pack"
+            core.write_bytes(b"core")
+            database.write_bytes(b"database")
+            input_pack.write_bytes(b"input")
+            recipe = web.recipe_from_dict({
+                "skillSetClones": [{
+                    "sourceSetKey": "source_set",
+                    "newSetKey": "new_set",
+                    "replacements": [],
+                    "armourBonus": 45,
+                    "meleeAttackBonus": 10,
+                    "meleeDamageBonus": 11,
+                    "apMeleeDamageBonus": 12,
+                    "chargeBonus": 13,
+                    "missileDefenceBonus": 14,
+                }],
+            })
+
+            with (
+                patch.object(web, "DEFAULT_GAME_DATA_DIRS", [game_dir]),
+                patch.object(web, "DEFAULT_GAME_LOCAL_PACKS", ()),
+            ):
+                paths = web._build_reference_pack_paths(
+                    {
+                        "inputPath": str(input_pack),
+                        "referencePackPaths": [str(core)],
+                    },
+                    recipe,
+                )
+
+        self.assertIn(core.resolve(), paths)
+        self.assertIn(database.resolve(), paths)
+
+    def test_build_without_armour_bonus_does_not_add_database_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            core = root / "mtu_reference_core.pack"
+            game_dir = root / "data"
+            game_dir.mkdir()
+            database = game_dir / "database.pack"
+            core.write_bytes(b"core")
+            database.write_bytes(b"database")
+            recipe = web.recipe_from_dict({})
+
+            with (
+                patch.object(web, "DEFAULT_GAME_DATA_DIRS", [game_dir]),
+                patch.object(web, "DEFAULT_GAME_LOCAL_PACKS", ()),
+            ):
+                paths = web._build_reference_pack_paths(
+                    {"referencePackPaths": [str(core)]},
+                    recipe,
+                )
+
+        self.assertEqual(paths, [core.resolve()])
+
+    def test_attack_bonus_alone_adds_vanilla_database_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            core = root / "mtu_reference_core.pack"
+            game_dir = root / "data"
+            game_dir.mkdir()
+            database = game_dir / "database.pack"
+            core.write_bytes(b"core")
+            database.write_bytes(b"database")
+            recipe = web.recipe_from_dict({
+                "skillSetClones": [{
+                    "sourceSetKey": "source_set",
+                    "newSetKey": "new_set",
+                    "replacements": [],
+                    "meleeAttackBonus": 9,
+                }],
+            })
+
+            with (
+                patch.object(web, "DEFAULT_GAME_DATA_DIRS", [game_dir]),
+                patch.object(web, "DEFAULT_GAME_LOCAL_PACKS", ()),
+            ):
+                paths = web._build_reference_pack_paths(
+                    {"referencePackPaths": [str(core)]},
+                    recipe,
+                )
+
+        self.assertIn(core.resolve(), paths)
+        self.assertIn(database.resolve(), paths)
 
     def test_auxiliary_catalog_does_not_append_korea_without_db_rows(self) -> None:
         character_data = {"pack": {"characters": []}}

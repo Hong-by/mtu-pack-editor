@@ -8,7 +8,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .rpfm_runtime import resolve_rpfm_server
+from .rpfm_runtime import (
+    prepare_rpfm_config_redirect,
+    resolve_rpfm_server,
+    rpfm_process_environment,
+)
 
 
 ROOT = Path(os.environ.get("TK_PACK_EDITOR_ROOT", Path(__file__).resolve().parents[1])).resolve()
@@ -35,10 +39,10 @@ def _ensure_rpfm_server() -> None:
     if not rpfm_server.is_file():
         raise ValueError(f"RPFM server binary not found: {rpfm_server}")
     _stop_stale_rpfm_processes(rpfm_server.name)
-    redirect_root = ROOT / "work" / "rpfm-runtime-config"
-    redirect_root.mkdir(parents=True, exist_ok=True)
-    redirect_path = redirect_root / f"config-{int(time.time() * 1000)}"
-    (rpfm_server.parent / "config_folder.txt").write_text(str(redirect_path), encoding="utf-8")
+    # This bundled RPFM build requires a fresh, non-existing redirected config
+    # directory on every launch. Reusing its previous target causes WinError
+    # 183; omitting the redirect makes it collide with its default path.
+    prepare_rpfm_config_redirect(ROOT, rpfm_server.parent)
     log_path = ROOT / "work" / "rpfm-server.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     if RPFM_LOG_HANDLE is not None and not RPFM_LOG_HANDLE.closed:
@@ -105,11 +109,7 @@ def _rpfm_env() -> dict[str, str]:
         if upper == "PATH" and any(existing.upper() == "PATH" for existing in env):
             continue
         env[key] = value
-    if os.name != "nt":
-        config_root = _rpfm_local_appdata_root()
-        config_root.mkdir(parents=True, exist_ok=True)
-        env["XDG_CONFIG_HOME"] = str(config_root)
-    return env
+    return rpfm_process_environment(ROOT, env)
 
 
 def _port_open(host: str, port: int) -> bool:
