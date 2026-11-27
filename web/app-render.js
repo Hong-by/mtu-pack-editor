@@ -7,8 +7,19 @@ function renderRoster({ syncSelection = true, renderSelection = true } = {}) {
   const list = $('characterList');
   list.innerHTML = '';
   const visibleCharacters = rosterCharactersForCurrentGender();
+  const factionSelect = $('rosterFaction');
+  const factionOptions = new Map();
+  for (const character of rosterCharacters()) {
+    for (const faction of character.rosterFactions || []) factionOptions.set(faction.key, faction.label);
+  }
+  if (state.rosterFaction !== 'unknown' && !factionOptions.has(state.rosterFaction)) state.rosterFaction = 'all';
+  factionSelect.innerHTML = '<option value="all">모든 진영</option>'
+    + [...factionOptions].sort((a, b) => a[1].localeCompare(b[1], 'ko')).map(([key, label]) =>
+      `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join('')
+    + '<option value="unknown">시작 진영 미확인</option>';
+  factionSelect.value = state.rosterFaction;
   const filtered = visibleCharacters.filter((character) => {
-    const matchesQuery = !query || String(character.rosterSearchText || '').includes(query);
+    const matchesQuery = !query || discoveryMatches(`${character.rosterSearchText} ${(character.rosterFactions || []).map(f => f.label).join(' ')} ${character.key} ${elementMeta(character.element).name} ${elementMeta(character.element).label}`, $('searchInput').value);
     return matchesQuery && matchesRosterFilter(character);
   });
   if (syncSelection && !filtered.some((character) => realTemplateKey(character) === state.selectedKey) && filtered.length) {
@@ -16,7 +27,9 @@ function renderRoster({ syncSelection = true, renderSelection = true } = {}) {
   }
 
   $('rosterCount').textContent = `${filtered.length}명`;
+  $('rosterConditions').textContent = [state.workflowGender === 'female' ? '여성' : '남성', state.filter === 'all' ? '모든 오행' : (elementMeta(state.filter).label + ' ' + elementMeta(state.filter).name), state.favoritesOnly ? '즐겨찾기만' : '', $('searchInput').value ? `검색: ${$('searchInput').value}` : ''].filter(Boolean).join(' · ');
   state.rosterResultCount = filtered.length;
+  if (state.rosterFaction !== 'all') $('rosterConditions').textContent += ` · ${factionSelect.selectedOptions[0].textContent}`;
   state.rosterFilteredCharacters = filtered;
   state.rosterRenderedCount = 0;
   if (!filtered.length) {
@@ -45,6 +58,7 @@ function renderRosterCard(character) {
     <div class="card-main">
       <strong>${sourceBadgeMarkup(character)} ${escapeHtml(displayNameWithDummyMarker(character))}</strong>
       <span title="${escapeHtml(rosterTitleTooltip(character))}">${meta.name} · ${escapeHtml(rosterTitleLabel(character))}</span>
+      ${(character.rosterFactions || []).length ? `<span>${escapeHtml(character.rosterFactions.map(f => f.label).join(' · '))}</span>` : ''}
     </div>
     <div class="card-actions">
       <span class="roster-element">${meta.label}</span>

@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tk_pack_builder.rpfm_runtime import (
     ensure_rpfm_config_redirect,
@@ -12,9 +13,17 @@ from tk_pack_builder.rpfm_runtime import (
     rpfm_process_environment,
     runtime_rpfm_dir,
 )
+from tk_pack_builder.web_runtime import _rpfm_env
 
 
 class RpfmRuntimeTest(unittest.TestCase):
+    def test_rpfm_server_defaults_to_warning_logs(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TK_RPFM_LOG_LEVEL", None)
+            env = _rpfm_env()
+
+        self.assertEqual(env["RUST_LOG"], "warn")
+
     def test_app_root_keeps_runtime_inside_writable_work_folder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "MTU Pack Editor"

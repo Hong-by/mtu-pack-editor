@@ -25,6 +25,7 @@ RPFM_SERVER_CANDIDATES = [
 DEFAULT_RPFM_SERVER = next((path for path in RPFM_SERVER_CANDIDATES if path.is_file()), RPFM_SERVER_CANDIDATES[0])
 RPFM_PROCESS: subprocess.Popen[bytes] | None = None
 RPFM_LOG_HANDLE: Any | None = None
+RPFM_LOG_MAX_BYTES = 16 * 1024 * 1024
 
 def _ensure_rpfm_server() -> None:
     global RPFM_PROCESS, RPFM_LOG_HANDLE
@@ -47,6 +48,13 @@ def _ensure_rpfm_server() -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     if RPFM_LOG_HANDLE is not None and not RPFM_LOG_HANDLE.closed:
         RPFM_LOG_HANDLE.close()
+    try:
+        if log_path.is_file() and log_path.stat().st_size > RPFM_LOG_MAX_BYTES:
+            log_path.unlink()
+    except OSError:
+        # Log cleanup must never prevent pack creation. The warning-only
+        # logging level still stops the file from growing further.
+        pass
     RPFM_LOG_HANDLE = log_path.open("ab")
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     RPFM_PROCESS = subprocess.Popen(
@@ -109,7 +117,12 @@ def _rpfm_env() -> dict[str, str]:
         if upper == "PATH" and any(existing.upper() == "PATH" for existing in env):
             continue
         env[key] = value
-    return rpfm_process_environment(ROOT, env)
+    runtime_env = rpfm_process_environment(ROOT, env)
+    # The server's INFO trace serialises every decoded/saved DB command.  A
+    # large multi-character build can otherwise write hundreds of megabytes
+    # of duplicate diagnostic text while the same payload crosses WebSocket.
+    runtime_env["RUST_LOG"] = os.environ.get("TK_RPFM_LOG_LEVEL", "warn")
+    return runtime_env
 
 
 def _port_open(host: str, port: int) -> bool:

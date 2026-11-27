@@ -96,6 +96,22 @@ function usesSharedPuzzleModel(character) {
   return /(?:^|[\\/_\s-])sad_artsets(?:[\\/_\s-]|$)/.test(imagePaths);
 }
 
+function hasKoreaUniquePortrait(character) {
+  // Current Korea templates have no legacy faction metadata. Use their actual
+  // mode retinues, and require a resolved, character-specific illustration.
+  const isKorea = isKoreaRosterCharacter(character);
+  const portrait = String(character?.portraitPath || '').toLowerCase();
+  const resolved = String(character?.portraitImagePath || '').toLowerCase();
+  return isKorea && hasRealTemplateRow(character) && hasUniqueImageSet(character)
+    && Boolean(portrait && resolved)
+    && !/(?:generic|scripted|dummy|placeholder|sad_artsets)/.test(`${portrait} ${resolved} ${character?.cardPath || ''}`);
+}
+
+function isKoreaRosterCharacter(character) {
+  return (character?.details || []).some(detail => /(?:^|_)korea(?:n)?_/.test(String(detail?.retinue || '')))
+    || (character?.rosterFactions || []).some(f => /^ironic_faction_(?:goguryeo|bakaja|shitla|tamno|gaya|buyeo|korea_ye)$/.test(f.key));
+}
+
 function generatedTemplatePoolSearchText(character) {
   return [
     realTemplateKey(character),
@@ -165,7 +181,7 @@ function isLowInformationGeneratedName(value) {
 }
 
 function isLowQualityGeneratedCharacter(character) {
-  if (usesSharedPuzzleModel(character)) return true;
+  if (usesSharedPuzzleModel(character)) return !hasKoreaUniquePortrait(character);
   if (hasFactionRosterMetadata(character) || hasUniqueImageSet(character)) return false;
   const combined = generatedTemplatePoolSearchText(character);
   if (isGeneratedTemplatePoolKey(character)) return true;
@@ -175,7 +191,8 @@ function isLowQualityGeneratedCharacter(character) {
 }
 
 function isTemplateVariantPoolCharacter(character) {
-  if (usesSharedPuzzleModel(character)) return true;
+  if (isKoreaRosterCharacter(character) && !hasKoreaUniquePortrait(character)) return true;
+  if (usesSharedPuzzleModel(character)) return !hasKoreaUniquePortrait(character);
   if (hasFactionRosterMetadata(character) || hasUniqueImageSet(character)) return false;
   const combined = generatedTemplatePoolSearchText(character);
   return /(?:^|[_\s-])scripted(?:[_\s-]|$)/.test(combined)
@@ -306,6 +323,11 @@ function matchesKoreaFactionFilter(character, filterKey) {
 }
 
 function matchesRosterFilter(character) {
+  const faction = state.rosterFaction || 'all';
+  const factions = character.rosterFactions || [];
+  if (faction === 'unknown' && factions.length) return false;
+  if (faction !== 'all' && faction !== 'unknown' && !factions.some(item => item.key === faction)) return false;
+  if (state.favoritesOnly && !isFavoriteCharacter(character)) return false;
   if (!matchesGender(character, state.workflowGender)) return false;
   if (state.filter === 'all') return true;
   if (state.filter === 'recommended') return isRecommendedRosterCharacter(character);
@@ -361,10 +383,10 @@ function saveFavoriteCharacterKeys() {
 }
 
 function appearanceGalleryCharacters() {
-  const query = normalizeLookupText(state.imageGalleryQuery);
+  const query = String(state.imageGalleryQuery || '').trim();
   const items = selectableImageAppearances();
   const filtered = query
-    ? items.filter((appearance) => normalizeLookupText(appearanceSearchText(appearance)).includes(query))
+    ? items.filter((appearance) => discoveryMatches(appearanceSearchText(appearance), query))
     : items;
   return sortFavoriteAppearances(filtered);
 }
@@ -374,14 +396,16 @@ function appearanceFavoriteKey(item) {
 }
 
 function isFavoriteAppearance(itemOrKey) {
+  if (typeof itemOrKey !== 'string' && itemOrKey?.imageAliases?.some((key) => state.favoriteAppearanceKeys.has(key))) return true;
   const key = typeof itemOrKey === 'string' ? itemOrKey : appearanceFavoriteKey(itemOrKey);
   return Boolean(key && state.favoriteAppearanceKeys.has(key));
 }
 
 function toggleFavoriteAppearance(key) {
   if (!key) return;
-  if (state.favoriteAppearanceKeys.has(key)) {
-    state.favoriteAppearanceKeys.delete(key);
+  const grouped = selectableImageAppearances().find((item) => item.key === key);
+  if (isFavoriteAppearance(grouped || key)) {
+    for (const alias of grouped?.imageAliases || [key]) state.favoriteAppearanceKeys.delete(alias);
   } else {
     state.favoriteAppearanceKeys.add(key);
   }
@@ -439,7 +463,7 @@ function currentGallerySelectionKey(galleryCharacters = appearanceGalleryCharact
     return state.selectedAppearanceCardKey;
   }
   const selectedCharacter = galleryCharacters.find((character) => (
-    appearanceKeyForGalleryCharacter(character) === selectedAppearanceKey
+    appearanceKeyForGalleryCharacter(character) === selectedAppearanceKey || character.imageAliases?.includes(selectedAppearanceKey)
   ));
   return galleryCardKey(selectedCharacter);
 }

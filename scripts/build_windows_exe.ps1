@@ -20,6 +20,11 @@ if (-not $SkipPyInstallerInstall) {
 }
 
 if (Test-Path $appDir) {
+    $resolvedApp = [System.IO.Path]::GetFullPath($appDir)
+    $resolvedDist = [System.IO.Path]::GetFullPath($distRoot).TrimEnd('\') + '\'
+    if (-not $resolvedApp.StartsWith($resolvedDist, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove a build directory outside dist: $resolvedApp"
+    }
     Remove-Item -LiteralPath $appDir -Recurse -Force
 }
 
@@ -31,6 +36,8 @@ if (Test-Path $appDir) {
     --clean `
     --add-data "tk_pack_builder\data\assembly_kit_title_effects.ko.json;tk_pack_builder\data" `
     --add-data "tk_pack_builder\data\assembly_kit_skill_effects.ko.json;tk_pack_builder\data" `
+    --add-data "tk_pack_builder\data\verified_ceo_registry.json;tk_pack_builder\data" `
+    --add-data "tk_pack_builder\data\gathering_ko.loc.json;tk_pack_builder\data" `
     --add-data "tk_pack_builder\data\dedicated_armour_pools;tk_pack_builder\data\dedicated_armour_pools" `
     "tk_pack_builder\launcher.py"
 
@@ -45,9 +52,9 @@ $rpfmTarget = Join-Path $workDir "rpfm-dist"
 $snapshotSource = Join-Path $root "work\reference_snapshot.json"
 $snapshotTarget = Join-Path $workDir "reference_snapshot.json"
 $packSource = Join-Path $root "work\packs\my_hero.pack"
-$coreReferenceSource = Join-Path $root "work\packs\refs\mtu_reference_core.pack"
+$coreReferenceSource = Join-Path $root "work\packs\refs\mtu_vanilla_reference.pack"
 $packTarget = Join-Path $workDir "packs\my_hero.pack"
-$coreReferenceTarget = Join-Path $workDir "packs\refs\mtu_reference_core.pack"
+$coreReferenceTarget = Join-Path $workDir "packs\refs\mtu_vanilla_reference.pack"
 $referencePackNames = @(
     "database.pack",
     "data_mh.pack",
@@ -55,17 +62,12 @@ $referencePackNames = @(
     "data_dlc07.pack",
     "data_dlc06.pack",
     "data_bl.pack",
-    "data_yt_bl.pack",
-    "BFG_Originals.pack",
-    "BFG_for_MTU.pack",
-    "BFG_Nanman2.pack",
-    "BFG_Yellow_Turban.pack",
-    "LSHZ_lbdc_lh.pack"
+    "data_yt_bl.pack"
 )
 $assetSource = Join-Path $root "work\assets"
 $assetTarget = Join-Path $workDir "assets"
-$internalMaterialsSource = Join-Path $root "work\internal_materials"
-$internalMaterialsTarget = Join-Path $workDir "internal_materials"
+$internalMaterialsSource = Join-Path $root "work\internal_materials\vanilla_mtu"
+$internalMaterialsTarget = Join-Path $workDir "internal_materials\vanilla_mtu"
 $internalMaterialFiles = @(
     "materials.v015.json",
     "materials.v015.summary.json",
@@ -101,19 +103,11 @@ if ($IncludeLegacyReferencePacks) {
     }
 }
 if (Test-Path $assetSource) {
-    $assetExcludeDirs = @(
-        "asset_backups",
-        "codex_generated",
-        "generated_image_sets",
-        "hby_generated_character_sets_backup_before_add_3_sets_20260629_233620",
-        "hby_generated_character_sets_backup_before_base3k_comments_20260629_221452",
-        "hby_generated_character_sets_backup_before_image_edit_source_restore_20260629_230449",
-        "hby_generated_character_sets_backup_before_restore_sunce_comments_20260629_225221",
-        "hby_generated_character_sets_backup_before_text_cleanup_20260629_223207"
-    )
-    robocopy $assetSource $assetTarget /E /XD $assetExcludeDirs | Out-Null
-    if ($LASTEXITCODE -gt 7) {
-        throw "Failed to copy extracted assets. robocopy exit code: $LASTEXITCODE"
+    foreach ($assetFolder in @("17309a40b912", "hby_generated_character_sets", "profile_190", "profile_korea")) {
+        robocopy (Join-Path $assetSource $assetFolder) (Join-Path $assetTarget $assetFolder) /E | Out-Null
+        if ($LASTEXITCODE -gt 7) {
+            throw "Failed to copy portrait assets: $assetFolder"
+        }
     }
 }
 
@@ -171,6 +165,15 @@ if (Test-Path $internalMaterialsSource) {
     }
 }
 
+foreach ($profile in @("190", "190-korea")) {
+    $profileSource = Join-Path $root "work\internal_materials\$profile"
+    $profileTarget = Join-Path $workDir "internal_materials\$profile"
+    New-Item -ItemType Directory -Force -Path $profileTarget | Out-Null
+    foreach ($name in @("materials.v015.json", "materials.v015.summary.json", "verified_ceo_registry.json", "assembly_kit_title_effects.ko.json", "audit.json")) {
+        Copy-Item -LiteralPath (Join-Path $profileSource $name) -Destination (Join-Path $profileTarget $name) -Force
+    }
+}
+
 if (Test-Path $schemaStoreSource) {
     robocopy $schemaStoreSource $schemaStoreTarget /E | Out-Null
     if ($LASTEXITCODE -gt 7) {
@@ -185,7 +188,7 @@ if (Test-Path $rpfmSource) {
     }
 }
 
-& $Python (Join-Path $root "scripts\stamp_windows_runtime_cache.py") --app-dir $appDir
+& $Python (Join-Path $root "scripts\stamp_windows_runtime_cache.py") --app-dir $appDir --source-root $root
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to stamp the packaged runtime cache."
 }

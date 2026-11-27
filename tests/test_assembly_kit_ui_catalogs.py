@@ -252,12 +252,12 @@ class AssemblyKitUiCatalogTests(unittest.TestCase):
         self.assertEqual(skill["sourceKind"], "assembly_kit")
         self.assertEqual(skill["name"], "평안")
         self.assertIn("농업 수입 +3%", skill["effectSummary"])
-        self.assertEqual(title["sourceKind"], "assembly_kit")
+        self.assertEqual(title["sourceKind"], "verified_game")
         self.assertEqual(title["title"], "만학도")
         self.assertIn("전문성 +15", title["effectSummary"])
 
         self.assertEqual(390, len(web._load_skill_effect_catalog()[1]))
-        self.assertEqual(389, len(web._load_title_effect_catalog()[1]))
+        self.assertEqual(429, len(web._load_title_effect_catalog()[1]))
         self.assertEqual(
             [web.PACKAGED_ASSEMBLY_KIT_SKILL_EFFECT_CATALOG],
             web._skill_effect_catalog_paths(),

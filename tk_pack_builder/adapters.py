@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .rpfm_fields import field_names as _rpfm_field_names
+
 import copy
 import json
 import os
@@ -192,7 +194,7 @@ class RpfmPackSession:
         table = data["DBRFileInfo"][0]["table"]
         if source == "pack":
             self.decoded_db_by_path[path] = copy.deepcopy(data["DBRFileInfo"][0])
-        fields = [field["name"] for field in table["definition"]["fields"]]
+        fields = _rpfm_field_names(table)
         rows = []
         for row in table["table_data"]:
             rows.append(
@@ -209,7 +211,7 @@ class RpfmPackSession:
             self.read_table(path)
         db = self.decoded_db_by_path[path]
         table = db["table"]
-        fields = [field["name"] for field in table["definition"]["fields"]]
+        fields = _rpfm_field_names(table)
         if len(rows) < len(table["table_data"]):
             raise ValueError("RPFM table replacement cannot remove rows.")
         if rows and not table["table_data"]:
@@ -246,7 +248,7 @@ class RpfmPackSession:
             raise ValueError(f"RPFM did not decode '{loc_path}' as a loc file.")
 
         table = data["LocRFileInfo"][0]["table"]
-        fields = [field["name"] for field in table["definition"]["fields"]]
+        fields = _rpfm_field_names(table)
         rows: dict[str, str] = {}
         for row in table["table_data"]:
             decoded = {

@@ -31,6 +31,8 @@ from .dedicated_armour_pool import (
     verify_pool_asset,
 )
 from .internal_materials import MaterialPackSession
+from .source_profiles import current as current_profile, resource as profile_resource, profiled, BASE as BASE_PROFILE
+from .source_policy import PROFILE, REFERENCE_PACK, supported_source, require_supported_sources, require_clean_references, require_clean_pack
 from .korea_addon import korea_character_metadata, korea_display_name_hint
 from .korean_names import korean_character_name
 from .pack_cache import PackCache
@@ -46,12 +48,12 @@ WEB_STATIC_SUFFIXES = {".css", ".html", ".js"}
 PACK_CACHE = PackCache(ROOT / "work" / "pack_cache.sqlite3")
 _BUILD_LOCK = threading.Lock()
 REFERENCE_SNAPSHOT = ROOT / "work" / "reference_snapshot.json"
-REFERENCE_SNAPSHOT_VERSION = 23
-OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 24
+REFERENCE_SNAPSHOT_VERSION = 26
+OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 27
 INTERNAL_CHARACTER_CATALOG = ROOT / "work" / "internal_dbs" / "character_catalog.json"
-INTERNAL_MATERIALS_PATH = ROOT / "work" / "internal_materials" / "materials.v015.json"
-INTERNAL_ASSET_MANIFEST = ROOT / "work" / "internal_materials" / "asset_manifest.v015.json"
-INTERNAL_MATERIAL_SUMMARY = ROOT / "work" / "internal_materials" / "materials.v015.summary.json"
+INTERNAL_MATERIALS_PATH = ROOT / "work" / "internal_materials" / "vanilla_mtu" / "materials.v015.json"
+INTERNAL_ASSET_MANIFEST = ROOT / "work" / "internal_materials" / "vanilla_mtu" / "asset_manifest.v015.json"
+INTERNAL_MATERIAL_SUMMARY = ROOT / "work" / "internal_materials" / "vanilla_mtu" / "materials.v015.summary.json"
 PACKAGED_ASSEMBLY_KIT_TITLE_EFFECT_CATALOG = (
     Path(__file__).resolve().parent / "data" / "assembly_kit_title_effects.ko.json"
 )
@@ -1132,7 +1134,13 @@ def _validated_dedicated_armour_pool(
     return None
 
 
+@profiled
 def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if current_profile() != BASE_PROFILE:
+        summary = _load_internal_material_summary()
+        return {"ok": True, "analysis": {}, "characters": {
+            "pack": summary, "vanilla": {"available": False}, "referencePacks": []},
+            "cache": {"hit": True}, "timings": {}}
     started_at = time.perf_counter()
     timings: dict[str, float] = {}
     input_path = payload.get("inputPath")
@@ -1229,7 +1237,12 @@ def open_pack_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _local_asset_cache_token() -> str:
     roots = [
         EXTRACTED_ASSET_ROOT / "hby_generated_character_sets",
+        EXTRACTED_ASSET_ROOT / "17309a40b912",
     ]
+    if current_profile() != BASE_PROFILE:
+        roots.append(EXTRACTED_ASSET_ROOT / "profile_190")
+    if current_profile() == '190-korea':
+        roots.append(EXTRACTED_ASSET_ROOT / "profile_korea")
     count = 0
     latest_mtime_ns = 0
     total_size = 0
@@ -1246,7 +1259,7 @@ def _local_asset_cache_token() -> str:
             count += 1
             latest_mtime_ns = max(latest_mtime_ns, stat.st_mtime_ns)
             total_size += stat.st_size
-    return f"hby-assets:{count}:{latest_mtime_ns}:{total_size}"
+    return f"portrait-assets:{count}:{latest_mtime_ns}:{total_size}"
 
 
 def _is_extracted_asset_scan_root(path: Path) -> bool:
@@ -1335,9 +1348,9 @@ def _load_reference_snapshot(
     pack_path: Path | None = None,
     include_vanilla: bool = False,
 ) -> dict[str, Any] | None:
-    if not REFERENCE_SNAPSHOT.is_file():
+    if not profile_resource(REFERENCE_SNAPSHOT, "reference_snapshot.json").is_file():
         return None
-    with REFERENCE_SNAPSHOT.open("r", encoding="utf-8") as handle:
+    with profile_resource(REFERENCE_SNAPSHOT, "reference_snapshot.json").open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
     if payload.get("schemaVersion") != REFERENCE_SNAPSHOT_VERSION:
         return None
@@ -1359,7 +1372,7 @@ def _load_reference_snapshot(
         "cache": {
             "hit": True,
             "type": "reference_snapshot",
-            "path": str(REFERENCE_SNAPSHOT),
+            "path": str(profile_resource(REFERENCE_SNAPSHOT, "reference_snapshot.json")),
         },
     }
 
@@ -1369,8 +1382,9 @@ def _enrich_korea_addon_character_data(character_data: dict[str, Any]) -> None:
     if character_data.get("_mtuEnrichmentToken") == enrichment_token:
         return
     _merge_internal_material_character_summary(character_data)
-    _merge_auxiliary_catalog_characters(character_data)
-    _apply_korea_addon_metadata_to_characters(character_data)
+    for summary in _iter_character_summaries(character_data):
+        for character in summary.get("characters", []):
+            _clear_stale_korea_metadata(character)
     _normalize_character_data_runtime_equipment_keys(character_data)
     character_data["_mtuEnrichmentToken"] = enrichment_token
 
@@ -1445,7 +1459,7 @@ def _normalize_character_runtime_equipment_keys(character: dict[str, Any]) -> No
 
 def _merge_internal_material_character_summary(character_data: dict[str, Any]) -> None:
     target_summary = character_data.get("pack")
-    if not isinstance(target_summary, dict) or not INTERNAL_MATERIALS_PATH.is_file():
+    if not isinstance(target_summary, dict) or not profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json").is_file():
         return
     try:
         internal_summary = _load_internal_material_summary()
@@ -1511,6 +1525,8 @@ def _has_useful_value(value: Any) -> bool:
 
 
 def _sanitize_stale_korea_character(character: dict[str, Any]) -> dict[str, Any]:
+    if current_profile() != BASE_PROFILE:
+        return character
     if not _has_stale_korea_metadata(character):
         return character
     sanitized = dict(character)
@@ -1631,7 +1647,7 @@ def _load_internal_material_summary_for_cache_key(_cache_key: str) -> dict[str, 
     if cached is not None:
         return cached
 
-    session = _open_compact_internal_material_session(INTERNAL_MATERIALS_PATH)
+    session = _open_compact_internal_material_session(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json"))
     tables = _read_internal_material_reference_tables(session)
     asset_files = session.list_files()
     asset_sources: dict[str, str] = {}
@@ -1658,6 +1674,13 @@ def _open_compact_internal_material_session(path: Path) -> MaterialPackSession:
     try:
         tables = select_tables(session.payload)
         loc_files = select_loc_files(session.payload, tables)
+        for path, table in session.payload.get("tables", {}).items():
+            if path.split('/')[1] in {"start_pos_characters_tables", "start_pos_factions_tables"}:
+                tables[path] = table
+        for path, loc in session.payload.get("loc", {}).items():
+            for key, value in loc.get("rows", {}).items():
+                if key.startswith("factions_screen_name_"):
+                    loc_files.setdefault(path, {})[key] = value
     except Exception:
         return session
     compact_payload = {
@@ -1673,16 +1696,23 @@ def _open_compact_internal_material_session(path: Path) -> MaterialPackSession:
 
 
 def _internal_material_cache_token() -> dict[str, Any]:
+    from .title_registry import REGISTRY_PATH
+    from .korean_patch import PATCH_PATH
     catalog_paths = _title_effect_catalog_paths()
     skill_catalog_paths = _skill_effect_catalog_paths()
     paths = [
-        INTERNAL_MATERIALS_PATH,
+        profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json"),
+        Path(__file__),
+        Path(__file__).with_name("image_catalog.py"),
         INTERNAL_ASSET_MANIFEST,
+        PATCH_PATH,
         *catalog_paths,
         *skill_catalog_paths,
+        profile_resource(REGISTRY_PATH, "verified_ceo_registry.json"),
     ]
     return {
-        "version": 30,
+        "version": 34,
+        "sourceProfile": current_profile(),
         "localAssets": _local_asset_cache_token(),
         "sources": {
             str(path): _file_cache_fingerprint(path)
@@ -1693,13 +1723,19 @@ def _internal_material_cache_token() -> dict[str, Any]:
 
 
 def _read_internal_material_summary_cache() -> dict[str, Any] | None:
-    if not INTERNAL_MATERIAL_SUMMARY.is_file():
+    if not profile_resource(INTERNAL_MATERIAL_SUMMARY, "materials.v015.summary.json").is_file():
         return None
     try:
-        with INTERNAL_MATERIAL_SUMMARY.open("r", encoding="utf-8") as handle:
+        with profile_resource(INTERNAL_MATERIAL_SUMMARY, "materials.v015.summary.json").open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
     except (OSError, json.JSONDecodeError):
         return None
+    if payload.get("portable"):
+        from .portable_cache import load_portable_summary
+        summary = load_portable_summary(payload, ROOT, current_profile())
+        if isinstance(summary, dict):
+            _write_internal_material_summary_cache(summary)
+            return _sanitize_summary_stale_korea_metadata(summary)
     if payload.get("cache") != _internal_material_cache_token():
         return None
     summary = payload.get("summary")
@@ -1711,8 +1747,8 @@ def _read_internal_material_summary_cache() -> dict[str, Any] | None:
 def _write_internal_material_summary_cache(summary: dict[str, Any]) -> None:
     summary = _sanitize_summary_stale_korea_metadata(summary)
     try:
-        INTERNAL_MATERIAL_SUMMARY.parent.mkdir(parents=True, exist_ok=True)
-        with INTERNAL_MATERIAL_SUMMARY.open("w", encoding="utf-8") as handle:
+        profile_resource(INTERNAL_MATERIAL_SUMMARY, "materials.v015.summary.json").parent.mkdir(parents=True, exist_ok=True)
+        with profile_resource(INTERNAL_MATERIAL_SUMMARY, "materials.v015.summary.json").open("w", encoding="utf-8") as handle:
             json.dump(
                 {
                     "cache": _internal_material_cache_token(),
@@ -2318,10 +2354,35 @@ def _build_attribute_set_catalog(
             }
         )
     deduped = _dedupe_catalog_entries(candidates, key_func=lambda item: str(item.get("key") or ""))
+    # UI equivalence includes bounds and all attributes, not only the five visible
+    # base values. Preserve mode-specific resolve_records/resolve keys in recipes.
+    rows_by_set: dict[str, list[dict[str, Any]]] = {}
+    for row in tables.get("character_attributes", []):
+        key = _attribute_set_key(row)
+        if key:
+            rows_by_set.setdefault(key, []).append(row)
+    for item in deduped:
+        rows = rows_by_set.get(item["key"], [])
+        comparison = []
+        for row in rows:
+            comparison.append({
+                "type": "resolve" if row.get("attribute_type") == "resolve_records" else row.get("attribute_type"),
+                "base": row.get("base_value"),
+                "min": row.get("min_range"),
+                "max": row.get("max_range"),
+            })
+        if comparison and all(row["type"] and row["base"] is not None for row in comparison):
+            unique = {json.dumps(row, sort_keys=True) for row in comparison}
+            item["equivalenceKey"] = json.dumps(sorted(unique))
+        item["gameMode"] = (
+            "historical" if item["key"].endswith("_records")
+            else "romance" if item["key"].endswith("_romance") else ""
+        )
     return sorted(deduped, key=lambda item: (str(item.get("label") or ""), str(item.get("key") or "")))
 
 
 def _build_title_catalog(characters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from .title_registry import resolve_title
     candidates: list[dict[str, Any]] = []
     effects_by_title, _effect_entries = _load_title_effect_catalog()
     for character in characters:
@@ -2329,6 +2390,11 @@ def _build_title_catalog(characters: list[dict[str, Any]]) -> list[dict[str, Any
             continue
         title_info = character.get("titleInfo") or {}
         if not isinstance(title_info, dict):
+            continue
+        verified_title = resolve_title(initial=title_info.get('initialCeoKey', ''),
+                                       node=title_info.get('ceoNodeKey', ''),
+                                       title=title_info.get('titleCeoKey', ''))
+        if not verified_title:
             continue
         key = str(title_info.get("ceoNodeKey") or title_info.get("initialCeoKey") or "")
         if not key:
@@ -2352,7 +2418,8 @@ def _build_title_catalog(characters: list[dict[str, Any]]) -> list[dict[str, Any
         )
         if common_title_info:
             label = str(common_title_info.get("label") or label)
-            effect_info = common_title_info
+            if not effect_info:
+                effect_info = common_title_info
         if _is_generated_template_pool_title_candidate(character, title_info, label, key, common_title_info):
             continue
         title_context = " ".join(
@@ -2382,7 +2449,7 @@ def _build_title_catalog(characters: list[dict[str, Any]]) -> list[dict[str, Any
                 "ownerName": "기본 칭호" if common_title_info else character.get("displayName") or character.get("label") or "",
                 "initialCeoKey": title_info.get("initialCeoKey") or "",
                 "ceoNodeKey": title_info.get("ceoNodeKey") or "",
-                "titleCeoKey": effect_info.get("key") or "",
+                "titleCeoKey": verified_title,
                 "element": elements[0] if elements else "",
                 "elements": elements,
                 "locTitleKey": title_info.get("locTitleKey") or "",
@@ -2465,6 +2532,8 @@ def _load_title_effect_catalog() -> tuple[dict[str, dict[str, Any]], list[dict[s
 
 
 def _title_effect_catalog_paths() -> list[Path]:
+    if current_profile() != BASE_PROFILE:
+        return [profile_resource(PACKAGED_ASSEMBLY_KIT_TITLE_EFFECT_CATALOG, "assembly_kit_title_effects.ko.json")]
     catalog_paths = []
     if PACKAGED_ASSEMBLY_KIT_TITLE_EFFECT_CATALOG.is_file():
         catalog_paths.append(PACKAGED_ASSEMBLY_KIT_TITLE_EFFECT_CATALOG)
@@ -2530,6 +2599,8 @@ def _title_effect_entry_from_row(row: Any) -> dict[str, Any]:
 
 
 def _title_effect_entry_priority(entry: dict[str, Any]) -> int:
+    if entry.get("sourceKind") == "verified_game":
+        return 200
     if entry.get("sourceKind") == "assembly_kit":
         return 100
     return 0
@@ -2616,7 +2687,7 @@ def _write_reference_snapshot(
     pack_path: Path | None = None,
     include_vanilla: bool = False,
 ) -> None:
-    REFERENCE_SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
+    profile_resource(REFERENCE_SNAPSHOT, "reference_snapshot.json").parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schemaVersion": REFERENCE_SNAPSHOT_VERSION,
         "createdAt": time.time(),
@@ -2627,11 +2698,14 @@ def _write_reference_snapshot(
         "analysis": analysis,
         "characters": characters,
     }
-    with REFERENCE_SNAPSHOT.open("w", encoding="utf-8") as handle:
+    with profile_resource(REFERENCE_SNAPSHOT, "reference_snapshot.json").open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False)
 
 
+@profiled
 def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    require_clean_references(payload.get("recipe", {}))
+    _reference_pack_paths(payload)
     if payload.get("useInternalMaterials"):
         material_path = _resolve_user_path(payload.get("materialPath") or "")
         session = MaterialPackSession.open(material_path)
@@ -2691,12 +2765,15 @@ def _build_response(messages: list[dict[str, Any]], output_path: Path | None = N
     }
 
 
+@profiled
 def build_payload(payload: dict[str, Any]) -> dict[str, Any]:
     with _BUILD_LOCK:
         return _build_payload_unlocked(payload)
 
 
 def _build_payload_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
+    require_clean_references(payload.get("recipe", {}))
+    _reference_pack_paths(payload)
     if payload.get("useInternalMaterials"):
         if not payload.get("delta"):
             raise ValueError("Internal materials build is only available for patch pack output.")
@@ -3001,7 +3078,7 @@ def summarize_character_tables(
             reference_source = "BFG_Astral.pack"
         portrait_path = str(primary_art.get("portrait") or "").strip("/")
         card_path = str(primary_art.get("card") or "").strip("/")
-        portrait_image_path = _find_character_panel_image(asset_index, portrait_path) or _find_character_image(asset_index, portrait_path, "halfbody_large")
+        portrait_image_path = _find_art_portrait(asset_index, portrait_path, card_path)
         card_image_path = _find_character_image(asset_index, card_path, "unitcards")
         if _is_image_only_reference(asset_sources.get(portrait_image_path or "", "")):
             portrait_image_path = None
@@ -3044,7 +3121,7 @@ def summarize_character_tables(
             reference_source = "BFG_Astral.pack"
         portrait_path = str(primary_art.get("portrait") or "").strip("/")
         card_path = str(primary_art.get("card") or "").strip("/")
-        portrait_image_path = _find_character_panel_image(asset_index, portrait_path) or _find_character_image(asset_index, portrait_path, "halfbody_large")
+        portrait_image_path = _find_art_portrait(asset_index, portrait_path, card_path)
         card_image_path = _find_character_image(asset_index, card_path, "unitcards")
         if _is_image_only_reference(asset_sources.get(portrait_image_path or "", "")):
             portrait_image_path = None
@@ -3109,8 +3186,11 @@ def summarize_character_tables(
     art_set_summary_by_key = {str(row.get("key") or ""): row for row in art_sets}
     characters = []
     for template in tables["character_generation_templates"]:
+        from .source_policy import EXCLUDED_TEMPLATE_KEYS
+        if template.get('key') in EXCLUDED_TEMPLATE_KEYS:
+            continue
         key = str(template.get("key", ""))
-        korea_metadata = korea_character_metadata(key) or {}
+        korea_metadata = {}
         reference_source = template.get("_referenceSourcePath")
         display_name = _character_display_name(template, loc_text)
         korea_name_hint = str(korea_metadata.get("koreaDisplayNameHint") or "")
@@ -3172,7 +3252,10 @@ def summarize_character_tables(
             }
         )
 
+    _attach_roster_factions(characters, tables, loc_text)
     _append_image_only_characters(characters, art_sets, asset_index, asset_sources)
+    from .image_catalog import annotate_image_catalog
+    annotate_image_catalog(art_sets, characters)
     detail_rows = tables["character_generation_template_game_mode_details"]
     skill_trees = (
         _summarize_skill_trees(tables, loc_text, characters)
@@ -3250,6 +3333,22 @@ def summarize_character_tables(
         "skillTrees": skill_trees,
         "subtypes": _unique_options(row.get("subtype") for row in tables["character_generation_templates"]),
     }
+
+
+def _attach_roster_factions(characters, tables, loc_text):
+    factions = {str(row.get("ID")): str(row.get("faction") or "")
+                for row in tables.get("start_pos_factions", [])}
+    by_template = {}
+    for row in tables.get("start_pos_characters", []):
+        faction = factions.get(str(row.get("faction")), "")
+        template = str(row.get("template") or "")
+        if faction and template:
+            by_template.setdefault(template, set()).add(faction)
+    for character in characters:
+        character["rosterFactions"] = [
+            {"key": key, "label": loc_text.get("factions_screen_name_" + key) or key}
+            for key in sorted(by_template.get(character.get("key"), set()))
+        ]
 
 
 def _build_ceo_set_catalog(
@@ -3370,6 +3469,10 @@ def _append_image_only_characters(
         real_path = _real_packed_asset_path(path)
         lower = real_path.lower()
         marker = "/stills/halfbody_large/"
+        if lower.startswith("ui/characters/krc_artsets/"):
+            # Shared transparent equipment layers are not standalone portraits.
+            # Character-specific KRC sets are supplied by the art table above.
+            continue
         if lower in existing_image_paths:
             if not _is_image_only_reference(asset_sources.get(path, "")):
                 continue
@@ -3525,6 +3628,14 @@ def _is_non_character_image_path(path: str) -> bool:
 
 def _friendly_image_character_label(image_key: str) -> str:
     lower = image_key.lower()
+    imported_labels = {
+        "hby_hero_special_import_silver_gaze": "[신규] 은발 백금 의상 여성",
+        "hby_hero_special_import_blue_gold_general": "[신규] 흑발 청금 갑옷 여장수",
+        "hby_hero_special_import_purple": "[신규] 보라 의상 여성",
+        "hby_hero_special_import_red_general": "[신규] 적금 갑옷 여장수",
+    }
+    if lower in imported_labels:
+        return imported_labels[lower]
     known = {
         "diao_chan": "珥덉꽑",
         "lu_bu": "?ы룷",
@@ -3739,7 +3850,8 @@ def _skill_name_for_key(skill_key: str, loc_text: dict[str, str]) -> str:
                 return catalog.get("name") or label
             if _contains_hangul(label):
                 return label
-            return _localized_label(label, skill_key, context="skill", loc_text=loc_text)
+            # A real localized name is safer than a guessed class/element label.
+            return label
     catalog = _catalog_skill_effect_info(skill_key)
     return catalog.get("name") or _friendly_skill_key(skill_key)
 
@@ -3803,6 +3915,8 @@ def _load_skill_effect_catalog() -> tuple[dict[str, dict[str, Any]], list[dict[s
 
 
 def _skill_effect_catalog_paths() -> list[Path]:
+    if current_profile() != BASE_PROFILE:
+        return []  # Use this profile's actual DB effects, not baseline overrides.
     paths: list[Path] = []
     if PACKAGED_ASSEMBLY_KIT_SKILL_EFFECT_CATALOG.is_file():
         paths.append(PACKAGED_ASSEMBLY_KIT_SKILL_EFFECT_CATALOG)
@@ -3928,11 +4042,8 @@ def _catalog_skill_effect_info(*values: Any) -> dict[str, Any]:
         if candidate in by_key:
             selected = by_key[candidate]
             break
-    if not selected:
-        for lookup_key in sorted(by_key, key=len, reverse=True):
-            if any(lookup_key in candidate for candidate in candidates):
-                selected = by_key[lookup_key]
-                break
+    # Never match a parent/prefix skill: MTU skills such as fire_blood_flower
+    # otherwise inherit the unrelated vanilla fire (Vanguard) entry.
     return selected
 
 
@@ -4022,9 +4133,6 @@ def _korean_character_label_from_key(value: Any, loc_text: dict[str, str] | None
         return ""
 
     for candidate in _character_template_candidates_from_label(text):
-        korea_name = korea_display_name_hint(candidate)
-        if korea_name and _contains_hangul(korea_name):
-            return korea_name
         mapped_name = korean_character_name(candidate)
         if mapped_name and _contains_hangul(mapped_name):
             return mapped_name
@@ -4795,6 +4903,8 @@ def _title_info_for_character(
     loc_text: dict[str, str],
 ) -> dict[str, Any]:
     initial_key = _preferred_initial_ceo(details)
+    from .title_registry import resolve_title, title_node
+    verified_title = resolve_title(initial=initial_key)
     template_key = str(template.get("key", ""))
     initial_token = _character_token_from_initial_ceo(initial_key) if initial_key else ""
     template_token = _character_token_from_template(template_key)
@@ -4803,6 +4913,10 @@ def _title_info_for_character(
     candidates = _title_candidate_keys(token, source_key, template_key)
     matched, title_text = _best_title_loc_candidate(candidates, loc_text)
     matched = matched or (candidates[0] if candidates else "")
+    if not initial_key:
+        verified_title = resolve_title(node=matched)
+    if verified_title:
+        matched = title_node(verified_title) or matched
     description = _loc_description_for_ceo_node(matched, loc_text) or ""
     _frontend_name, frontend_title = _frontend_character_description_parts(template_key, loc_text)
     effects_by_title, _effect_entries = _load_title_effect_catalog()
@@ -4814,6 +4928,7 @@ def _title_info_for_character(
         f"ceo_nodes_description_{matched}" if matched else "",
         template_key,
     )
+    description = str(keyed_effect_info.get('description') or description)
     label = (
         _usable_title_label(keyed_effect_info.get("title"))
         or _usable_title_label(title_text)
@@ -4822,7 +4937,9 @@ def _title_info_for_character(
         or "칭호 미확인"
     )
     return {
-        "status": "read_only_spike",
+        "status": "verified" if verified_title else "unavailable",
+        "titleCeoKey": verified_title,
+        "effectSummary": keyed_effect_info.get('effectSummary', ''),
         "label": label,
         "description": description,
         "hasDescription": bool(description),
@@ -4831,7 +4948,7 @@ def _title_info_for_character(
         "locTitleKey": f"ceo_nodes_title_{matched}" if matched else "",
         "descriptionKey": f"ceo_nodes_description_{matched}" if matched else "",
         "source": "campaigns/ceo_data.ccd",
-        "note": "set_title/career CEO는 CCD/startpos 기반이라 스크립트 적용 검증이 필요합니다.",
+        "note": "" if verified_title else "내장 자료에서 지원하는 칭호 연결이 없습니다.",
     }
 
 
@@ -5221,13 +5338,13 @@ def _merge_internal_materials(
     asset_files: list[str],
     asset_sources: dict[str, str],
 ) -> dict[str, Any] | None:
-    if not INTERNAL_MATERIALS_PATH.is_file():
+    if not profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json").is_file():
         return None
     started = time.perf_counter()
     known_assets = set(asset_files)
     before_counts = {alias: len(rows) for alias, rows in tables.items()}
     try:
-        session = MaterialPackSession.open(INTERNAL_MATERIALS_PATH)
+        session = MaterialPackSession.open(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json"))
         reference_tables = _read_internal_material_reference_tables(session)
         for alias, rows in reference_tables.items():
             if alias == "campaign_character_arts":
@@ -5235,49 +5352,49 @@ def _merge_internal_materials(
                     tables.setdefault(alias, []),
                     rows,
                     ("art_set_id", "age", "portrait", "card", "uniform"),
-                    str(INTERNAL_MATERIALS_PATH),
+                    str(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json")),
                 )
             elif alias == "character_generation_template_game_mode_details":
                 _append_missing_rows_by_fields(
                     tables.setdefault(alias, []),
                     rows,
                     ("character_generation_template", "game_mode"),
-                    str(INTERNAL_MATERIALS_PATH),
+                    str(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json")),
                 )
             elif alias == "character_skill_node_links":
                 _append_missing_rows_by_fields(
                     tables.setdefault(alias, []),
                     rows,
                     ("parent_key", "child_key", "link_type"),
-                    str(INTERNAL_MATERIALS_PATH),
+                    str(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json")),
                 )
             elif alias == "character_skill_level_to_effects_junctions":
                 _append_missing_rows_by_fields(
                     tables.setdefault(alias, []),
                     rows,
                     ("character_skill_key", "effect_key", "effect_scope", "level"),
-                    str(INTERNAL_MATERIALS_PATH),
+                    str(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json")),
                 )
             elif alias == "character_attribute_sets":
                 _append_missing_rows_by_key(
                     tables.setdefault(alias, []),
                     rows,
                     _attribute_set_key,
-                    str(INTERNAL_MATERIALS_PATH),
+                    str(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json")),
                 )
             elif alias == "character_attributes":
                 _append_missing_rows_by_key(
                     tables.setdefault(alias, []),
                     rows,
                     lambda row: (_attribute_set_key(row), _attribute_stat_key(row) or ""),
-                    str(INTERNAL_MATERIALS_PATH),
+                    str(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json")),
                 )
             else:
                 _append_missing_rows(
                     tables.setdefault(alias, []),
                     rows,
                     _key_field_for_alias(alias),
-                    str(INTERNAL_MATERIALS_PATH),
+                    str(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json")),
                 )
         for key, text in _read_all_loc_text(session).items():
             loc_text[key] = text
@@ -5288,7 +5405,7 @@ def _merge_internal_materials(
             for alias in reference_tables
         }
         return {
-            "path": str(INTERNAL_MATERIALS_PATH),
+            "path": str(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json")),
             "ok": True,
             "internalMaterials": True,
             "tables": sorted(reference_tables),
@@ -5299,7 +5416,7 @@ def _merge_internal_materials(
         }
     except Exception as error:
         return {
-            "path": str(INTERNAL_MATERIALS_PATH),
+            "path": str(profile_resource(INTERNAL_MATERIALS_PATH, "materials.v015.json")),
             "ok": False,
             "internalMaterials": True,
             "error": str(error),
@@ -5327,6 +5444,8 @@ def _merge_internal_asset_manifest(
         if not packed_path or packed_path in known_assets:
             continue
         if _is_aw_asset_path(str(packed_path)):
+            continue
+        if not supported_source(str(info.get("sourcePack") or info.get("sourcePath") or "")):
             continue
         if not _internal_manifest_asset_is_available(str(packed_path), info):
             continue
@@ -5368,9 +5487,11 @@ def _merge_extracted_asset_inventory(
     pack_dirs = sorted(
         (
             path for path in EXTRACTED_ASSET_ROOT.iterdir()
-            if path.is_dir() and _is_extracted_asset_scan_root(path)
+            if path.is_dir() and path.name in ({"17309a40b912", "hby_generated_character_sets"}
+                | ({"profile_190"} if current_profile() != BASE_PROFILE else set())
+                | ({"profile_korea"} if current_profile() == '190-korea' else set()))
         ),
-        key=lambda path: (0 if path.name == "hby_generated_character_sets" else 1, path.name.lower()),
+        key=lambda path: ({"hby_generated_character_sets": 0, "profile_korea": 1, "profile_190": 2}.get(path.name, 3), path.name.lower()),
     )
     for pack_dir in pack_dirs:
         for path in pack_dir.rglob("*"):
@@ -5438,6 +5559,8 @@ def _read_internal_material_reference_tables(session: Any) -> dict[str, list[dic
         ],
     }
     wanted_aliases = {
+        "start_pos_characters",
+        "start_pos_factions",
         *CHARACTER_TABLE_ALIASES,
         "campaign_character_art_sets",
         "campaign_character_arts",
@@ -6040,7 +6163,8 @@ def _read_all_loc_text(session: Any) -> dict[str, str]:
             texts.update(session.read_loc(loc_path))
         except (NotImplementedError, ValueError):
             continue
-    return texts
+    from .korean_patch import overlay
+    return overlay(texts)
 
 
 def _loc_merge_priority(loc_path: str) -> tuple[int, str]:
@@ -6058,10 +6182,6 @@ def _loc_merge_priority(loc_path: str) -> tuple[int, str]:
 
 def _character_display_name(template: dict[str, Any], loc_text: dict[str, str]) -> str | None:
     key = str(template.get("key", ""))
-    korea_metadata = korea_character_metadata(key) or {}
-    korea_name = str(korea_metadata.get("koreaDisplayNameHint") or "")
-    if korea_name:
-        return korea_name
 
     frontend_name, _frontend_title = _frontend_character_description_parts(key, loc_text)
     if frontend_name:
@@ -6339,6 +6459,19 @@ def _build_asset_index(asset_files: list[str]) -> dict[str, Any]:
         "stills_by_name": stills_by_name,
         "prefix_cache": {},
     }
+
+
+def _find_art_portrait(asset_index, portrait_key, card_key):
+    # KRC is a shared layered-portrait folder: its root stills are transparent
+    # armour layers, while the card token identifies the actual character face.
+    if str(portrait_key).strip('/').lower() == 'krc_artsets':
+        for size in ('', 'large/'):
+            path = f'ui/characters/KRC_artsets/stills/halfbody_large/faces/{size}{card_key}.png'
+            found = asset_index['lower_to_path'].get(path.lower())
+            if found:
+                return found
+        return None
+    return _find_character_panel_image(asset_index, portrait_key) or _find_character_image(asset_index, portrait_key, 'halfbody_large')
 
 
 def _find_character_image(asset_index: dict[str, Any], image_key: str, image_kind: str) -> str | None:
@@ -6712,11 +6845,14 @@ def _open_session(payload: dict[str, Any]) -> Any:
     if adapter_name == "auto":
         adapter_name = _detect_adapter(pack_path)
     if adapter_name == "rpfm":
+        require_clean_pack(pack_path)
         _ensure_rpfm_server()
     return adapter_for(adapter_name).open_pack(pack_path)
 
 
 def _reference_pack_paths(payload: dict[str, Any]) -> list[Path]:
+    if current_profile() != BASE_PROFILE:
+        return []
     raw_paths = payload.get("referencePackPaths") or []
     if isinstance(raw_paths, str):
         raw_paths = [line.strip() for line in raw_paths.splitlines()]
@@ -6725,9 +6861,10 @@ def _reference_pack_paths(payload: dict[str, Any]) -> list[Path]:
         if not raw_path:
             continue
         paths.append(_resolve_user_path(raw_path))
-    core_reference = ROOT / "work" / "packs" / "refs" / "mtu_reference_core.pack"
+    core_reference = ROOT / "work" / "packs" / "refs" / REFERENCE_PACK
     if not paths and core_reference.is_file():
         paths.append(core_reference)
+    require_supported_sources(paths)
     paths.extend(default_game_local_pack_paths())
     paths = _dedupe_paths(paths)
     return [
@@ -6749,6 +6886,7 @@ def _build_reference_pack_paths(
             int(value)
             for value in (
                 clone.armour_bonus,
+                clone.melee_defence_bonus,
                 clone.melee_attack_bonus,
                 clone.melee_damage_bonus,
                 clone.ap_melee_damage_bonus,
@@ -6770,6 +6908,7 @@ def _build_reference_pack_paths(
         except (OSError, ValueError):
             pass
     candidates.extend(root / "database.pack" for root in DEFAULT_GAME_DATA_DIRS)
+    candidates.append(ROOT / "work" / "packs" / "refs" / "database.pack")
     database_path = next((path.resolve() for path in candidates if path.is_file()), None)
     if database_path is None:
         raise ValueError(
@@ -6788,11 +6927,11 @@ def _build_reference_pack_paths(
 
 
 def _uses_core_reference_pack(reference_paths: list[Path]) -> bool:
-    return any(path.name.lower() == "mtu_reference_core.pack" for path in reference_paths)
+    return any(path.name.lower() == REFERENCE_PACK for path in reference_paths)
 
 
 def _reference_core_material_report(reference_paths: list[Path]) -> dict[str, Any] | None:
-    core_path = next((path for path in reference_paths if path.name.lower() == "mtu_reference_core.pack"), None)
+    core_path = next((path for path in reference_paths if path.name.lower() == REFERENCE_PACK), None)
     if core_path is None:
         return None
     return {
@@ -6807,7 +6946,7 @@ def _reference_core_material_report(reference_paths: list[Path]) -> dict[str, An
 
 def _reference_pack_priority(path: Path) -> int:
     name = path.name.lower()
-    if name == "mtu_reference_core.pack":
+    if name == REFERENCE_PACK:
         return -3
     if name == "local_kr.pack":
         return -2

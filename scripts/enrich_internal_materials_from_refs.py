@@ -40,24 +40,13 @@ def _workshop_pack_candidates(content_id: str, file_name: str) -> list[Path]:
     return [root / content_id / file_name for root in _workshop_roots()]
 
 
-DEFAULT_SOURCES = [
-    ROOT / "work" / "packs" / "my_hero.pack",
-    ROOT / "work" / "packs" / "refs" / "database.pack",
-] + [
-    ROOT / "work" / "packs" / "refs" / "!!190_expanded_with_characters.pack",
-    ROOT / "work" / "packs" / "refs" / "!!190expande_korea_addon.pack",
-] + _workshop_pack_candidates(
-    "2875547086",
-    "!!190_expanded_with_characters.pack",
-) + _workshop_pack_candidates(
-    "3415534775",
-    "!!190expande_korea_addon.pack",
-)
+from scripts.build_internal_materials_v015 import DEFAULT_SOURCES
+from tk_pack_builder.source_policy import MATERIAL_DIRECTORY, require_clean_materials, supported_source
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Merge missing internal material rows from reference packs.")
-    parser.add_argument("--materials", type=Path, default=ROOT / "work" / "internal_materials" / "materials.v015.json")
+    parser.add_argument("--materials", type=Path, default=ROOT / "work" / "internal_materials" / MATERIAL_DIRECTORY / "materials.v015.json")
     parser.add_argument("--source", action="append", type=Path, dest="sources")
     parser.add_argument("--report", type=Path, default=ROOT / "work" / "internal_materials" / "material_enrichment_report.v015.json")
     args = parser.parse_args()
@@ -65,6 +54,9 @@ def main() -> None:
     material_path = args.materials.resolve()
     materials = json.loads(material_path.read_text(encoding="utf-8"))
     sources = [path.resolve() for path in (args.sources or DEFAULT_SOURCES) if path.is_file()]
+    require_clean_materials(materials)
+    if any(not supported_source(path) for path in sources):
+        raise ValueError("Only vanilla and MTU sources are supported")
     material_sources = materials.setdefault("sources", [])
     for source in sources:
         source_text = str(source)
@@ -92,6 +84,7 @@ def main() -> None:
 
     finalize_loc_materials(materials)
 
+    require_clean_materials(materials)
     backup_path = material_path.with_suffix(f".backup-{time.strftime('%Y%m%d%H%M%S')}.json")
     shutil.copy2(material_path, backup_path)
     material_path.write_text(json.dumps(materials, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -174,7 +174,7 @@ class WebMaterialBuildTest(unittest.TestCase):
         )
 
     def test_title_catalog_merges_duplicate_title_keys(self) -> None:
-        title_key = "3k_main_ceo_node_career_historical_test_hero_01"
+        title_key = "3k_dlc05_ceo_node_career_historical_ji_ling_01"
         characters = [
             {
                 "key": "3k_main_template_historical_test_hero_wood",
@@ -319,8 +319,8 @@ class WebMaterialBuildTest(unittest.TestCase):
             loc_text,
         )
 
-        self.assertEqual("금 장군", info["label"])
-        self.assertEqual("3k_main_ceo_node_career_historical_generic_m_metal_general_01", info["ceoNodeKey"])
+        self.assertEqual("호위대", info["label"])
+        self.assertEqual("3k_main_ceo_node_career_generated_general_metal_01", info["ceoNodeKey"])
 
     def test_generic_title_fallback_is_translated(self) -> None:
         loc_text = {
@@ -338,7 +338,7 @@ class WebMaterialBuildTest(unittest.TestCase):
             loc_text,
         )
 
-        self.assertEqual("남성 금 장군", info["label"])
+        self.assertEqual("호위대", info["label"])
 
 
 
@@ -524,12 +524,12 @@ class WebMaterialBuildTest(unittest.TestCase):
 
         model = next(item for item in summary["modelSets"] if item["key"] == "shared_art_set")
         attribute = next(item for item in summary["attributeSetCatalog"] if item["key"] == "shared_attribute_set")
-        title = next(item for item in summary["titleCatalog"] if item["ownerKey"] == "3k_mtu_template_historical_test_hero_wood")
+        self.assertFalse(any(item["ownerKey"] == "3k_mtu_template_historical_test_hero_wood" for item in summary["titleCatalog"]))
         self.assertEqual(model["sourceTag"], "MTU")
         self.assertFalse(model["isMale"])
         self.assertEqual(attribute["sourceTag"], "MTU")
         self.assertEqual(attribute["stats"]["authority"], 70)
-        self.assertEqual(title["sourceTag"], "MTU")
+
 
     def test_read_character_data_includes_skill_tree_snapshot_data(self) -> None:
         tables = {
@@ -653,7 +653,7 @@ class WebMaterialBuildTest(unittest.TestCase):
         self.assertEqual(tree["nodes"][0]["skillKey"], "3k_main_skill_special_ability_fire_the_dragons_gaze")
         self.assertEqual(tree["nodes"][0]["name"], "용의 눈빛")
 
-    def test_title_info_uses_template_token_when_initial_ceo_is_generic(self) -> None:
+    def test_title_info_uses_actual_generic_initial_title_not_template_name(self) -> None:
         tables = {
             "character_generation_templates": [
                 {
@@ -686,8 +686,8 @@ class WebMaterialBuildTest(unittest.TestCase):
         summary = web.summarize_character_tables(tables, loc_text, [])
 
         character = next(item for item in summary["characters"] if item["key"] == "3k_main_template_historical_guan_yu_hero_wood")
-        self.assertEqual(character["titleInfo"]["ceoNodeKey"], "3k_main_ceo_node_career_historical_guan_yu_01")
-        self.assertEqual(character["titleInfo"]["label"], "무신")
+        self.assertEqual(character["titleInfo"]["ceoNodeKey"], "3k_main_ceo_node_career_generated_general_wood_01")
+        self.assertEqual(character["titleInfo"]["label"], "민병대 노장")
 
     def test_unit_stats_follow_retinue_slot_chain_across_modes(self) -> None:
         tables = {
@@ -891,7 +891,7 @@ class WebMaterialBuildTest(unittest.TestCase):
                 "morale": 60,
                 "primary_ammo": 0,
             })
-            return [{"path": "mtu_reference_core.pack", "ok": True}]
+            return [{"path": "mtu_vanilla_reference.pack", "ok": True}]
 
         with (
             patch.object(web, "_merge_reference_packs", side_effect=merge_reference_rows) as merge_mock,
@@ -900,10 +900,10 @@ class WebMaterialBuildTest(unittest.TestCase):
         ):
             character_data = web.read_character_data(
                 FakePackSession(tables),
-                reference_paths=[Path("mtu_reference_core.pack")],
+                reference_paths=[Path("mtu_vanilla_reference.pack")],
             )
 
-        self.assertEqual(merge_mock.call_args.args[4], [Path("mtu_reference_core.pack")])
+        self.assertEqual(merge_mock.call_args.args[4], [Path("mtu_vanilla_reference.pack")])
         character = character_data["pack"]["characters"][0]
         self.assertEqual(character["combatStats"]["landUnitKey"], "3k_main_hero_fire_generic")
         self.assertEqual(character["combatStats"]["unitChargeBonus"], 50)
@@ -988,6 +988,28 @@ class WebMaterialBuildTest(unittest.TestCase):
         self.assertEqual(skill["effectSummary"], "권위 +4 (해당 인물)")
         self.assertEqual(skill["effectRows"], [{"effectKey": "test_effect"}])
         self.assertEqual(skill["effectDataSource"], "assembly_kit")
+
+    def test_mtu_skill_does_not_inherit_vanilla_prefix_metadata(self) -> None:
+        for suffix, name in (
+            ("blood_flower", "Vermilion Comet"),
+            ("concentrated_strikes", "Fanged Flurry"),
+        ):
+            key = f"3k_main_skill_special_ability_fire_{suffix}"
+            with self.subTest(key=key):
+                self.assertEqual(web._catalog_skill_effect_info(key), {})
+                loc = {f"character_skills_localised_name_{key}": name}
+                effects = [{"effectKey": f"3k_main_skill_{suffix}",
+                            "name": name, "value": 1,
+                            "abilitySummary": f"능력: {name}"}]
+                entry = web._skill_index_entry(key, loc, effects)
+                web._add_catalog_skill_index_entries({key: entry})
+                self.assertEqual(entry["name"], name)
+                self.assertIn(name, entry["effectSummary"])
+                self.assertNotIn("짐승의 포효", entry["effectSummary"])
+
+    def test_exact_vanilla_skill_catalog_match_is_preserved(self) -> None:
+        key = "3k_main_skill_special_ability_fire_roar_of_the_beast"
+        self.assertEqual(web._catalog_skill_effect_info(key)["key"], key)
 
     def test_material_ability_grant_is_expanded_into_korean_mechanics(self) -> None:
         tables = {
@@ -1128,7 +1150,7 @@ class WebMaterialBuildTest(unittest.TestCase):
             {
                 "key": "shared_template",
                 "value": "database",
-                "_referenceSourcePath": "mtu_reference_core.pack",
+                "_referenceSourcePath": "mtu_vanilla_reference.pack",
                 "_sourceTablePath": "db/character_generation_templates_tables/data__",
                 "_sourceRank": 10,
             }
@@ -1145,7 +1167,7 @@ class WebMaterialBuildTest(unittest.TestCase):
                 }
             ],
             "key",
-            "mtu_reference_core.pack",
+            "mtu_vanilla_reference.pack",
         )
 
         self.assertEqual(len(target), 1)
@@ -1162,7 +1184,7 @@ class WebMaterialBuildTest(unittest.TestCase):
                 }
             ],
             "key",
-            "mtu_reference_core.pack",
+            "mtu_vanilla_reference.pack",
         )
 
         self.assertEqual(target[0]["value"], "mtu")
@@ -1198,12 +1220,12 @@ class WebMaterialBuildTest(unittest.TestCase):
                 "assets": {
                     available_path: {
                         "sourceId": source_id,
-                        "sourcePath": "",
+                        "sourcePath": "my_hero.pack",
                         "extractedPath": str(extracted),
                     },
                     missing_path: {
                         "sourceId": "missing_source",
-                        "sourcePath": "",
+                        "sourcePath": "my_hero.pack",
                         "extractedPath": str(root / "missing.png"),
                     },
                 }
@@ -1224,7 +1246,7 @@ class WebMaterialBuildTest(unittest.TestCase):
     def test_core_reference_still_includes_default_game_packs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            core = root / "mtu_reference_core.pack"
+            core = root / "mtu_vanilla_reference.pack"
             game_dir = root / "data"
             game_dir.mkdir()
             local_kr = game_dir / "local_kr.pack"
@@ -1243,7 +1265,7 @@ class WebMaterialBuildTest(unittest.TestCase):
     def test_armour_bonus_build_automatically_adds_vanilla_database_reference(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            core = root / "mtu_reference_core.pack"
+            core = root / "mtu_vanilla_reference.pack"
             game_dir = root / "data"
             game_dir.mkdir()
             database = game_dir / "database.pack"
@@ -1257,6 +1279,7 @@ class WebMaterialBuildTest(unittest.TestCase):
                     "newSetKey": "new_set",
                     "replacements": [],
                     "armourBonus": 45,
+                    "meleeDefenceBonus": 9,
                     "meleeAttackBonus": 10,
                     "meleeDamageBonus": 11,
                     "apMeleeDamageBonus": 12,
@@ -1283,7 +1306,7 @@ class WebMaterialBuildTest(unittest.TestCase):
     def test_build_without_armour_bonus_does_not_add_database_reference(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            core = root / "mtu_reference_core.pack"
+            core = root / "mtu_vanilla_reference.pack"
             game_dir = root / "data"
             game_dir.mkdir()
             database = game_dir / "database.pack"
@@ -1305,7 +1328,7 @@ class WebMaterialBuildTest(unittest.TestCase):
     def test_attack_bonus_alone_adds_vanilla_database_reference(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            core = root / "mtu_reference_core.pack"
+            core = root / "mtu_vanilla_reference.pack"
             game_dir = root / "data"
             game_dir.mkdir()
             database = game_dir / "database.pack"
@@ -1393,7 +1416,7 @@ class WebMaterialBuildTest(unittest.TestCase):
 
         self.assertEqual(character_data["pack"]["characters"], [])
 
-    def test_open_pack_with_core_reference_applies_korea_metadata(self) -> None:
+    def test_open_pack_with_core_reference_does_not_apply_korea_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             pack_path = Path(tmp) / "my_hero.pack"
             pack_path.write_bytes(b"pack")
@@ -1409,7 +1432,7 @@ class WebMaterialBuildTest(unittest.TestCase):
             }
 
             with (
-                patch.object(web, "_reference_pack_paths", return_value=[Path("mtu_reference_core.pack")]),
+                patch.object(web, "_reference_pack_paths", return_value=[Path("mtu_vanilla_reference.pack")]),
                 patch.object(web, "_open_session", return_value=FakeSession()),
                 patch.object(web, "analyze_pack", return_value=FakeAnalysis()),
                 patch.object(web, "read_character_data", return_value=character_data),
@@ -1426,9 +1449,8 @@ class WebMaterialBuildTest(unittest.TestCase):
 
             character = result["characters"]["pack"]["characters"][0]
             self.assertTrue(result["ok"])
-            self.assertTrue(character["isKoreaAddon"])
-            self.assertEqual(character["displayName"], "고계수")
-            self.assertEqual(character["label"], "고계수")
+            self.assertNotIn("isKoreaAddon", character)
+            self.assertNotEqual(character["displayName"], "고계수")
 
     def test_korea_name_hint_is_not_applied_without_metadata(self) -> None:
         character_data = {

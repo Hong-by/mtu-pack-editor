@@ -16,13 +16,13 @@ def main() -> None:
     parser.add_argument(
         "--materials",
         type=Path,
-        default=ROOT / "work" / "internal_materials" / "materials.v015.json",
+        default=ROOT / "work" / "internal_materials" / "vanilla_mtu" / "materials.v015.json",
     )
     parser.add_argument("--asset-root", type=Path, default=ROOT / "work" / "assets")
     parser.add_argument(
         "--output",
         type=Path,
-        default=ROOT / "work" / "internal_materials" / "asset_manifest.v015.json",
+        default=ROOT / "work" / "internal_materials" / "vanilla_mtu" / "asset_manifest.v015.json",
     )
     parser.add_argument(
         "--pack-root",

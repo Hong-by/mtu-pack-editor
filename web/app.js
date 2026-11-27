@@ -39,6 +39,27 @@ for (const button of document.querySelectorAll('[data-workflow-gender]')) {
   button.addEventListener('click', () => setWorkflowGender(button.dataset.workflowGender));
 }
 
+bind('rosterFavorites', 'click', () => {
+  state.favoritesOnly = !state.favoritesOnly;
+  $('rosterFavorites').setAttribute('aria-pressed', String(state.favoritesOnly));
+  resetRosterRenderLimit();
+  renderRoster();
+});
+bind('rosterClear', 'click', () => {
+  state.filter = 'all';
+  state.rosterFaction = 'all';
+  state.favoritesOnly = false;
+  $('searchInput').value = '';
+  $('rosterFavorites').setAttribute('aria-pressed', 'false');
+  document.querySelectorAll('.filter').forEach((item) => item.classList.toggle('active', item.dataset.filter === 'all'));
+  resetRosterRenderLimit();
+  renderRoster();
+});
+bind('rosterFaction', 'change', () => {
+  state.rosterFaction = $('rosterFaction').value;
+  resetRosterRenderLimit();
+  renderRoster();
+});
 bind('searchInput', 'input', () => {
   resetRosterRenderLimit();
   debounceRender('roster', renderRoster);
@@ -129,7 +150,13 @@ for (const button of document.querySelectorAll('[data-title-filter-prefix]')) {
 }
 bind('editCombatProfile', 'change', () => syncEquipmentSummary('edit', 'editCombatProfile'));
 bind('sourceCombatProfile', 'change', () => {
-  $('sourceDedicatedArmourValue').value = '';
+  for (const id of [
+    'sourceDedicatedArmourValue',
+    'sourceMeleeDefenceBonus',
+    'sourceMissileDefenceBonus',
+  ]) {
+    $(id).value = '';
+  }
   syncEquipmentSummary('source', 'sourceCombatProfile');
 });
 bind('sourceDedicatedArmourEnabled', 'change', () => {
@@ -137,11 +164,17 @@ bind('sourceDedicatedArmourEnabled', 'change', () => {
   syncDedicatedArmourControls(character);
   renderValidation();
 });
-bind('sourceDedicatedArmourValue', 'input', () => {
-  const character = characters().find((item) => item.key === $('sourceCombatProfile').value);
-  syncDedicatedArmourControls(character);
-  renderValidation();
-});
+for (const id of [
+  'sourceDedicatedArmourValue',
+  'sourceMeleeDefenceBonus',
+  'sourceMissileDefenceBonus',
+]) {
+  bind(id, 'input', () => {
+    const character = characters().find((item) => item.key === $('sourceCombatProfile').value);
+    syncDedicatedArmourControls(character);
+    renderValidation();
+  });
+}
 bind('editEquipmentSet', 'change', () => syncCeoSetSummary('edit', 'equipment', 'editEquipmentSet'));
 bind('sourceEquipmentSet', 'change', () => syncCeoSetSummary('source', 'equipment', 'sourceEquipmentSet'));
 bind('editTraitSet', 'change', () => syncCeoSetSummary('edit', 'trait', 'editTraitSet'));
@@ -258,6 +291,7 @@ document.addEventListener('click', (event) => {
   if (elementTab) {
     const prefix = elementTab.dataset.skillPrefix;
     state.skillCandidateTabs[prefix] = elementTab.dataset.skillElementTab || 'all';
+    skillDiscoveryState(prefix).limit = 40;
     renderSkillTreeEditor(prefix);
     return;
   }
@@ -271,7 +305,7 @@ document.addEventListener('click', (event) => {
     const tree = skillTreeBySet(setKey);
     const selectedNode = dedupeSkillTreeNodes(tree?.nodes || []).find((item) => item.key === node.dataset.skillNode);
     const info = selectedNode ? skillInfo(selectedNode.skillKey) : null;
-    state.skillCandidateTabs[node.dataset.skillPrefix] = info?.element || 'all';
+    // Preserve the user's search and filters when changing the target node.
     renderSkillTreeEditor(node.dataset.skillPrefix);
     return;
   }
@@ -293,6 +327,8 @@ document.addEventListener('input', (event) => {
   const search = event.target.closest('[data-skill-search]');
   if (!search) return;
   const prefix = search.dataset.skillSearch;
+  skillDiscoveryState(prefix).query = search.value;
+  skillDiscoveryState(prefix).limit = 40;
   const target = document.querySelector(`[data-skill-candidates="${prefix}"]`);
   if (target) target.innerHTML = renderSkillCandidates(prefix, search.value);
 });

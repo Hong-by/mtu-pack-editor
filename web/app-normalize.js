@@ -6,6 +6,13 @@ function hydrateFromPackData(characterData, responseEnvelope = {}) {
   state.options = summary;
   state.dedicatedArmour = responseEnvelope.dedicatedArmour || null;
   state.characters = summary.characters.map((item) => normalizePackCharacter(item, summary));
+  for (const character of state.characters) {
+    if (!hasKoreaUniquePortrait(character)) continue;
+    const artSet = summary.artSets.find(item => item.key === character.artSet);
+    const label = `${character.name} 이미지 세트`;
+    character.imageSetName = label;
+    if (artSet) artSet.label = label;
+  }
   bumpDataVersion();
   state.assetCacheVersion = responseEnvelope.assetCacheToken
     || characterData.assetCacheToken
@@ -37,7 +44,9 @@ function normalizePackCharacter(item, summary) {
   const imageNameFallback = isImageOnly
     ? (artSet?.label || item.portrait || item.card || item.artSet || item.key)
     : item.key;
-  const displayName = sheetHero?.kr || displayLabel(item.label || item.displayName, imageNameFallback);
+  const localizedName = item.label || item.displayName || '';
+  const usableLocalizedName = hasHangul(localizedName) || (!sheetHero?.kr && isKoreaRosterCharacter(item) && /[\u3400-\u9fff]/.test(localizedName));
+  const displayName = !isImageOnly && usableLocalizedName && !looksLikeInternalKey(localizedName) ? localizedName : (sheetHero?.kr || displayLabel(item.label || item.displayName, imageNameFallback));
   const sheetTitle = sheetTitleInfoFor(titleInfo.ceoNodeKey || titleInfo.initialCeoKey || '', item.key);
   const koreaTitleOverride = koreaTitleOverrideFor(item, titleInfo);
   const resolvedTitleName = koreaTitleOverride || displayTitleLabel(titleInfo.label, titleInfo.ceoNodeKey || titleInfo.initialCeoKey || '', sheetTitle?.krTitle);
@@ -89,6 +98,9 @@ function normalizePackCharacter(item, summary) {
     titleOwnerName: sheetTitle?.krName || manualTitle?.owner || displayName,
     titleDescription: titleInfo.description || '',
     titleKey: titleInfo.ceoNodeKey || '',
+    titleCeoKey: titleInfo.titleCeoKey || '',
+    titleCareerCeoKey: titleInfo.titleCeoKey || '',
+    titleEffectSummary: titleInfo.effectSummary || '',
     titleInitialCeoKey: titleInfo.initialCeoKey || '',
     titleLocKey: titleInfo.locTitleKey || '',
     titleStatus: titleInfo.status || 'read_only_spike',
@@ -130,6 +142,7 @@ function normalizePackCharacter(item, summary) {
     birthYear: birthYearForAgeRange(item.ageRange),
     spawnEvent,
     rosterSearchText,
+    rosterFactions: item.rosterFactions || [],
     templateRow: item.templateRow || {},
     details: item.details || [],
     portraitPath: item.portrait || artSet?.portrait || '',
@@ -139,6 +152,9 @@ function normalizePackCharacter(item, summary) {
     cardImagePath: item.cardImagePath || artSet?.cardImagePath || '',
     cardImageSourcePath: item.cardImageSourcePath || artSet?.cardImageSourcePath || '',
     imageAssets: item.imageAssets || artSet?.imageAssets || [],
+    imageCatalogEligible: item.imageCatalogEligible ?? artSet?.imageCatalogEligible,
+    imageCatalogIssues: item.imageCatalogIssues || artSet?.imageCatalogIssues || [],
+    imageContentSignature: item.imageContentSignature || artSet?.imageContentSignature || '',
     hasImage: Boolean(item.portraitImagePath || item.cardImagePath || artSet?.portraitImagePath || artSet?.cardImagePath),
     uniform: item.uniform || artSet?.uniform || '',
     uniformLabel: item.uniformLabel || artSet?.uniformLabel || '',

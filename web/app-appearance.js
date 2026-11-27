@@ -60,7 +60,7 @@ function isLshzImageOnly(item) {
 
 function displayNameWithDummyMarker(item) {
   const name = displayLabel(item?.name || item?.imageSetName || '-', item?.key || item?.artSet || '');
-  return name;
+  return item?.imageVariantLabel ? `${name} · ${item.imageVariantLabel}` : name;
 }
 
 function cleanDisplayCandidate(value) {
@@ -391,10 +391,10 @@ function titleCatalogChoices() {
           titleEffects: Array.isArray(item.effects) ? item.effects : [],
           titleEffectSummary: item.effectSummary || '',
           titleEffectTitle: item.effectTitle || '',
-          titleCeoKey: item.titleCeoKey || item.ceoKey || item.key,
+          titleCeoKey: item.titleCeoKey || '',
           titleElement: item.element || '',
           titleElements: Array.isArray(item.elements) ? item.elements : (item.element ? [item.element] : []),
-          titleCareerCeoKey: titleCareerCeoKeyFromNodeKey(item.ceoNodeKey || item.key),
+          titleCareerCeoKey: item.titleCeoKey || '',
           titleKey: item.ceoNodeKey || item.key,
           titleInitialCeoKey: item.initialCeoKey || '',
           titleLocKey: item.locTitleKey || '',
@@ -440,6 +440,7 @@ function koreanizeTitleOwnerName(value) {
 
 function displayTitleLabel(label, key = '', fallback = '') {
   const text = String(label || '').trim();
+  if (text && hasHangul(text) && !looksLikeInternalKey(text) && !isMixedNameTitleLabel(text) && !looksLikeTitleSuffixFallback(text, key)) return text;
   const sheetTitle = sheetTitleInfoFor(key || text);
   if (sheetTitle?.krTitle) return sheetTitle.krTitle;
   if (fallback) return fallback;
@@ -456,6 +457,7 @@ function looksLikeTitleSuffixFallback(value, key = '') {
 }
 
 function fallbackTitleDisplayName(label = '', key = '', ownerName = '') {
+  if (label && hasHangul(label) && !looksLikeInternalKey(label) && !isMixedNameTitleLabel(label) && !looksLikeTitleSuffixFallback(label, key)) return label;
   const sheetTitle = sheetTitleInfoFor(key || label);
   if (sheetTitle?.krTitle) return sheetTitle.krTitle;
   const owner = cleanTitleOwnerName(ownerName || sheetTitle?.krName || '', key || label);
@@ -566,18 +568,10 @@ function manualTitleChoices() {
 
 function allTitleChoices() {
   return cachedDerived('allTitleChoices', () => {
-    const manual = manualTitleChoices().filter((item) => item.manualTitleAnchored);
     const catalog = titleCatalogChoices();
     const regularSource = catalog.length ? catalog : titleSourceCharacters();
-    const regular = regularSource.filter((character) => {
-      const owner = normalizeKoreanText(character.titleOwnerName || character.name);
-      const title = normalizeKoreanText(character.titleName);
-      return !manual.some((item) => (
-        normalizeKoreanText(item.titleOwnerName || item.name) === owner
-        && normalizeKoreanText(item.titleName) === title
-      ));
-    });
-    return sortTitleCandidates(dedupeTitleChoicesByDisplay(dedupeTitleChoices([...manual, ...regular])));
+    const regular = regularSource.filter((character) => character.titleCeoKey);
+    return sortTitleCandidates(dedupeTitleChoicesByDisplay(dedupeTitleChoices(regular)));
   });
 }
 
@@ -604,7 +598,10 @@ function titleChoicesForFilter(filter, ...preserveChoices) {
       .map((item) => titleChoiceValue(item))
       .filter(Boolean),
   );
-  const choices = allTitleChoices();
+  const choices = [...allTitleChoices()];
+  for (const item of preserveChoices.filter(Boolean)) {
+    if (!choices.some((choice) => titleChoiceValue(choice) === titleChoiceValue(item))) choices.push(item);
+  }
   const filtered = choices.filter((item) => (
     titleChoiceMatchesStatFilter(item, filter) || keep.has(titleChoiceValue(item))
   ));
@@ -666,6 +663,9 @@ function appearanceSets() {
         cardImagePath: item.cardImagePath || '',
         cardImageSourcePath: item.cardImageSourcePath || '',
         imageAssets: item.imageAssets || [],
+        imageCatalogEligible: item.imageCatalogEligible,
+        imageCatalogIssues: item.imageCatalogIssues || [],
+        imageContentSignature: item.imageContentSignature || '',
         uniform: item.imageOnly || item.virtual ? '' : (item.uniform || ''),
         uniformLabel: item.imageOnly || item.virtual ? '모델 없음' : (item.uniformLabel || ''),
         isMale: item.isMale,
@@ -727,14 +727,48 @@ function modelAppearanceSets() {
 }
 
 function selectableImageAppearances() {
-  return cachedDerived('selectableImageAppearances', () => appearanceSets().filter((item) => {
+  return cachedDerived('selectableImageAppearances', () => dedupeImageChoices(appearanceSets().filter((item) => {
+      if (item.imageCatalogEligible === false) return false;
       if (sourceInfo(item).tag === 'AW') return false;
       if (!item.portraitImagePath && !item.externalImageSet) return false;
       const combined = `${item.artSet || ''} ${item.imageSetName || ''} ${item.portraitPath || ''} ${item.cardPath || ''}`.toLowerCase();
       const referenceSource = String(item.referenceSourcePath || '').toLowerCase();
       const isBfg = item.externalImageSet || referenceSource.includes('bfg_');
       return isBfg || (!combined.includes('generic') && !combined.includes('scripted'));
-    }));
+    })));
+}
+
+function imageChoiceIdentity(item) {
+  if (item?.imageContentSignature) return `content:${item.imageContentSignature}`;
+  // A matching thumbnail is not enough: compare every exported asset and visual
+  // age/season variant. Keep sets without a complete asset list separate.
+  if (!item?.imageAssets?.length) return `key:${item?.key}`;
+  const normalize = (value) => String(value || '').replace(/\\/g, '/').toLowerCase();
+  const assets = item.imageAssets.map((asset) => [normalize(asset.sourcePath), normalize(asset.path)]).sort();
+  const rows = (item.rows || []).map((row) => [row.age, row.level, row.season, row.has_come_of_age,
+    row.portrait, row.card, row.fallback_composite_display, row.religion]).map(JSON.stringify).sort();
+  return JSON.stringify([assets, rows, item.portraitImagePath, item.cardImagePath]);
+}
+
+function dedupeImageChoices(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const signature = imageChoiceIdentity(item);
+    if (!groups.has(signature)) groups.set(signature, { ...item, imageAliases: [], imageAliasNames: [] });
+    groups.get(signature).imageAliases.push(item.key);
+    groups.get(signature).imageAliasNames.push(item.name || item.imageSetName || '');
+  }
+  const result = [...groups.values()];
+  const byName = new Map();
+  for (const item of result) {
+    const name = String(item.name || item.imageSetName || '');
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push(item);
+  }
+  for (const variants of byName.values()) {
+    if (variants.length > 1) variants.forEach((item, index) => { item.imageVariantLabel = `이미지 구성 ${index + 1}`; });
+  }
+  return result;
 }
 
 function mergeImageOnlyAppearance(existing, incoming) {
@@ -777,6 +811,9 @@ function appearanceFromCharacter(character) {
     cardImagePath: character?.cardImagePath || '',
     cardImageSourcePath: character?.cardImageSourcePath || '',
     imageAssets: character?.imageAssets || [],
+    imageCatalogEligible: character?.imageCatalogEligible,
+    imageCatalogIssues: character?.imageCatalogIssues || [],
+    imageContentSignature: character?.imageContentSignature || '',
     uniform: isImageOnly ? '' : (character?.uniform || ''),
     isMale: character?.isMale ?? character?.templateRow?.is_male,
     voiceoverActor: character?.voiceoverActor || character?.templateRow?.voiceover_actor || '',
@@ -870,8 +907,8 @@ function imageTokenFromAppearance(appearance) {
 
 function imageTokenForAsset(appearance, assetPath) {
   const normalized = normalizeImageAssetPath(assetPath).toLowerCase();
-  const value = normalized.includes('/stills/unitcards/')
-    ? appearance?.cardPath
+  const value = (normalized.includes('/stills/') || normalized.includes('/composites/faces/'))
+    ? imageCardKeyFromAppearance(appearance)
     : appearance?.portraitPath;
   return String(value || imageTokenFromAppearance(appearance)).replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || '';
 }
@@ -949,6 +986,8 @@ function appearanceSearchText(appearance) {
     appearance?.key,
     appearance?.name,
     appearance?.imageSetName,
+    ...(appearance?.imageAliases || []),
+    ...(appearance?.imageAliasNames || []),
     appearance?.artSet,
     imageFolderName(appearance),
     appearance?.portraitImagePath,
@@ -1077,8 +1116,15 @@ function imageCardKeyFromAppearance(appearance) {
   const path = String(appearance?.cardImagePath || '').replace(/\\/g, '/').replace(/[\\/]+$/, '');
   const fileName = path.split('/').filter(Boolean).pop() || '';
   const stem = fileName.replace(/\.(png|jpg|jpeg|dds)$/i, '');
-  if (stem) return stem;
-  return imageFolderFromValue(appearance?.cardPath);
+  if (stem && /\/stills\/unitcards\//i.test(path)) return stem;
+  const declared = imageFolderFromValue(appearance?.cardPath);
+  const names = [...new Set((appearance?.imageAssets || [])
+    .map(asset => String(asset.path || '').replace(/\\/g, '/'))
+    .filter(value => /\/stills\/unitcards\/(?:faces\/)?(?:large\/)?[^/]+\.png$/i.test(value)
+      && !/ancillary|ancilliary|\/EMPTY\.png$/i.test(value))
+    .map(value => value.split('/').pop().replace(/\.png$/i, '')))];
+  return names.find(name => name.toLowerCase() === declared.toLowerCase())
+    || (names.length === 1 ? names[0] : declared);
 }
 
 function modelArtOverridesFromAppearance(appearance) {

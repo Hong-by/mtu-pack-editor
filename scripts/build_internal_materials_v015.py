@@ -35,51 +35,14 @@ def _workshop_pack_candidates(content_id: str, file_name: str) -> list[Path]:
     return [root / content_id / file_name for root in _workshop_roots()]
 
 
-DEFAULT_SOURCES = [
-    ROOT / "work" / "packs" / "my_hero.pack",
-    ROOT / "work" / "packs" / "refs" / "database.pack",
-    ROOT / "work" / "packs" / "refs" / "data_mh.pack",
-    ROOT / "work" / "packs" / "refs" / "data_ep.pack",
-    ROOT / "work" / "packs" / "refs" / "data_dlc07.pack",
-    ROOT / "work" / "packs" / "refs" / "data_dlc06.pack",
-    ROOT / "work" / "packs" / "refs" / "data_bl.pack",
-    ROOT / "work" / "packs" / "refs" / "data_yt_bl.pack",
-    ROOT / "work" / "packs" / "refs" / "BFG_Originals.pack",
-    ROOT / "work" / "packs" / "refs" / "BFG_for_MTU.pack",
-    ROOT / "work" / "packs" / "refs" / "BFG_Nanman2.pack",
-    ROOT / "work" / "packs" / "refs" / "BFG_Yellow_Turban.pack",
-    ROOT / "work" / "legacy_template" / "8King_4P_1.7_up.pack",
-] + [
-    ROOT / "work" / "packs" / "refs" / "!!190_expanded_with_characters.pack",
-    ROOT / "work" / "packs" / "refs" / "!!190expande_korea_addon.pack",
-] + _workshop_pack_candidates(
-    "2875547086",
-    "!!190_expanded_with_characters.pack",
-) + _workshop_pack_candidates(
-    "3415534775",
-    "!!190expande_korea_addon.pack",
-) + _workshop_pack_candidates(
-    "3010906135",
-    "!!190_expanded_overhauladdition.pack",
-) + _workshop_pack_candidates(
-    "3240150507",
-    "!!190_expanded_region.pack",
-) + _workshop_pack_candidates(
-    "3242244024",
-    "!!190_expanded_kr.pack",
-) + _workshop_pack_candidates(
-    "3578173989",
-    "!!190expande_korea_addon_mod.pack",
-) + _workshop_pack_candidates(
-    "1813995786",
-    "[mod]MTU_original_v_0_0_2_korean.pack",
-) + _workshop_pack_candidates(
-    "2229399407",
-    "TheGathering_localised_kr.pack",
-) + _workshop_pack_candidates(
-    "2851094625",
-    "cao_wife(KOR).pack",
-) + default_game_local_pack_paths()
+from tk_pack_builder.source_policy import PROFILE, MATERIAL_DIRECTORY, supported_source, require_clean_materials, EXCLUDED_TEMPLATE_KEYS
+
+DEFAULT_SOURCES = [ROOT / "work" / "packs" / "my_hero.pack"] + [
+    ROOT / "work" / "packs" / "refs" / name
+    for name in ("database.pack", "data_mh.pack", "data_ep.pack", "data_dlc07.pack",
+                 "data_dlc06.pack", "data_bl.pack", "data_yt_bl.pack", "data.pack")
+] + _workshop_pack_candidates("1813995786", "[mod]MTU_original_v_0_0_2_korean.pack") + default_game_local_pack_paths()
+
 
 REQUIRED_TABLE_FOLDERS = {
     "agent_uniforms_tables",
@@ -133,17 +96,21 @@ REQUIRED_TABLE_FOLDERS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build v0.1.5 internal material snapshots.")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "work" / "internal_materials")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "work" / "internal_materials" / MATERIAL_DIRECTORY)
     parser.add_argument("--source", action="append", type=Path, dest="sources")
     parser.add_argument("--include-large-assets", action="store_true")
     args = parser.parse_args()
 
     sources = [path.resolve() for path in (args.sources or DEFAULT_SOURCES) if path.is_file()]
+    rejected = [str(path) for path in sources if not supported_source(path)]
+    if rejected:
+        raise ValueError(f"Unsupported material sources: {rejected}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     _ensure_rpfm_server()
     materials: dict[str, Any] = {
         "schemaVersion": 1,
+        "sourceProfile": PROFILE,
         "baseline": "v0.1.5",
         "createdAt": time.time(),
         "sources": [str(path) for path in sources],
@@ -163,6 +130,8 @@ def main() -> None:
         report["sources"].append(source_report)
 
     finalize_loc_materials(materials)
+
+    require_clean_materials(materials)
 
     material_path = args.output_dir / "materials.v015.json"
     report_path = args.output_dir / "internalization_report.v015.json"
@@ -196,6 +165,10 @@ def inspect_source(source: Path, materials: dict[str, Any], include_large_assets
             try:
                 rows = session.read_table(table_path)
                 source_db = session.decoded_db_by_path[session._resolve_table_path(table_path)]
+                if table_folder(table_path) == 'character_generation_templates_tables':
+                    from tk_pack_builder.delta_builder import _db_with_rows
+                    rows = [row for row in rows if row.get('key') not in EXCLUDED_TEMPLATE_KEYS]
+                    source_db = _db_with_rows(source_db, rows)
             except Exception:
                 failed_tables.append(table_path)
                 continue

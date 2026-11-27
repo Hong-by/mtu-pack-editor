@@ -142,9 +142,13 @@ function dedicatedArmourSelection(character) {
   const enabled = Boolean($('sourceDedicatedArmourEnabled')?.checked);
   if (!enabled) return null;
   const slot = availableDedicatedArmourSlot(character);
-  const bonus = Number($('sourceDedicatedArmourValue')?.value);
+  const armourBonus = Number($('sourceDedicatedArmourValue')?.value);
+  const meleeDefenceBonus = Number($('sourceMeleeDefenceBonus')?.value);
+  const missileDefenceBonus = Number($('sourceMissileDefenceBonus')?.value);
   if (!slot) return null;
-  if (!Number.isInteger(bonus) || bonus < -500 || bonus > 500) return null;
+  if (!Number.isInteger(armourBonus) || armourBonus < -500 || armourBonus > 500) return null;
+  if (!Number.isInteger(meleeDefenceBonus) || meleeDefenceBonus < -100 || meleeDefenceBonus > 100) return null;
+  if (!Number.isInteger(missileDefenceBonus) || missileDefenceBonus < -100 || missileDefenceBonus > 100) return null;
   const sourceArmourValue = Number(character.baseDefense);
   return {
     poolId: '',
@@ -153,11 +157,13 @@ function dedicatedArmourSelection(character) {
     sourceInitialCeoKey: characterInitialCeoKey(character),
     sourceArmourTypeKey: character.armourStatKey,
     sourceArmourValue,
-    armourBonus: bonus,
+    armourBonus: armourBonus,
+    meleeDefenceBonus,
+    missileDefenceBonus,
     armourCeoKey: '',
     initialCeoKey: '',
     armourTypeKey: '',
-    armourValue: sourceArmourValue + bonus,
+    armourValue: sourceArmourValue + armourBonus,
   };
 }
 
@@ -196,12 +202,12 @@ function ceoSetSummaryMarkup(kind, key) {
   `;
 }
 
-function syncCeoSetSummary(prefix, kind, selectId) {
+function syncCeoSetSummary(prefix, kind, selectId, { deferValidation = false } = {}) {
   const suffix = kind === 'equipment' ? 'EquipmentSetSummary' : 'TraitSetSummary';
   const target = $(`${prefix}${suffix}`);
   if (!target) return;
   target.innerHTML = ceoSetSummaryMarkup(kind, $(selectId).value);
-  renderValidation();
+  if (!deferValidation) renderValidation();
 }
 
 function uniqueStrings(values) {

@@ -216,6 +216,7 @@ class RecipeFromDictTest(unittest.TestCase):
                     {"nodeKey": "node_a", "skillKey": "skill_b"},
                 ],
                 "armourBonus": 1,
+                "meleeDefenceBonus": 7,
                 "meleeAttackBonus": 2,
                 "meleeDamageBonus": 3,
                 "apMeleeDamageBonus": 4,
@@ -227,6 +228,7 @@ class RecipeFromDictTest(unittest.TestCase):
         self.assertEqual(clone.new_set_key, "hby_new_set")
         self.assertEqual(clone.replacements, {"node_a": "skill_b"})
         self.assertEqual(clone.armour_bonus, 1)
+        self.assertEqual(clone.melee_defence_bonus, 7)
         self.assertEqual(clone.melee_attack_bonus, 2)
         self.assertEqual(clone.melee_damage_bonus, 3)
         self.assertEqual(clone.ap_melee_damage_bonus, 4)
@@ -257,6 +259,35 @@ class RecipeFromDictTest(unittest.TestCase):
         clone = recipe.attribute_set_clones[0]
         self.assertIn("authority", clone.overrides)
         self.assertNotIn("label", clone.overrides)
+
+    def test_generated_attribute_set_keys_are_remapped_for_190e_ui(self) -> None:
+        recipe = recipe_from_dict({
+            "modName": "attribute_compat",
+            "attributeSetClones": [{
+                "sourceSetKey": "3k_main_attribute_set_general_water_records",
+                "newSetKey": "hby_attribute_set_lady_sun_1",
+                "overrides": {"expertise": 80},
+            }],
+            "characterCloneRecipes": [{
+                "newTemplateKey": "hby_template_lady_sun_1",
+                "sourceTemplateKey": "3k_main_template_historical_lady_sun_shangxiang_hero_fire",
+                "detailOverrides": {
+                    "romance": {"attribute_set": "hby_attribute_set_lady_sun_1"},
+                    "historical": {"attribute_set": "hby_attribute_set_lady_sun_1"},
+                },
+            }],
+        })
+
+        expected = "3k_main_attribute_set_general_hby_lady_sun_1"
+        self.assertEqual(recipe.attribute_set_clones[0].new_set_key, expected)
+        self.assertEqual(
+            recipe.character_clones[0].detail_overrides["romance"]["attribute_set"],
+            expected,
+        )
+        self.assertEqual(
+            recipe.character_clones[0].detail_overrides["historical"]["attribute_set"],
+            expected,
+        )
 
     def test_character_clone_display_name_falls_back_to_new_name(self) -> None:
         recipe = recipe_from_dict({
@@ -304,6 +335,7 @@ class RecipeFromDictTest(unittest.TestCase):
                     "sourceArmourTypeKey": "source_armour_type",
                     "sourceArmourValue": 45,
                     "armourBonus": -12,
+                    "meleeDefenceBonus": 12,
                     "meleeAttackBonus": 7,
                     "meleeDamageBonus": 8,
                     "apMeleeDamageBonus": 9,
@@ -318,11 +350,35 @@ class RecipeFromDictTest(unittest.TestCase):
         assert adjustment is not None
         self.assertEqual(adjustment.source_armour_value, 45)
         self.assertEqual(adjustment.armour_value, 33)
+        self.assertEqual(adjustment.melee_defence_bonus, 12)
         self.assertEqual(adjustment.melee_attack_bonus, 7)
         self.assertEqual(adjustment.melee_damage_bonus, 8)
         self.assertEqual(adjustment.ap_melee_damage_bonus, 9)
         self.assertEqual(adjustment.charge_bonus, 10)
         self.assertEqual(adjustment.missile_defence_bonus, 11)
+
+    def test_character_armour_adjustment_rejects_invalid_defence_chance(self) -> None:
+        payload = {
+            "characterCloneRecipes": [{
+                "newTemplateKey": "hby_template",
+                "sourceTemplateKey": "src_template",
+                "detailOverrides": {},
+                "dedicatedArmour": {
+                    "sourceCeoKey": "source_armour",
+                    "sourceInitialCeoKey": "source_initial",
+                    "sourceArmourTypeKey": "source_armour_type",
+                    "sourceArmourValue": 45,
+                    "armourBonus": 0,
+                    "meleeDefenceBonus": 101,
+                },
+            }],
+        }
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "defence chance bonuses must be between -100 and 100",
+        ):
+            recipe_from_dict(payload)
 
     def test_character_patch_is_parsed(self) -> None:
         recipe = recipe_from_dict({

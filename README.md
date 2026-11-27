@@ -1,45 +1,38 @@
-# Three Kingdoms Custom Character Pack Builder CLI Prototype
+# MTU Pack Editor
 
-UI 없이 `recipe.json + starter.pack -> output.pack` 흐름을 검증하는 CLI 프로토타입입니다.
+Total War: THREE KINGDOMS의 장수 생성·수정과 패치 pack 제작을 위한 로컬 웹 프로그램입니다.
 
-현재 구현은 `MockPackAdapter`와 `RpfmAdapter`를 지원합니다. Mock `.pack`은 JSON envelope이고, RPFM 경로는 실행 중인 RPFM 서버에 붙어 실제 pack의 DB를 디코드한 뒤 숫자 cell만 수정해 저장합니다. 저장 방식은 Save As(`--output`)와 원본 저장(`--in-place`)을 분리합니다.
+## Windows v2.2.0 설치
 
-대상 게임은 **Total War: THREE KINGDOMS**로 고정합니다. RPFM game key는 `three_kingdoms`입니다.
+GitHub Releases에서 `MTU-Pack-Editor-v2.2.0-*.zip` 파일을 **모두** 다운로드하고 같은 위치에 압축을 풉니다. 모든 ZIP의 `MTU Pack Editor` 폴더를 하나로 합쳐 주세요. ZIP 안에서 실행하지 마세요.
 
-## 사용법
+1. `MTU Pack Editor.exe`를 실행합니다. Python과 RPFM 런타임은 별도로 설치할 필요가 없습니다.
+2. 브라우저에서 프로그램을 열고 사용할 자료 구성을 선택합니다.
+3. 장수 생성 또는 기존 장수 수정을 작업 목록에 추가하고 패치 pack을 저장합니다.
+4. 생성한 `.pack`을 게임의 `data` 폴더에 넣고 필요한 원본 모드와 함께 활성화합니다.
 
-## Windows portable release
+배포본에는 편집용 MTU 입력 팩, 참조 자료와 이미지 자료가 포함됩니다. 게임과 선택한 구성의 원본 모드는 별도로 설치·활성화해야 합니다. 프로그램의 자료 구성 선택은 게임 모드를 설치하거나 활성화하지 않습니다.
 
-GitHub Releases에서 `MTU-Pack-Editor-...-windows-portable.zip`을 받았다면 Python이나 RPFM을 따로 설치하지 않고 실행할 수 있습니다.
+기존 버전에서 업그레이드할 때는 새 폴더에 설치하고 기존 작업과 출력 팩을 보관하세요. 작업 목록은 같은 브라우저·주소의 로컬 저장소를 사용합니다. 다른 브라우저나 포트로 접속하면 기존 목록이 보이지 않을 수 있습니다.
 
-1. zip을 원하는 폴더에 풉니다.
-2. 보유 중인 pack 파일을 아래 위치에 넣습니다.
-3. `MTU Pack Editor.bat`을 실행합니다.
-4. 웹 UI에서 `팩 읽기`를 누릅니다.
-5. 작업을 추가하고 `저장`을 누르면 기본값 기준 `work\packs\my_hero_patch.pack`이 생성됩니다.
-6. 생성된 `.pack` 파일을 Total War: THREE KINGDOMS 설치 폴더의 `data` 폴더에 넣고, 런처/모드 매니저에서 원본 MTU 모드와 함께 활성화합니다.
+## 자료 구성
 
-필수 기본 입력 pack:
+- 바닐라·MTU
+- 바닐라·MTU·190 Expanded
+- 바닐라·MTU·190 Expanded·한반도
 
-```text
-work\packs\my_hero.pack
-```
+구성마다 사용할 수 있는 장수·칭호·장비가 다릅니다. 다른 구성에서 만든 작업은 원래 구성으로 돌아가거나 현재 자료로 다시 선택해야 합니다. 자세한 내용은 [자료 구성 안내](docs/source-profiles.md)를 참고하세요.
 
-참조 pack 기본 위치:
+## v2.2.0 변경 사항
 
-```text
-work\packs\refs\BFG_Originals.pack
-work\packs\refs\database.pack
-work\packs\refs\data_mh.pack
-work\packs\refs\data_ep.pack
-work\packs\refs\data_dlc07.pack
-work\packs\refs\data_dlc06.pack
-work\packs\refs\data_bl.pack
-work\packs\refs\data_yt_bl.pack
-work\packs\refs\data.pack
-```
+- 선택 가능한 자료 구성과 한국어 카탈로그를 확장했습니다.
+- 작업 목록의 수정 진입 시 선택 목록을 필요한 시점에 불러오도록 변경했습니다. 저장한 작업 설정은 유지합니다.
+- 이미지 연결 및 얼굴 경로를 보완하고, 불완전한 세트는 새 이미지 선택에서 제외했습니다.
+- 같은 그림을 쓰는 이미지 항목을 묶고 기존 키는 유지합니다.
+- 생성 이미지 세트를 교체·추가했습니다. 최근 추가한 네 세트는 이름에 `[신규]`를 붙여 검색할 수 있습니다.
+- 설치 경로가 달라져도 배포 이미지 카탈로그를 불러올 수 있도록 캐시를 준비합니다.
 
-공개 릴리즈에는 Total War: THREE KINGDOMS 원본 데이터나 타 모드 원본 `.pack` 파일이 포함되지 않습니다. 본인이 보유하거나 사용 권한이 있는 pack 파일을 직접 배치해야 합니다.
+게임 내 모든 모드 조합과 기존 세이브의 호환성까지 보장하는 릴리즈는 아닙니다. 실행 파일의 시작·자료 로딩과 자동화 검사를 배포 전에 확인합니다.
 
 ## 개발 실행
 

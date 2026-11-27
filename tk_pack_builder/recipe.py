@@ -39,6 +39,7 @@ class SkillSetClone:
     new_set_key: str
     replacements: dict[str, str]
     armour_bonus: int = 0
+    melee_defence_bonus: int = 0
     melee_attack_bonus: int = 0
     melee_damage_bonus: int = 0
     ap_melee_damage_bonus: int = 0
@@ -72,6 +73,7 @@ class DedicatedArmourAssignment:
     armour_ceo_key: str = ""
     initial_ceo_key: str = ""
     armour_type_key: str = ""
+    melee_defence_bonus: int = 0
     melee_attack_bonus: int = 0
     melee_damage_bonus: int = 0
     ap_melee_damage_bonus: int = 0
@@ -152,6 +154,7 @@ def load_recipe(path: Path) -> Recipe:
 
 def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     data = _normalize_age_range_clones(data)
+    data = _normalize_attribute_set_clones(data)
     patches = _coalesce_stat_patches([
         StatPatch(
             equipment_key=item["equipmentKey"],
@@ -190,6 +193,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
                 if replacement.get("nodeKey") and replacement.get("skillKey")
             },
             armour_bonus=int(item.get("armourBonus") or 0),
+            melee_defence_bonus=int(item.get("meleeDefenceBonus") or 0),
             melee_attack_bonus=int(item.get("meleeAttackBonus") or 0),
             melee_damage_bonus=int(item.get("meleeDamageBonus") or 0),
             ap_melee_damage_bonus=int(item.get("apMeleeDamageBonus") or 0),
@@ -336,7 +340,6 @@ def _dedicated_armour_assignment(value: Any) -> DedicatedArmourAssignment | None
         "melee_damage_bonus": int(value.get("meleeDamageBonus") or 0),
         "ap_melee_damage_bonus": int(value.get("apMeleeDamageBonus") or 0),
         "charge_bonus": int(value.get("chargeBonus") or 0),
-        "missile_defence_bonus": int(value.get("missileDefenceBonus") or 0),
     }
     invalid_bonuses = [
         name
@@ -347,6 +350,20 @@ def _dedicated_armour_assignment(value: Any) -> DedicatedArmourAssignment | None
         raise ValueError(
             "Character combat bonuses must be between -500 and 500: "
             + ", ".join(invalid_bonuses)
+        )
+    defence_bonuses = {
+        "melee_defence_bonus": int(value.get("meleeDefenceBonus") or 0),
+        "missile_defence_bonus": int(value.get("missileDefenceBonus") or 0),
+    }
+    invalid_defence_bonuses = [
+        name
+        for name, bonus in defence_bonuses.items()
+        if not -100 <= bonus <= 100
+    ]
+    if invalid_defence_bonuses:
+        raise ValueError(
+            "Character defence chance bonuses must be between -100 and 100: "
+            + ", ".join(invalid_defence_bonuses)
         )
     required = {
         key: str(value.get(key) or "").strip()
@@ -371,6 +388,7 @@ def _dedicated_armour_assignment(value: Any) -> DedicatedArmourAssignment | None
         initial_ceo_key=str(value.get("initialCeoKey") or "").strip(),
         armour_type_key=str(value.get("armourTypeKey") or "").strip(),
         **combat_bonuses,
+        **defence_bonuses,
     )
 
 
@@ -407,6 +425,57 @@ def _normalize_age_range_clones(data: dict[str, Any]) -> dict[str, Any]:
     ]
     normalized["characterPatches"] = [
         remap_template_overrides(item)
+        for item in data.get("characterPatches", [])
+    ]
+    return normalized
+
+
+def _normalize_attribute_set_clones(data: dict[str, Any]) -> dict[str, Any]:
+    """Remap generated attribute sets into 190E's supported key namespace.
+
+    190E extracts a character CQI from its UI object id with a pattern that
+    assumes the attribute-set key starts with
+    ``3k_main_attribute_set_general``. Older editor recipes used
+    ``hby_attribute_set_`` and therefore made 190E pass the entire object id
+    to ``SetContextObject`` when the character details panel opened.
+
+    Remap the cloned row and all character-detail references at recipe load so
+    persisted work queues and older recipe files are fixed at build time too.
+    """
+    normalized = dict(data)
+    remaps: dict[str, str] = {}
+    attribute_items: list[dict[str, Any]] = []
+    for item in data.get("attributeSetClones", []):
+        copied = dict(item)
+        old_key = str(copied.get("newSetKey") or "")
+        if old_key.startswith("hby_attribute_set_"):
+            suffix = old_key.removeprefix("hby_attribute_set_")
+            new_key = f"3k_main_attribute_set_general_hby_{suffix}"
+            copied["newSetKey"] = new_key
+            remaps[old_key] = new_key
+        attribute_items.append(copied)
+    normalized["attributeSetClones"] = attribute_items
+    if not remaps:
+        return normalized
+
+    def remap_detail_overrides(item: dict[str, Any]) -> dict[str, Any]:
+        copied = dict(item)
+        details: dict[str, Any] = {}
+        for mode, raw_overrides in (copied.get("detailOverrides") or {}).items():
+            overrides = dict(raw_overrides or {})
+            attribute_set = str(overrides.get("attribute_set") or "")
+            if attribute_set in remaps:
+                overrides["attribute_set"] = remaps[attribute_set]
+            details[str(mode)] = overrides
+        copied["detailOverrides"] = details
+        return copied
+
+    normalized["characterCloneRecipes"] = [
+        remap_detail_overrides(item)
+        for item in data.get("characterCloneRecipes", [])
+    ]
+    normalized["characterPatches"] = [
+        remap_detail_overrides(item)
         for item in data.get("characterPatches", [])
     ]
     return normalized

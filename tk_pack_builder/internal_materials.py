@@ -3,11 +3,13 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from .character_clone import CHARACTER_TABLE_ALIASES
 from .game import THREE_KINGDOMS_GAME_KEY
+from .source_policy import require_clean_materials
 from .stat_tables import TABLE_ALIASES
 
 
@@ -145,9 +147,17 @@ class MaterialPackSession:
 
     @classmethod
     def open(cls, path: Path) -> "MaterialPackSession":
-        with path.open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        return cls(path.resolve(), payload)
+        resolved = path.resolve()
+        stat = resolved.stat()
+        payload = _load_material_payload(
+            str(resolved),
+            stat.st_size,
+            stat.st_mtime_ns,
+        )
+        from .source_profiles import current, BASE
+        if payload.get('sourceProfile', BASE) != current():
+            raise ValueError('선택한 모드 구성과 재료 DB가 일치하지 않습니다.')
+        return cls(resolved, payload)
 
     def list_tables(self, source: str = "pack") -> list[str]:
         if source == "vanilla":
@@ -240,3 +250,16 @@ class MaterialPackSession:
         if not matches:
             raise ValueError(f"Material table not found: {table_name}")
         raise ValueError(f"Material table name is ambiguous: {table_name}: {matches[:5]}")
+
+
+@lru_cache(maxsize=2)
+def _load_material_payload(
+    path: str,
+    _size: int,
+    _mtime_ns: int,
+) -> dict[str, Any]:
+    """Parse the large bundled material snapshot once per unchanged file."""
+    with Path(path).open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    require_clean_materials(payload)
+    return payload

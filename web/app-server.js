@@ -131,12 +131,14 @@ function materialBuildOptions(saveMode = $('saveModeSelect').value) {
 }
 
 function serverPayload() {
+  if (state.queue.some(queueProfileBlocked)) throw new Error('다른 모드 구성의 보류 작업이 있습니다. 원래 구성을 적용하거나 현재 자료로 작업을 다시 추가하세요.');
   syncQueuedDedicatedArmourFromEditor();
   const saveMode = $('saveModeSelect').value;
   const inPlace = saveMode === 'in_place';
   const materialBuild = materialBuildOptions(saveMode);
   return {
     adapter: 'rpfm',
+    sourceProfile: state.sourceProfile || 'vanilla-mtu-v1',
     inputPath: $('inputPackPath').value,
     outputPath: inPlace ? '' : $('outputPackPath').value,
     referencePackPaths: referencePackPaths(),
@@ -180,12 +182,17 @@ async function loadPack(options = {}) {
   try {
     const data = await postJson('/api/open', {
       adapter: 'auto',
+      sourceProfile: options.sourceProfile || state.sourceProfile || 'vanilla-mtu-v1',
       inputPath: $('inputPackPath').value,
       referencePackPaths: referencePackPaths(),
       includeVanilla: false,
       forceRefresh,
     });
+    state.sourceProfile = data.sourceProfile || 'vanilla-mtu-v1';
+    state.editingQueueIndex = null;
+    state.skillTreeDrafts = {};
     hydrateFromPackData(data.characters, data);
+    renderSourceProfile();
     const cacheText = data.cache?.hit ? 'DB 스냅샷 사용' : 'pack 원본 해석 후 DB 저장';
     const referenceOk = (data.characters?.referencePacks || []).filter((item) => item.ok).length;
     const referenceTotal = (data.characters?.referencePacks || []).length;

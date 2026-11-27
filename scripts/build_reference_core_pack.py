@@ -11,15 +11,16 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from tk_pack_builder.source_policy import require_clean_materials
 from tk_pack_builder.adapters import adapter_for  # noqa: E402
 from tk_pack_builder.delta_builder import _db_with_rows, _loc_db_with_rows, _new_delta_pack  # noqa: E402
 from tk_pack_builder.web import _ensure_rpfm_server  # noqa: E402
 from scripts.build_internal_materials_v015 import MERGED_KOREAN_LOC_PATH, _loc_source_priority  # noqa: E402
 
 
-DEFAULT_MATERIALS = ROOT / "work" / "internal_materials" / "materials.v015.json"
+DEFAULT_MATERIALS = ROOT / "work" / "internal_materials" / "vanilla_mtu" / "materials.v015.json"
 DEFAULT_WRITER_TEMPLATE = ROOT / "work" / "packs" / "my_hero.pack"
-DEFAULT_OUTPUT = ROOT / "work" / "packs" / "refs" / "mtu_reference_core.pack"
+DEFAULT_OUTPUT = ROOT / "work" / "packs" / "refs" / "mtu_vanilla_reference.pack"
 
 REFERENCE_TABLE_FOLDERS = {
     "campaign_character_art_sets_tables",
@@ -152,6 +153,7 @@ def main() -> None:
         raise SystemExit(f"Writer template pack not found: {writer_template}")
 
     materials = json.loads(materials_path.read_text(encoding="utf-8"))
+    require_clean_materials(materials)
     tables = select_tables(materials)
     loc_files = select_loc_files(materials, tables)
 

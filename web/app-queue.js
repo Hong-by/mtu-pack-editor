@@ -39,11 +39,18 @@ function ceoSetDescription(kind, selection) {
 
 function combatAdjustmentDescription(adjustment) {
   if (!adjustment) return '';
-  const value = Number(adjustment.armourBonus || 0);
-  return `방어력 ${value >= 0 ? '+' : ''}${value}`;
+  const parts = [
+    ['방어력', Number(adjustment.armourBonus || 0), ''],
+    ['근접 회피', Number(adjustment.meleeDefenceBonus || 0), '%p'],
+    ['원거리 방어', Number(adjustment.missileDefenceBonus || 0), '%p'],
+  ];
+  return parts
+    .map(([label, value, suffix]) => `${label} ${value >= 0 ? '+' : ''}${value}${suffix}`)
+    .join(' · ');
 }
 
 function commitQueueItem(item) {
+  item.sourceProfile = state.sourceProfile || 'vanilla-mtu-v1';
   const editingKind = currentQueueEditKind();
   if (editingKind === item.kind) {
     state.queue[state.editingQueueIndex] = item;
@@ -98,7 +105,7 @@ function syncQueuedDedicatedArmourFromEditor() {
   const combat = characters().find((item) => item.key === combatKey);
   const adjustment = toggle.checked ? dedicatedArmourSelection(combat) : null;
   if (toggle.checked && !adjustment) {
-    throw new Error('전투 보정값은 각각 -500~500의 정수로 입력해주세요.');
+    throw new Error('방어력은 -500~500, 회피·원거리 방어는 -100~100의 정수로 입력해주세요.');
   }
   state.queue[targetIndex].payload.dedicatedArmour = adjustment;
   persistWorkQueue();
@@ -230,7 +237,7 @@ function stageCreate() {
     state.serverMessages = [validationItem(
       'error',
       '전투 보정 설정 실패',
-      '기준 갑옷 연결과 각 보정치(-500~500 정수)를 확인해주세요.',
+      '기준 갑옷 연결과 보정치 범위(방어력 -500~500, 확률 -100~100)를 확인해주세요.',
     )];
     renderValidation();
     return;
@@ -296,6 +303,7 @@ function renderQueue() {
             </span>
           </div>
           <strong>${escapeHtml(item.title)}</strong>
+          ${queueProfileBlocked(item) ? '<small class="profile-blocked">보류: 다른 모드 구성에서 만든 작업입니다. 원래 구성을 적용하거나 다시 추가하세요.</small>' : ''}
           <span>${escapeHtml(queueItemShortDescription(item))}</span>
         </div>
       </article>
@@ -378,14 +386,19 @@ function removeQueueItem(index) {
 function loadQueueItem(index) {
   const item = state.queue[index];
   if (!item?.payload) return;
+  if (queueProfileBlocked(item)) {
+    state.serverMessages = [validationItem('warning', '작업 보류', '이 작업을 만든 모드 구성을 적용한 뒤 열어주세요. 작업은 그대로 보관됩니다.')];
+    renderValidation();
+    return;
+  }
   state.editingQueueIndex = index;
   if (item.kind === 'patch_character') {
     loadPatchQueueItem(item);
   } else if (item.kind === 'clone_character') {
     loadCloneQueueItem(item);
   }
-  renderQueue();
-  setWorkView('editor');
+  // The queue itself has not changed. Publish the restored editor once.
+  setMode(item.kind === 'clone_character' ? 'create' : 'edit', { deferRender: true });
   refreshStageButtons();
   renderSelectedPreview();
   renderValidation();
@@ -393,92 +406,134 @@ function loadQueueItem(index) {
 
 function loadPatchQueueItem(item) {
   const payload = item.payload;
+  const previousGender = state.workflowGender;
   if (payload.targetKey) {
     state.selectedKey = payload.targetKey;
-    renderRoster({ syncSelection: false, renderSelection: false });
-    fillForms(selectedCharacter());
   }
-  setMode('edit');
-  $('editName').value = payload.displayName || $('editName').value;
-  setSelectValue('editImageSet', payload.imageSetKey);
-  setSelectValue('editSubtype', payload.subtype);
-  refreshTitleSelectForElement('edit', '', selectedCharacter());
-  setSelectValue('editTitle', payload.titleSourceKey);
+  prepareEditWorkflowForms(selectedCharacter(), { deferSummaries: true });
+  refreshQueueRosterSelection(previousGender);
+  $('editName').value = payload.displayName ?? $('editName').value;
+  restoreQueueSelect('editImageSet', payload.imageSetKey);
+  restoreQueueSelect('editSubtype', payload.subtype);
+  restoreQueueSelect('editTitle', payload.titleSourceKey);
   renderTitleSummary('edit', resolveTitleChoice($('editTitle').value));
-  setSelectValue('editTraitSet', payload.traitSet?.setKey || CEO_SET_BASE_VALUE);
-  syncCeoSetSummary('edit', 'trait', 'editTraitSet');
-  setSelectValue('editAttributeSet', attributeChoiceValueFor(payload.attributeSetSourceKey));
-  syncAttributeSummary('edit', 'editAttributeSet');
+  restoreQueueSelect('editTraitSet', payload.traitSet?.setKey || CEO_SET_BASE_VALUE);
+  syncCeoSetSummary('edit', 'trait', 'editTraitSet', { deferValidation: true });
+  restoreQueueSelect('editAttributeSet', attributeChoiceValueFor(payload.attributeSetSourceKey));
+  syncAttributeSummary('edit', 'editAttributeSet', { deferValidation: true });
   applyAttributeSetCloneToInputs('edit', payload.attributeSetClone);
-  setSelectValue('editEquipmentSet', payload.equipmentSet?.setKey || CEO_SET_BASE_VALUE);
-  syncCeoSetSummary('edit', 'equipment', 'editEquipmentSet');
-  setSelectValue('editCombatProfile', payload.combatProfileSourceKey);
-  syncEquipmentSummary('edit', 'editCombatProfile');
-  setSelectValue('editUnitProfile', payload.unitProfileSourceKey || payload.targetKey);
-  syncUnitSummary('edit', 'editUnitProfile');
+  restoreQueueSelect('editEquipmentSet', payload.equipmentSet?.setKey || CEO_SET_BASE_VALUE);
+  syncCeoSetSummary('edit', 'equipment', 'editEquipmentSet', { deferValidation: true });
+  restoreQueueSelect('editCombatProfile', payload.combatProfileSourceKey);
+  syncEquipmentSummary('edit', 'editCombatProfile', { deferValidation: true });
+  restoreQueueSelect('editUnitProfile', payload.unitProfileSourceKey || payload.targetKey);
+  syncUnitSummary('edit', 'editUnitProfile', { deferValidation: true });
   applyLandUnitCloneToInputs('edit', payload.unitStatClone);
   $('editWeight').value = payload.spawn?.weight ?? $('editWeight').value;
   $('editAgeRange').value = payload.spawn?.birthYear ?? birthYearForAgeRange(payload.spawn?.ageRange) ?? $('editAgeRange').value;
   $('editMinRound').value = payload.spawn?.minRound ?? $('editMinRound').value;
   $('editMaxRound').value = payload.spawn?.maxRound ?? $('editMaxRound').value;
-  setSelectValue('editSpawnEvent', payload.spawn?.event);
-  setSelectValue('editSkill', payload.skillSourceKey || payload.skillSources?.historical || payload.skillSources?.romance);
+  restoreQueueSelect('editSpawnEvent', payload.spawn?.event);
+  restoreQueueSelect('editSkill', payload.skillSourceKey || payload.skillSources?.historical || payload.skillSources?.romance);
   restoreSkillTreeDraft('edit', payload.skillTree);
-  updateImagePreviews();
-  updateAllSpawnFieldLabels();
-  renderSkillTreeEditors();
+  syncModelLockSummaries(selectedCharacter(), selectedCharacter());
+  updateImagePreview('editImagePreview', 'editImageSet', '기존 장수 수정');
+  updateSpawnFieldLabels('edit');
+  renderSkillTreeEditor('edit');
 }
 
 function loadCloneQueueItem(item) {
   const payload = item.payload;
+  const previousGender = state.workflowGender;
   const base = characters().find((item) => item.key === payload.sourceKeys?.base);
   if (base) {
     state.selectedKey = realTemplateKey(base) || base.key;
-    syncWorkflowGender(characterGenderKey(base));
-    state.formOptionsSignature = '';
-    renderRoster({ syncSelection: false, renderSelection: false });
-    fillForms(base);
   }
-  setMode('create');
-  $('createName').value = payload.newName || $('createName').value;
-  setSelectValue('createGender', state.workflowGender);
-  setSelectValue('sourceBase', payload.sourceKeys?.base);
-  setSelectValue('sourceImageSet', payload.sourceKeys?.imageSet);
-  setSelectValue('sourceSkill', payload.sourceKeys?.skill);
-  setSelectValue('createSubtype', payload.subtype);
-  refreshTitleSelectForElement('source', '', base);
-  setSelectValue('sourceTitle', payload.sourceKeys?.title);
+  prepareCreateWorkflowForms(base || selectedCharacter(), { deferSummaries: true });
+  refreshQueueRosterSelection(previousGender);
+  $('createName').value = payload.newName ?? $('createName').value;
+  restoreQueueSelect('createGender', state.workflowGender);
+  restoreQueueSelect('sourceBase', payload.sourceKeys?.base);
+  restoreQueueSelect('sourceImageSet', payload.sourceKeys?.imageSet);
+  restoreQueueSelect('sourceSkill', payload.sourceKeys?.skill);
+  restoreQueueSelect('createSubtype', payload.subtype);
+  restoreQueueSelect('sourceTitle', payload.sourceKeys?.title);
   renderTitleSummary('source', resolveTitleChoice($('sourceTitle').value));
-  setSelectValue('sourceTraitSet', payload.traitSet?.setKey || payload.sourceKeys?.traitSet || CEO_SET_BASE_VALUE);
-  syncCeoSetSummary('source', 'trait', 'sourceTraitSet');
-  setSelectValue('sourceAttributeSet', attributeChoiceValueFor(payload.sourceKeys?.attributeSet));
-  syncAttributeSummary('source', 'sourceAttributeSet');
+  restoreQueueSelect('sourceTraitSet', payload.traitSet?.setKey || payload.sourceKeys?.traitSet || CEO_SET_BASE_VALUE);
+  syncCeoSetSummary('source', 'trait', 'sourceTraitSet', { deferValidation: true });
+  restoreQueueSelect('sourceAttributeSet', attributeChoiceValueFor(payload.sourceKeys?.attributeSet));
+  syncAttributeSummary('source', 'sourceAttributeSet', { deferValidation: true });
   applyAttributeSetCloneToInputs('source', payload.attributeSetClone);
-  setSelectValue('sourceEquipmentSet', payload.equipmentSet?.setKey || payload.sourceKeys?.equipmentSet || CEO_SET_BASE_VALUE);
-  syncCeoSetSummary('source', 'equipment', 'sourceEquipmentSet');
-  setSelectValue('sourceCombatProfile', payload.sourceKeys?.combatProfile);
-  syncEquipmentSummary('source', 'sourceCombatProfile');
+  restoreQueueSelect('sourceEquipmentSet', payload.equipmentSet?.setKey || payload.sourceKeys?.equipmentSet || CEO_SET_BASE_VALUE);
+  syncCeoSetSummary('source', 'equipment', 'sourceEquipmentSet', { deferValidation: true });
+  restoreQueueSelect('sourceCombatProfile', payload.sourceKeys?.combatProfile);
+  syncEquipmentSummary('source', 'sourceCombatProfile', { deferValidation: true });
   $('sourceDedicatedArmourEnabled').checked = Boolean(payload.dedicatedArmour);
   $('sourceDedicatedArmourValue').value = payload.dedicatedArmour
     ? (payload.dedicatedArmour.armourBonus
       ?? Number(payload.dedicatedArmour.armourValue) - Number(payload.dedicatedArmour.sourceArmourValue))
     : '';
+  $('sourceMeleeDefenceBonus').value = payload.dedicatedArmour?.meleeDefenceBonus ?? 0;
+  $('sourceMissileDefenceBonus').value = payload.dedicatedArmour?.missileDefenceBonus ?? 0;
   syncDedicatedArmourControls(
     characters().find((item) => item.key === $('sourceCombatProfile').value),
   );
-  setSelectValue('sourceUnitProfile', payload.sourceKeys?.unitProfile || payload.sourceKeys?.base);
-  syncUnitSummary('source', 'sourceUnitProfile');
+  restoreQueueSelect('sourceUnitProfile', payload.sourceKeys?.unitProfile || payload.sourceKeys?.base);
+  syncUnitSummary('source', 'sourceUnitProfile', { deferValidation: true });
   applyLandUnitCloneToInputs('source', payload.unitStatClone);
-  setSelectValue('sourceSpawn', payload.sourceKeys?.spawn);
+  restoreQueueSelect('sourceSpawn', payload.sourceKeys?.spawn);
   $('createWeight').value = payload.spawn?.weight ?? $('createWeight').value;
   $('createAgeRange').value = payload.spawn?.birthYear ?? birthYearForAgeRange(payload.spawn?.ageRange) ?? $('createAgeRange').value;
   $('createMinRound').value = payload.spawn?.minRound ?? $('createMinRound').value;
   $('createMaxRound').value = 999;
-  setSelectValue('sourceSpawnEvent', generatedSpawnEventFromRound($('createMinRound').value));
+  restoreQueueSelect('sourceSpawnEvent', generatedSpawnEventFromRound($('createMinRound').value));
   restoreSkillTreeDraft('source', payload.skillTree);
-  updateImagePreviews();
-  updateAllSpawnFieldLabels();
-  renderSkillTreeEditors();
+  syncModelLockSummaries(selectedCharacter(), base || selectedCharacter());
+  updateImagePreview('sourceImagePreview', 'sourceImageSet', '신규 장수 생성');
+  updateSpawnFieldLabels('create');
+  renderSkillTreeEditor('source');
+}
+
+function refreshQueueRosterSelection(previousGender) {
+  if (previousGender !== state.workflowGender) {
+    renderRoster({ syncSelection: false, renderSelection: false });
+  } else {
+    updateRosterActiveState(state.selectedKey);
+  }
+}
+
+function restoreQueueSelect(id, value) {
+  const select = $(id);
+  if (value !== undefined && value !== null && value !== '' && typeof select?._optionLoader === 'function') {
+    // Seed only the saved choice; opening/searching the picker loads its catalog.
+    // Keep the saved key even if it is outside the current filter/catalog.
+    let selected;
+    if (id.endsWith('ImageSet')) {
+      const item = appearanceByKey(value);
+      if (item) selected = appearanceOption(item);
+    } else if (id.endsWith('Title')) {
+      const item = resolveTitleChoice(value);
+      if (item) selected = titleSelectOptionForCharacter(item);
+    } else if (id.endsWith('AttributeSet')) {
+      const item = resolveAttributeChoice(value);
+      if (item) selected = option(value, attributeOptionLabel(item));
+    } else if (id.endsWith('TraitSet') || id.endsWith('EquipmentSet')) {
+      const kind = id.endsWith('TraitSet') ? 'trait' : 'equipment';
+      const item = ceoSetChoices(kind).find((item) => item.key === value);
+      if (item) selected = kind === 'trait' ? traitSetOption(item) : equipmentSetOption(item);
+    } else {
+      const item = characters().find((item) => item.key === value);
+      if (item) {
+        const formatter = id.endsWith('Skill') ? skillSelectOption
+          : id.endsWith('CombatProfile') ? combatProfileOption
+          : id.endsWith('UnitProfile') ? unitProfileOption
+          : id.endsWith('Spawn') ? spawnProfileOption : baseSelectOption;
+        selected = formatter(item);
+      }
+    }
+    setLazySelectedOption(id, { ...(selected || option(value, String(value))), value: String(value) });
+  }
+  setSelectValue(id, value);
 }
 
 function restoreSkillTreeDraft(prefix, snapshot) {

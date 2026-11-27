@@ -16,3 +16,5 @@ server.*.log
 .DS_Store
 .claude/
 출력팩/
+output/
+release-assets/

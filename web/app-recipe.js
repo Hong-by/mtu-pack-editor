@@ -66,6 +66,7 @@ function skillSetCloneFromPayload(recipe, snapshot, ownerKey, index, options = {
   const replacements = Object.entries(snapshot?.replacements || {})
     .filter(([, skillKey]) => skillKey);
   const armourBonus = Number(options.armourBonus || 0);
+  const meleeDefenceBonus = Number(options.meleeDefenceBonus || 0);
   const meleeAttackBonus = Number(options.meleeAttackBonus || 0);
   const meleeDamageBonus = Number(options.meleeDamageBonus || 0);
   const apMeleeDamageBonus = Number(options.apMeleeDamageBonus || 0);
@@ -73,6 +74,7 @@ function skillSetCloneFromPayload(recipe, snapshot, ownerKey, index, options = {
   const missileDefenceBonus = Number(options.missileDefenceBonus || 0);
   const hasCombatBonuses = Boolean(
     armourBonus
+    || meleeDefenceBonus
     || meleeAttackBonus
     || meleeDamageBonus
     || apMeleeDamageBonus
@@ -90,6 +92,7 @@ function skillSetCloneFromPayload(recipe, snapshot, ownerKey, index, options = {
     newSetKey,
     replacements: replacements.map(([nodeKey, skillKey]) => ({ nodeKey, skillKey })),
     armourBonus,
+    meleeDefenceBonus,
     meleeAttackBonus,
     meleeDamageBonus,
     apMeleeDamageBonus,
@@ -175,14 +178,10 @@ function isBackgroundTitleCeoKey(key) {
 
 function titleCeoKeyFromChoice(titleSource) {
   const candidates = [
-    titleSource?.titleCareerCeoKey,
-    titleSource?.titleKey,
-    titleSource?.ceoNodeKey,
     titleSource?.titleCeoKey,
-    titleSource?.ceoKey,
-    titleSource?.titleInitialCeoKey,
+    titleSource?.titleCareerCeoKey,
   ];
-  return candidates.map(titleCareerCeoKeyFromValue).find(Boolean) || '';
+  return candidates.find((key) => typeof key === 'string' && /_ceo_career_/.test(key)) || '';
 }
 
 function knownInitialCeoKeys() {
@@ -353,7 +352,7 @@ function recipeFromQueue() {
         ? patchImageToken
         : (imageCardKeyFromAppearance(appearanceFromCharacter(targetCharacter)) || targetImageToken);
       const patchImageAssets = imageSet
-        ? customImageAssetsFromAppearance(imageSet, targetImageToken, targetCardToken)
+        ? patchImageAssetsFromAppearance(imageSet, appearanceFromCharacter(targetCharacter), targetImageToken, targetCardToken)
         : [];
       const patchImageArtKeys = imageSet
         ? artImageKeysFromTargetAssets(patchImageAssets, targetImageToken)
@@ -365,11 +364,7 @@ function recipeFromQueue() {
         })
         : {};
       if (payload.attributeSetClone) {
-        recipe.attributeSetClones.push({
-          sourceSetKey: payload.attributeSetClone.sourceSetKey,
-          newSetKey: payload.attributeSetClone.newSetKey,
-          overrides: payload.attributeSetClone.overrides,
-        });
+        recipe.attributeSetClones.push(...attributeClonesForRecipe(payload.attributeSetClone));
       }
       if (payload.ageRangeClone) {
         recipe.ageRangeClones.push({
@@ -392,11 +387,11 @@ function recipeFromQueue() {
       const detailOverrides = mergeSkillSetOverrides({
         historical: compactObject({
           retinue: retinueOverride || detailsByMode(unit).historical?.retinue || unit?.unitProfile,
-          attribute_set: attributeSetOverride || detailsByMode(attribute).historical?.attributeSet || attribute?.attributeSet,
+          attribute_set: attributeCloneKeyForMode(payload.attributeSetClone, 'historical') || detailsByMode(attribute).historical?.attributeSet || attribute?.attributeSet,
         }),
         romance: compactObject({
           retinue: retinueOverride || detailsByMode(unit).romance?.retinue || unit?.unitProfile,
-          attribute_set: attributeSetOverride || detailsByMode(attribute).romance?.attributeSet || attribute?.attributeSet,
+          attribute_set: attributeCloneKeyForMode(payload.attributeSetClone, 'romance') || detailsByMode(attribute).romance?.attributeSet || attribute?.attributeSet,
         }),
       }, skillSource);
       const patchSkillSetOverride = skillSetCloneFromPayload(recipe, payload.skillTree, payload.targetKey, itemNumber);
@@ -452,11 +447,7 @@ function recipeFromQueue() {
       const attributeSetOverride = payload.attributeSetClone?.newSetKey;
       const defaultTitleSource = defaultTitleChoiceForCharacter(base);
       if (payload.attributeSetClone) {
-        recipe.attributeSetClones.push({
-          sourceSetKey: payload.attributeSetClone.sourceSetKey,
-          newSetKey: payload.attributeSetClone.newSetKey,
-          overrides: payload.attributeSetClone.overrides,
-        });
+        recipe.attributeSetClones.push(...attributeClonesForRecipe(payload.attributeSetClone));
       }
       if (payload.ageRangeClone) {
         recipe.ageRangeClones.push({
@@ -479,11 +470,11 @@ function recipeFromQueue() {
       if (attributeSetOverride) {
         detailOverridesWithSkill.historical = compactObject({
           ...detailOverridesWithSkill.historical,
-          attribute_set: attributeSetOverride,
+          attribute_set: attributeCloneKeyForMode(payload.attributeSetClone, 'historical'),
         });
         detailOverridesWithSkill.romance = compactObject({
           ...detailOverridesWithSkill.romance,
-          attribute_set: attributeSetOverride,
+          attribute_set: attributeCloneKeyForMode(payload.attributeSetClone, 'romance'),
         });
       }
       const customTemplateKey = `hby_template_${slug}_${itemNumber}`;
@@ -510,6 +501,7 @@ function recipeFromQueue() {
         : 0;
       const combatBonuses = {
         armourBonus,
+        meleeDefenceBonus: Number(payload.dedicatedArmour?.meleeDefenceBonus || 0),
         meleeAttackBonus: Number(payload.dedicatedArmour?.meleeAttackBonus || 0),
         meleeDamageBonus: Number(payload.dedicatedArmour?.meleeDamageBonus || 0),
         apMeleeDamageBonus: Number(payload.dedicatedArmour?.apMeleeDamageBonus || 0),
@@ -609,6 +601,7 @@ function recipeFromQueue() {
       });
     }
     recipe.workItems.push({
+      sourceProfile: item.sourceProfile || 'vanilla-mtu-v1',
       kind: item.kind,
       type: item.type,
       title: item.title,
@@ -651,4 +644,12 @@ function compactObject(value) {
   return Object.fromEntries(
     Object.entries(value || {}).filter(([, item]) => item !== undefined && item !== null && item !== '')
   );
+}
+
+function attributeClonesForRecipe(clone) {
+  return (clone?.modeClones || (clone ? [clone] : [])).map(({sourceSetKey, newSetKey, overrides}) => ({sourceSetKey, newSetKey, overrides}));
+}
+
+function attributeCloneKeyForMode(clone, mode) {
+  return clone?.modeClones?.find((item) => item.gameMode === mode)?.newSetKey || clone?.newSetKey;
 }

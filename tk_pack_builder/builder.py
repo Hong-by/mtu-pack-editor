@@ -19,6 +19,9 @@ def build_pack(
     delta: bool = False,
     reference_paths: list[Path] | None = None,
 ) -> list[dict[str, object]]:
+    from .source_policy import require_clean_references, require_supported_sources
+    require_clean_references(recipe)
+    require_supported_sources(reference_paths or [])
     if delta:
         if output_path is None:
             raise ValueError("Delta patch pack output path is required.")

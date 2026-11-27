@@ -13,6 +13,17 @@ def read_web_script(name: str) -> str:
 
 
 class WebAppConfigTest(unittest.TestCase):
+    def test_generated_attribute_sets_use_190e_compatible_prefix(self) -> None:
+        source = (ROOT / "web" / "app-editor.js").read_text(encoding="utf-8")
+        self.assertIn(
+            "const baseKey = `3k_main_attribute_set_general_hby_${slug}_${index}`",
+            source,
+        )
+        self.assertNotIn(
+            "newSetKey: `hby_attribute_set_${slug}_${index}`",
+            source,
+        )
+
     def test_work_queue_is_persisted_across_refresh_and_pack_reload(self) -> None:
         state_js = read_web_script("app-state.js")
         normalize_js = read_web_script("app-normalize.js")
@@ -96,15 +107,19 @@ class WebAppConfigTest(unittest.TestCase):
             index_html,
         )
         self.assertIn('id="sourceDedicatedArmourValue"', index_html)
+        self.assertIn('id="sourceMeleeDefenceBonus"', index_html)
+        self.assertIn('id="sourceMissileDefenceBonus"', index_html)
         self.assertNotIn('id="sourceMeleeAttackBonus"', index_html)
         self.assertNotIn('id="sourceMeleeDamageBonus"', index_html)
         self.assertNotIn('id="sourceApMeleeDamageBonus"', index_html)
         self.assertNotIn('id="sourceChargeBonus"', index_html)
-        self.assertNotIn('id="sourceMissileDefenceBonus"', index_html)
         self.assertNotIn("const unsupportedBonusInputs = [", editor_js)
         self.assertIn('min="-500" max="500"', index_html)
+        self.assertIn('min="-100" max="100"', index_html)
         self.assertIn("방어력 보정치", index_html)
-        self.assertIn("기존 갑옷 유지 + 장수 전용 방어력 보정", index_html)
+        self.assertIn("근접 회피 보정치", index_html)
+        self.assertIn("원거리 방어 확률 보정치", index_html)
+        self.assertIn("기존 갑옷 유지 + 장수 전용 방어 보정", index_html)
         self.assertNotIn("첫 번째 대상 장수 1명에게만 생성됩니다", index_html)
         self.assertNotIn("근접 공격 속도 보정치", index_html)
         self.assertNotIn("일반 무기 피해 보정치", index_html)
@@ -114,13 +129,14 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn('class="reference-path-help"', index_html)
         self.assertIn("function availableDedicatedArmourSlot(character)", helpers_js)
         self.assertIn("const sourceArmourValue = Number(character.baseDefense);", helpers_js)
-        self.assertIn("armourBonus: bonus", helpers_js)
+        self.assertIn("armourBonus: armourBonus", helpers_js)
+        self.assertIn("meleeDefenceBonus,", helpers_js)
+        self.assertIn("missileDefenceBonus,", helpers_js)
         self.assertNotIn("meleeAttackBonus,", helpers_js)
         self.assertNotIn("meleeDamageBonus,", helpers_js)
         self.assertNotIn("apMeleeDamageBonus,", helpers_js)
         self.assertNotIn("chargeBonus,", helpers_js)
-        self.assertNotIn("missileDefenceBonus,", helpers_js)
-        self.assertIn("armourValue: sourceArmourValue + bonus", helpers_js)
+        self.assertIn("armourValue: sourceArmourValue + armourBonus", helpers_js)
         self.assertIn("function syncDedicatedArmourControls(character)", editor_js)
         self.assertIn("기존 장비 유지 · 숨김 장수 효과", editor_js)
         self.assertNotIn("globalStatus.activeCcd?.packPath", editor_js)
@@ -130,6 +146,7 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("dedicatedArmour: payload.dedicatedArmour || null", recipe_js)
         self.assertIn("payload.dedicatedArmour.armourBonus ?? legacyArmourBonus", recipe_js)
         self.assertIn("const combatBonuses = {", recipe_js)
+        self.assertIn("meleeDefenceBonus:", recipe_js)
         self.assertIn("meleeAttackBonus:", recipe_js)
         self.assertIn("missileDefenceBonus:", recipe_js)
         self.assertIn("function syncQueuedDedicatedArmourFromEditor()", queue_js)
@@ -194,7 +211,7 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("3k_dlc04_ceo_initial_data_character_historical_non_deployable_empress_he_fire", appearance_js)
         self.assertIn("titleKey: matchedTitleSource?.titleKey", appearance_js)
         self.assertIn("manualTitleAnchored: Boolean(matchedTitleSource)", appearance_js)
-        self.assertIn("manualTitleChoices().filter((item) => item.manualTitleAnchored)", appearance_js)
+        self.assertNotIn("const manual = manualTitleChoices()", appearance_js)
 
     def test_title_choices_are_deduped_by_canonical_title_key(self) -> None:
         appearance_js = read_web_script("app-appearance.js")
@@ -208,13 +225,13 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("function dedupeTitleChoices(items)", appearance_js)
         self.assertIn("function dedupeTitleChoicesByDisplay(items)", appearance_js)
         self.assertIn("item?.titleCeoKey", appearance_js)
-        self.assertIn("titleCeoKey: item.titleCeoKey || item.ceoKey || item.key", appearance_js)
+        self.assertIn("titleCeoKey: item.titleCeoKey || ''", appearance_js)
         self.assertIn("titleCanonicalKey: item.canonicalTitleGroup || ''", appearance_js)
         self.assertIn("dedupeTitleChoices((state.options?.titleCatalog || [])", appearance_js)
         self.assertIn("function isGeneratedTitleCatalogItem(item)", appearance_js)
         self.assertIn(".filter((item) => !isGeneratedTitleCatalogItem(item))", appearance_js)
         self.assertIn("const catalog = titleCatalogChoices();", appearance_js)
-        self.assertIn("return sortTitleCandidates(dedupeTitleChoicesByDisplay(dedupeTitleChoices([...manual, ...regular])));", appearance_js)
+        self.assertIn("return sortTitleCandidates(dedupeTitleChoicesByDisplay(dedupeTitleChoices(regular)));", appearance_js)
         title_effects_js = read_web_script("app-title-effects.js")
         self.assertIn("function titleDisplayDedupeKey(character)", title_effects_js)
         self.assertIn("function sheetHeroInfoForAny(...keys)", title_effects_js)
@@ -274,7 +291,7 @@ class WebAppConfigTest(unittest.TestCase):
         normalize_js = read_web_script("app-normalize.js")
         server_js = read_web_script("app-server.js")
 
-        self.assertIn("OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 24", web_py)
+        self.assertIn("OPEN_PAYLOAD_CACHE_SCHEMA_VERSION = 27", web_py)
         self.assertIn('json.dumps(payload, ensure_ascii=False, separators=(",", ":"))', web_py)
         self.assertIn('"assetCacheToken": asset_cache_token', web_py)
         self.assertIn('cached["assetCacheToken"] = asset_cache_token', web_py)
@@ -290,7 +307,7 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("def _file_cache_key(paths: list[Path])", web_py)
         self.assertIn("catalog_paths = _title_effect_catalog_paths()", web_py)
         self.assertIn("skill_catalog_paths = _skill_effect_catalog_paths()", web_py)
-        self.assertIn('"version": 30', web_py)
+        self.assertIn('"version": 34', web_py)
         self.assertIn("return _load_title_effect_catalog_for_cache_key(_file_cache_key(_title_effect_catalog_paths()))", web_py)
         self.assertIn("@lru_cache(maxsize=8)\ndef _load_title_effect_catalog_for_cache_key", web_py)
         self.assertIn("return _load_skill_effect_catalog_for_cache_key(_file_cache_key(catalog_paths))", web_py)
@@ -351,12 +368,10 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("dedupeSkillTreeNodes(tree?.nodes || []).find", app_js)
 
     def test_packaged_effect_catalogs_are_included_in_windows_build(self) -> None:
-        spec = (ROOT / "MTU Pack Editor.spec").read_text(encoding="utf-8")
         build_script = (ROOT / "scripts" / "build_windows_exe.ps1").read_text(encoding="utf-8")
 
-        self.assertIn("tk_pack_builder\\\\data\\\\assembly_kit_title_effects.ko.json", spec)
-        self.assertIn("tk_pack_builder\\\\data\\\\assembly_kit_skill_effects.ko.json", spec)
-        self.assertIn("tk_pack_builder\\\\data\\\\dedicated_armour_pools", spec)
+        for resource in ("assembly_kit_title_effects.ko.json", "assembly_kit_skill_effects.ko.json", "dedicated_armour_pools"):
+            self.assertIn(f'--add-data "tk_pack_builder\\data\\{resource};tk_pack_builder\\data', build_script)
         self.assertIn('"assembly_kit_title_effects.ko.json"', build_script)
         self.assertIn('"assembly_kit_skill_effects.ko.json"', build_script)
         self.assertNotIn('"title_effects.ko.json"', build_script)
@@ -499,7 +514,7 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("select._optionLoader = optionLoader;", editor_js)
         self.assertIn("function ensureSelectOptionsLoaded(select)", editor_js)
         self.assertIn("ensureSelectOptionsLoaded(select);", editor_js)
-        self.assertIn("function prepareCreateWorkflowForms(character)", editor_js)
+        self.assertIn("function prepareCreateWorkflowForms(character, { deferSummaries = false } = {})", editor_js)
         self.assertIn("setLazySelect('sourceBase', () => selectableFormCharacters().map(baseSelectOption), baseSelectOption(character));", editor_js)
         self.assertIn("setLazySelect('sourceImageSet', () => selectableImageAppearances().map(appearanceOption), imageSelectOptionForCharacter(character));", editor_js)
         self.assertIn("setLazySelect('sourceSkill', () => selectableFormCharacters().map(skillSelectOption), skillSelectOption(character));", editor_js)
@@ -568,14 +583,14 @@ class WebAppConfigTest(unittest.TestCase):
 
         self.assertIn('<main class="app-shell">', index_html)
         self.assertNotIn('class="app-layout"', index_html)
-        self.assertIn('data-filter="earth" type="button">土</button>', index_html)
-        self.assertIn('data-filter="fire" type="button">火</button>', index_html)
-        self.assertIn('data-filter="wood" type="button">木</button>', index_html)
-        self.assertIn('data-filter="water" type="button">水</button>', index_html)
-        self.assertIn('data-filter="metal" type="button">金</button>', index_html)
-        self.assertIn('class="filter-row korea-filter-row"', index_html)
-        self.assertIn('data-filter="korea:goguryeo"', index_html)
-        self.assertIn('data-filter="favorites"', index_html)
+        self.assertIn('data-filter="earth" type="button">土 토</button>', index_html)
+        self.assertIn('data-filter="fire" type="button">火 화</button>', index_html)
+        self.assertIn('data-filter="wood" type="button">木 목</button>', index_html)
+        self.assertIn('data-filter="water" type="button">水 수</button>', index_html)
+        self.assertIn('data-filter="metal" type="button">金 금</button>', index_html)
+        self.assertNotIn('class="filter-row korea-filter-row"', index_html)
+        self.assertNotIn('data-filter="korea:goguryeo"', index_html)
+        self.assertIn('id="rosterFavorites"', index_html)
         self.assertIn('class="roster-heading"', index_html)
         self.assertIn('class="gender-row roster-gender-row"', index_html)
         self.assertNotIn('<div class="gender-row" role="group" aria-label="성별 필터">', index_html)
@@ -615,7 +630,7 @@ class WebAppConfigTest(unittest.TestCase):
         self.assertIn("function usesSharedPuzzleModel(character)", catalog_js)
         self.assertIn("^sad_[mf]_(earth|fire|metal|water|wood)$", catalog_js)
         self.assertIn("sad_artsets", catalog_js)
-        self.assertIn("if (usesSharedPuzzleModel(character)) return true;", catalog_js)
+        self.assertIn("if (usesSharedPuzzleModel(character)) return !hasKoreaUniquePortrait(character);", catalog_js)
         self.assertIn("function selectableFallbackCharacters()", catalog_js)
         self.assertIn("function isLowQualityGeneratedCharacter(character)", catalog_js)
         self.assertIn("function isLowInformationGeneratedName(value)", catalog_js)

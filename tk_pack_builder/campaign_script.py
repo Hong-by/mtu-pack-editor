@@ -9,6 +9,7 @@ def build_campaign_start_script(
     ceo_entries: list[dict[str, Any]],
     equipment_entries: list[dict[str, Any]],
     *,
+    work_entries: list[dict[str, str]] | None = None,
     escape: Callable[[str], str],
     string_list: Callable[[list[str]], str],
 ) -> str | None:
@@ -20,7 +21,7 @@ def build_campaign_start_script(
     inventory call exactly follows CA's Three Kingdoms scripts and never equips
     an item on a character.
     """
-    if not spawn_entries and not ceo_entries and not equipment_entries:
+    if not spawn_entries and not ceo_entries and not equipment_entries and not work_entries:
         return None
 
     lines = [
@@ -180,23 +181,73 @@ def build_campaign_start_script(
         "    return ok and result ~= false",
         "end",
         "",
+        "local function hby_character_ceo_for_category(character, category_key)",
+        "    local manager_ok, manager = pcall(function()",
+        "        return character:ceo_management()",
+        "    end)",
+        "    if not manager_ok or not manager then",
+        "        return nil",
+        "    end",
+        "    local list_ok, ceos = pcall(function()",
+        "        return manager:all_ceos_for_category(category_key)",
+        "    end)",
+        "    if not list_ok or not ceos then",
+        "        return nil",
+        "    end",
+        "    local count_ok, count = pcall(function() return ceos:num_items() end)",
+        "    if not count_ok or not count then",
+        "        return nil",
+        "    end",
+        "    for index = 0, count - 1 do",
+        "        local item_ok, item = pcall(function() return ceos:item_at(index) end)",
+        "        if item_ok and item then",
+        "            local key_ok, key = pcall(function() return item:ceo_data_key() end)",
+        '            if key_ok and type(key) == "string" and key ~= "" then',
+        "                return key",
+        "            end",
+        "        end",
+        "    end",
+        "    return nil",
+        "end",
+        "",
+        "local function hby_set_character_title(character, manager, title_ceo)",
+        '    if title_ceo == "" then',
+        "        return true",
+        "    end",
+        '    local category_key = "3k_main_ceo_category_career"',
+        "    local current_title = hby_character_ceo_for_category(character, category_key)",
+        "    if current_title == title_ceo then",
+        "        return true",
+        "    end",
+        '    if current_title and current_title ~= "" then',
+        "        hby_remove_ceo(manager, current_title)",
+        "    end",
+        "    if not hby_add_ceo(manager, title_ceo) then",
+        "        return false",
+        "    end",
+        "    return hby_character_ceo_for_category(character, category_key) == title_ceo",
+        "end",
+        "",
         "local function hby_add_ancillary_to_faction(faction_key, ancillary_key)",
-        "    local query_ok, faction = pcall(function()",
-        "        return cm:query_faction(faction_key)",
+        "    local modify_ok, faction = pcall(function()",
+        "        return cm:modify_faction(faction_key)",
         "    end)",
-        "    if not query_ok or not faction then",
+        "    if not modify_ok or not faction then",
         "        return false",
         "    end",
-        "    local null_ok, is_null = pcall(function() return faction:is_null_interface() end)",
-        "    if null_ok and is_null then",
+        "    local manager_ok, manager = pcall(function()",
+        "        return faction:ceo_management()",
+        "    end)",
+        "    if not manager_ok or not manager then",
         "        return false",
         "    end",
-        "    local ok = pcall(function()",
-        # CA's campaign manager API requires a FACTION_SCRIPT_INTERFACE here,
-        # not the faction key string used by modify_faction.
-        "        cm:add_ancillary_to_faction(faction, ancillary_key, false)",
+        "    local ok, result = pcall(function()",
+        # Match The Gathering Sandbox and 190E's own inventory helper.  Adding
+        # the CEO to the faction manager creates an inventory item without
+        # equipping or mutating any character slot.
+        "        return manager:add_ceo(ancillary_key)",
         "    end)",
-        "    return ok",
+        "    return ok and result ~= false",
         "end",
         "",
         "local function hby_grant_equipment(item, faction_key)",
@@ -251,11 +302,12 @@ def build_campaign_start_script(
         "    end",
         "    local all_applied = true",
         "    for i = 1, #item.remove_ceos do",
-        "        if not hby_remove_ceo(manager, item.remove_ceos[i]) then",
-        "            all_applied = false",
-        "        end",
+        # Removal is deliberately best-effort. The generated character may
+        # already have a generic career CEO instead of its source template's
+        # title; hby_set_character_title removes the actual current career CEO.
+        "        hby_remove_ceo(manager, item.remove_ceos[i])",
         "    end",
-        '    if item.title_ceo ~= "" and not hby_add_ceo(manager, item.title_ceo) then',
+        "    if not hby_set_character_title(character, manager, item.title_ceo) then",
         "        all_applied = false",
         "    end",
         "    for i = 1, #item.add_ceos do",
@@ -265,12 +317,10 @@ def build_campaign_start_script(
         "    end",
         "    if not all_applied then",
         '        output("MTU Pack Editor: character CEO update failed: " .. tostring(item.template))',
+        "        return false",
         "    end",
-        # A valid character/CEO manager means every operation above was a
-        # deterministic one-shot attempt. Do not retry an invalid optional CEO
-        # forever; repeated title mutation on every faction turn is less safe
-        # than reporting the failed key once and finalising this work item.
         "    cm:set_saved_value(item.save_key, true)",
+        '    output("MTU Pack Editor: character title and traits applied: " .. tostring(item.template))',
         "    return true",
         "end",
         "",
@@ -341,4 +391,96 @@ def build_campaign_start_script(
         "end",
         "",
     ])
-    return "\n".join(lines)
+    return _with_diagnostics(lines, work_entries or [
+        {"template": str(entry["template"]), "kind": str(entry.get("workKind") or
+         ("new_character" if entry in spawn_entries else "existing_character"))}
+        for entry in [*spawn_entries, *ceo_entries, *equipment_entries]
+    ], escape)
+
+
+def _with_diagnostics(lines: list[str], work_entries: list[dict[str, str]], escape: Callable[[str], str]) -> str:
+    """Instrument the existing calls without changing their returns or ordering."""
+    prelude = r'''-- HBY_DIAG v1: append/flush/close each record; logging failure never stops gameplay.
+local hby_diag_seq = 0
+local hby_diag_template = "-"
+local hby_diag_kind = "runtime"
+local hby_diag_detail = ""
+local hby_diag_kinds = {}
+local function hby_diag(stage, status, detail)
+    pcall(function()
+        hby_diag_seq = hby_diag_seq + 1
+        local line = "[HBY_DIAG v1] seq=" .. tostring(hby_diag_seq)
+            .. " kind=" .. hby_diag_kind .. " template=" .. hby_diag_template
+            .. " stage=" .. stage .. " status=" .. status
+            .. " detail=" .. tostring(detail or hby_diag_detail):gsub("[\r\n]", " ")
+        if io and io.open then
+            pcall(function()
+                local file = io.open("hby_mtu_pack_editor_diagnostic.log", "a")
+                if file then file:write(line .. "\n"); file:flush(); file:close() end
+            end)
+        end
+        if type(output) == "function" then pcall(output, line) end
+    end)
+end
+local function hby_diag_context(template)
+    hby_diag_template = tostring(template or "-")
+    hby_diag_kind = hby_diag_kinds[hby_diag_template] or "runtime"
+    hby_diag_detail = ""
+end
+hby_diag("script_load", "begin", "diagnostics=1")
+'''
+    manifest = []
+    for entry in work_entries:
+        template, kind = escape(entry["template"]), escape(entry["kind"])
+        manifest.extend([
+            f'hby_diag_kinds["{template}"] = "{kind}"',
+            f'hby_diag_context("{template}")',
+            'hby_diag("work_manifest", "info", "DB changes load before first_tick; runtime entries may be absent")',
+        ])
+    manifest.append('hby_diag_context(nil)')
+    instrumented = []
+    function = "registration"
+    call_index = 0
+    pending: list[tuple[str, str, str]] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "if cm and cm.add_first_tick_callback then":
+            function, call_index = "first_tick", 0
+        if stripped.startswith("local function "):
+            function = stripped.split("local function ", 1)[1].split("(", 1)[0]
+            call_index = 0
+        if "pcall(function()" in line:
+            call_index += 1
+            indent = line[:len(line) - len(line.lstrip())]
+            label = f"{function}.call_{call_index}"
+            result = "nil"
+            if stripped.startswith("local ") and " = pcall" in stripped:
+                result = stripped[6:].split(" = pcall", 1)[0].split(",")[0].strip()
+            instrumented.append(f'{indent}hby_diag("{label}", "before")')
+            if stripped.endswith("end)"):
+                instrumented.extend([line, f'{indent}hby_diag("{label}", "after", "pcall_ok=" .. tostring({result}))'])
+                continue
+            pending.append((indent, label, result))
+        instrumented.append(line)
+        if pending and stripped == "end)" and line.startswith(pending[-1][0]) and len(line)-len(line.lstrip()) == len(pending[-1][0]):
+            indent, label, result = pending.pop()
+            instrumented.append(f'{indent}hby_diag("{label}", "after", "pcall_ok=" .. tostring({result}))')
+        if stripped.startswith("local function "):
+            if stripped.endswith("(item, faction_key, turn_number)") or stripped.endswith("(item, faction_key)") or stripped.endswith("(item)"):
+                instrumented.append('    hby_diag_context(item.template)')
+            if "(ceo_manager, ceo_key)" in stripped:
+                instrumented.append('    hby_diag_detail = "ceo=" .. tostring(ceo_key)')
+            if "(faction_key, ancillary_key)" in stripped:
+                instrumented.append('    hby_diag_detail = "equipment=" .. tostring(ancillary_key)')
+            if "(character, category_key)" in stripped:
+                instrumented.append('    hby_diag_detail = "category=" .. tostring(category_key)')
+            if "(character, manager, title_ceo)" in stripped:
+                instrumented.append('    hby_diag_detail = "title=" .. tostring(title_ceo)')
+            instrumented.append(f'    hby_diag("{function}", "enter")')
+        if stripped == "cm:add_first_tick_callback(function()":
+            instrumented.extend(['        hby_diag_context(nil)', '        hby_diag("first_tick", "enter")'])
+        if stripped.startswith("hby_") and "[i]" in stripped and stripped.endswith(")"):
+            instrumented.append('        hby_diag("work_step", "returned")')
+    if pending:
+        raise ValueError("Unclosed diagnostic call instrumentation")
+    return prelude + "\n".join(manifest + instrumented + ['hby_diag_context(nil)', 'hby_diag("script_load", "complete")', ''])

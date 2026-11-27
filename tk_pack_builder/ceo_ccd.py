@@ -1555,7 +1555,9 @@ def _lookup_string(table: dict[int, str], index: int, label: str) -> str:
 def _read_sized_utf8(reader: _Reader, size_width: int) -> str:
     size = reader.u16() if size_width == 2 else reader.u32()
     try:
-        return reader.read(size).decode("utf-8")
+        # Some workshop CCD keys contain legacy bytes. Preserve those bytes;
+        # never guess an encoding or silently turn them into different keys.
+        return reader.read(size).decode("utf-8", errors="surrogateescape")
     except UnicodeDecodeError as error:
         raise CeoCcdError("CCD contains invalid UTF-8 string data.") from error
 
@@ -1569,7 +1571,7 @@ def _read_sized_utf16(reader: _Reader, size_width: int) -> str:
 
 
 def _write_sized_utf8(output: bytearray, value: str, size_width: int) -> None:
-    encoded = value.encode("utf-8")
+    encoded = value.encode("utf-8", errors="surrogateescape")
     output.extend(_pack_u16(len(encoded)) if size_width == 2 else _pack_u32(len(encoded)))
     output.extend(encoded)
 

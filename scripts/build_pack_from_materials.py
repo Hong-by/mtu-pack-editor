@@ -18,7 +18,7 @@ from tk_pack_builder.web import _ensure_rpfm_server  # noqa: E402
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build a pack using internal material rows as the source.")
     parser.add_argument("--recipe", type=Path, default=ROOT / "examples" / "recipe.character-clone.json")
-    parser.add_argument("--materials", type=Path, default=ROOT / "work" / "internal_materials" / "materials.v015.json")
+    parser.add_argument("--materials", type=Path, default=ROOT / "work" / "internal_materials" / "vanilla_mtu" / "materials.v015.json")
     parser.add_argument(
         "--writer-template",
         type=Path,

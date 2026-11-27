@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Cache-Control" content="no-store">
     <title>MTU 장수 제작소</title>
-    <link rel="stylesheet" href="./app.css?v=2.1.2-da1">
+    <link rel="stylesheet" href="./app.css?v=2.1.4-korean-patch">
   </head>
   <body>
     <header class="app-header">
@@ -13,15 +13,15 @@
         <span class="brand-mark">將</span>
         <div>
           <h1>MTU 장수 제작소</h1>
-          <p>기존 장수를 수정하거나, 여러 장수의 정보를 조합해 신규 장수를 만듭니다.</p>
+          <p>바닐라·MTU 장수를 수정하거나 조합해 신규 장수를 만듭니다.</p>
         </div>
       </div>
       <div class="header-actions">
         <input id="inputPackPath" class="path-input" value="work\packs\my_hero.pack" aria-label="입력 pack 경로">
         <input id="outputPackPath" class="path-input" value="output\my_hero_patch.pack" aria-label="출력 pack 경로">
         <div class="reference-path-group">
-          <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">work\packs\refs\mtu_reference_core.pack</textarea>
-          <small class="reference-path-help">CEO 데이터를 바꾸는 모드는 실제 게임 로드 순서대로 한 줄에 하나씩 추가하세요. 갑옷 방어력 보정은 기존 갑옷을 바꾸지 않습니다.</small>
+          <textarea id="referencePackPaths" class="reference-paths" aria-label="참조 pack 경로">work\packs\refs\mtu_vanilla_reference.pack</textarea>
+          <small class="reference-path-help">선택한 모드 구성의 내장 자료를 사용합니다.</small>
         </div>
         <select id="saveModeSelect" class="save-mode" aria-label="저장 방식">
           <option value="patch_pack" selected>패치 pack</option>
@@ -37,6 +37,15 @@
       </div>
     </header>
 
+    <section class="source-profile-panel" aria-label="사용할 모드 데이터">
+      <strong>사용할 모드 데이터</strong>
+      <span>바닐라·MTU 기본 포함</span>
+      <label><input id="include190Data" type="checkbox"> 190 Expanded</label>
+      <label><input id="includeKoreaData" type="checkbox"> 한반도 (190 포함)</label>
+      <button id="applySourceProfile" type="button" class="ghost-btn">선택한 구성 적용</button>
+      <small id="sourceProfileStatus" role="status"></small>
+      <small>추가 모드로 만든 팩은 게임에서도 해당 모드와 선행 모드가 필요합니다. 모드 설치·활성화는 게임 런처에서 진행하세요.</small>
+    </section>
     <main class="app-shell">
       <aside class="roster-panel">
         <div class="panel-toolbar">
@@ -48,23 +57,23 @@
               <button id="workflowGenderFemale" class="gender-btn" data-workflow-gender="female" type="button">여성</button>
             </div>
           </div>
-          <input id="searchInput" placeholder="이름, 오행, key 검색">
+          <input id="searchInput" placeholder="이름·진영·오행 검색 · 여러 단어 가능">
+          <label for="rosterFaction">원본 시작 진영</label>
+          <select id="rosterFaction"><option value="all">모든 진영</option></select>
         </div>
         <div class="filter-row" role="group" aria-label="오행 필터">
           <button class="filter active" data-filter="all" type="button">전체</button>
-          <button class="filter" data-filter="earth" type="button">土</button>
-          <button class="filter" data-filter="fire" type="button">火</button>
-          <button class="filter" data-filter="wood" type="button">木</button>
-          <button class="filter" data-filter="water" type="button">水</button>
-          <button class="filter" data-filter="metal" type="button">金</button>
+          <button class="filter" data-filter="earth" type="button">土 토</button>
+          <button class="filter" data-filter="fire" type="button">火 화</button>
+          <button class="filter" data-filter="wood" type="button">木 목</button>
+          <button class="filter" data-filter="water" type="button">水 수</button>
+          <button class="filter" data-filter="metal" type="button">金 금</button>
         </div>
-        <div class="filter-row korea-filter-row" role="group" aria-label="한반도 세력 필터">
-          <button class="filter" data-filter="korea:goguryeo" type="button">고구려</button>
-          <button class="filter" data-filter="korea:baekje" type="button">백제</button>
-          <button class="filter" data-filter="korea:silla" type="button">신라</button>
-          <button class="filter" data-filter="korea:tamna" type="button">탐라</button>
-          <button class="filter" data-filter="favorites" type="button">즐겨찾기</button>
+        <div class="filter-row" role="group" aria-label="즐겨찾기 필터">
+          <button id="rosterFavorites" type="button" aria-pressed="false">즐겨찾기만</button>
+          <button id="rosterClear" type="button">검색·진영·오행·즐겨찾기 해제</button>
         </div>
+        <p id="rosterConditions" class="discovery-hint" role="status"></p>
         <div id="characterList" class="character-list"></div>
       </aside>
 
@@ -242,11 +251,19 @@
             <div class="dedicated-armour-panel">
               <label class="check-row">
                 <input id="sourceDedicatedArmourEnabled" type="checkbox">
-                <span>기존 갑옷 유지 + 장수 전용 방어력 보정</span>
+                <span>기존 갑옷 유지 + 장수 전용 방어 보정</span>
               </label>
               <label>
                 <span>방어력 보정치</span>
                 <input id="sourceDedicatedArmourValue" type="number" min="-500" max="500" step="1" value="0">
+              </label>
+              <label>
+                <span>근접 회피 보정치</span>
+                <input id="sourceMeleeDefenceBonus" type="number" min="-100" max="100" step="1" value="0">
+              </label>
+              <label>
+                <span>원거리 방어 확률 보정치</span>
+                <input id="sourceMissileDefenceBonus" type="number" min="-100" max="100" step="1" value="0">
               </label>
               <div id="sourceDedicatedArmourStatus" class="equipment-note"></div>
             </div>
@@ -298,22 +315,24 @@
       <textarea id="recipeText" spellcheck="false"></textarea>
     </dialog>
 
-    <script src="./app-data.js?v=2.1.2-da1"></script>
-    <script src="./reference_names.js?v=2.1.2-da1"></script>
-    <script src="./app-labels.js?v=2.1.2-da1"></script>
-    <script src="./app-catalog.js?v=2.1.2-da1"></script>
-    <script src="./app-appearance.js?v=2.1.2-da1"></script>
-    <script src="./app-state.js?v=2.1.2-da1"></script>
-    <script src="./app-workflow.js?v=2.1.2-da1"></script>
-    <script src="./app-title-effects.js?v=2.1.2-da1"></script>
-    <script src="./app-normalize.js?v=2.1.2-da1"></script>
-    <script src="./app-form-helpers.js?v=2.1.2-da1"></script>
-    <script src="./app-render.js?v=2.1.2-da1"></script>
-    <script src="./app-editor.js?v=2.1.2-da1"></script>
-    <script src="./app-queue.js?v=2.1.2-da1"></script>
-    <script src="./app-skills.js?v=2.1.2-da1"></script>
-    <script src="./app-recipe.js?v=2.1.2-da1"></script>
-    <script src="./app-server.js?v=2.1.2-da1"></script>
-    <script src="./app.js?v=2.1.2-da1"></script>
+    <script src="./app-data.js?v=2.1.4-korean-patch"></script>
+    <script src="./reference_names.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-labels.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-catalog.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-appearance.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-state.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-workflow.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-title-effects.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-normalize.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-form-helpers.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-render.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-discovery.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-editor.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-queue.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-skills.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-recipe.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-server.js?v=2.1.4-korean-patch"></script>
+    <script src="./app-source-profiles.js?v=2.1.4-korean-patch"></script>
+    <script src="./app.js?v=2.1.4-korean-patch"></script>
   </body>
 </html>

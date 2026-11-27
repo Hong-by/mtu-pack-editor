@@ -214,6 +214,9 @@ function retargetImageAssetPath(path, sourceToken, targetToken) {
     }
   }
   const fileName = parts[parts.length - 1] || '';
+  const faceIndex = parts.indexOf('faces');
+  if (faceIndex > 0 && parts[faceIndex - 1] === 'composites'
+      && parts[faceIndex + 1] === sourceToken) parts[faceIndex + 1] = targetToken;
   const extensionIndex = fileName.lastIndexOf('.');
   if (extensionIndex > 0 && fileName.slice(0, extensionIndex) === sourceToken) {
     parts[parts.length - 1] = `${targetToken}${fileName.slice(extensionIndex)}`;
@@ -254,6 +257,17 @@ function customImageAssetsFromAppearance(appearance, targetToken, targetCardToke
         targetPath,
       }))
   ));
+  // Generic bodies resolve faces separately from armour; unique bodies also
+  // need the direct paths. Supply both layouts for the selected portrait only.
+  for (const asset of [...retargetedAssets]) {
+    const path = asset.targetPath;
+    const still = path.match(/^(.*\/stills\/[^/]+\/)(large\/)?([^/]+\.png)$/i);
+    if (still && imageFileStemFromPath(path) === targetCardToken) {
+      retargetedAssets.push({...asset, targetPath: `${still[1]}faces/${still[2] || ''}${still[3]}`});
+    }
+    const panel = path.match(/^(.*\/composites\/)((?:large_panel|small_panel)\/.*)$/i);
+    if (panel) retargetedAssets.push({...asset, targetPath: `${panel[1]}faces/${targetCardToken}/${panel[2]}`});
+  }
   const seenTargets = new Set();
   return retargetedAssets.filter((asset) => {
     const targetPath = normalizeImageAssetPath(asset.targetPath);
@@ -261,6 +275,30 @@ function customImageAssetsFromAppearance(appearance, targetToken, targetCardToke
     seenTargets.add(targetPath);
     return true;
   });
+}
+
+function patchImageAssetsFromAppearance(appearance, targetAppearance, targetToken, targetCardToken) {
+  const assets = customImageAssetsFromAppearance(appearance, targetToken, targetCardToken);
+  // The Korea shared male face set uses transparent armour layers. These
+  // audited source layers must follow the face when its folder is isolated.
+  if (imageFolderName(targetAppearance).toLowerCase() !== 'krc_artsets'
+      || targetAppearance?.isMale !== true) return assets;
+  const seen = new Set(assets.map(asset => asset.targetPath.toLowerCase()));
+  for (const asset of imageAssetsFromAppearance(targetAppearance)) {
+    const path = gameImageAssetPath(asset.path);
+    if (!/(?:^|\/)\w*ancillary_armour_[^/]*_male(?:\/|\.png$)/i.test(path)) continue;
+    const targetPath = retargetImageAssetPath(path, imageFolderName(targetAppearance), targetToken);
+    if (!seen.has(targetPath.toLowerCase())) {
+      assets.push({...asset, targetPath});
+      seen.add(targetPath.toLowerCase());
+    }
+    const emptyPath = targetPath.replace(/\w*ancillary_armour_[^/]*_male(?=\/|\.png$)/i, 'EMPTY');
+    if (!seen.has(emptyPath.toLowerCase())) {
+      assets.push({...asset, targetPath: emptyPath});
+      seen.add(emptyPath.toLowerCase());
+    }
+  }
+  return assets;
 }
 
 function artImageKeysFromTargetAssets(imageAssets, fallbackPortraitToken = '', fallbackCardToken = '') {

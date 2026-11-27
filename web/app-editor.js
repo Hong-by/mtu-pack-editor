@@ -197,7 +197,7 @@ function setupCreateLazySelects(character) {
   setLazySelect('sourceSpawn', () => selectableFormCharacters().map(spawnProfileOption), spawnProfileOption(character));
 }
 
-function prepareEditWorkflowForms(character) {
+function prepareEditWorkflowForms(character, { deferSummaries = false } = {}) {
   const editGender = characterGenderKey(character);
   resetWorkflowDraft('edit', character);
   syncWorkflowGender(editGender);
@@ -215,6 +215,7 @@ function prepareEditWorkflowForms(character) {
   setSelectValue('editSpawnEvent', character.spawnEvent);
   setSelectValue('editSubtype', elementMeta(character.element).subtype);
   renderTitleFilterButtons('edit');
+  if (deferSummaries) return;
   renderTitleSummary('edit', character);
   syncCeoSetSummary('edit', 'trait', 'editTraitSet');
   syncModelLockSummaries(character, characters().find((item) => item.key === $('sourceBase')?.value) || character);
@@ -227,7 +228,7 @@ function prepareEditWorkflowForms(character) {
   renderSkillTreeEditor('edit');
 }
 
-function prepareCreateWorkflowForms(character) {
+function prepareCreateWorkflowForms(character, { deferSummaries = false } = {}) {
   const createGender = characterGenderKey(character);
   resetWorkflowDraft('source', character);
   syncWorkflowGender(createGender);
@@ -245,6 +246,7 @@ function prepareCreateWorkflowForms(character) {
   setSelectValue('sourceSpawnEvent', generatedSpawnEventFromRound($('createMinRound').value));
   setSelectValue('createSubtype', elementMeta(character.element).subtype);
   renderTitleFilterButtons('source');
+  if (deferSummaries) return;
   renderTitleSummary('source', character);
   syncCeoSetSummary('source', 'trait', 'sourceTraitSet');
   syncModelLockSummaries(selectedCharacter(), character);
@@ -374,6 +376,12 @@ function applyTitleFilter(prefix, filter) {
     ? characters().find((item) => item.key === $('sourceBase')?.value) || selectedCharacter()
     : selectedCharacter();
   refreshTitleSelectForElement(prefix, '', fallback);
+  const titleSelect = $(`${prefix}Title`);
+  if (titleSelect?._discoveryPanel) {
+    titleSelect._discoveryPanel.hidden = false;
+    titleSelect._discoveryLimit = 30;
+    renderDiscoverySelect(titleSelect);
+  }
   renderTitleSummary(prefix, resolveTitleChoice($(`${prefix}Title`)?.value) || fallback);
   renderSelectedPreview();
   renderValidation();
@@ -448,7 +456,7 @@ function fillSelect(id, options) {
   renderSelectOptions(select, options, select.value);
   enhanceSearchableSelect(select);
   const input = select.parentNode.querySelector(`[data-search-for="${select.id}"]`);
-  if (input) input.value = '';
+  renderDiscoverySelect(select);
 }
 
 function setLazySelect(id, optionLoader, selectedOption = null) {
@@ -462,7 +470,7 @@ function setLazySelect(id, optionLoader, selectedOption = null) {
   enhanceSearchableSelect(select);
   wireLazySelect(select);
   const input = select.parentNode.querySelector(`[data-search-for="${select.id}"]`);
-  if (input) input.value = '';
+  renderDiscoverySelect(select);
 }
 
 function setLazySelectedOption(id, selectedOption) {
@@ -477,7 +485,7 @@ function setLazySelectedOption(id, selectedOption) {
   select._lastQuery = '';
   renderSelectOptions(select, select._allOptions, selectedOption?.value || select.value);
   const input = select.parentNode.querySelector(`[data-search-for="${select.id}"]`);
-  if (input) input.value = '';
+  renderDiscoverySelect(select);
 }
 
 function ensureSelectOptionsLoaded(select) {
@@ -485,7 +493,11 @@ function ensureSelectOptionsLoaded(select) {
     return select?._allOptions || [];
   }
   const selectedValue = select.value;
+  const selectedOption = (select._allOptions || []).find((item) => String(item.value) === selectedValue);
   const options = select._optionLoader() || [];
+  if (selectedOption && !options.some((item) => String(item.value) === selectedValue)) {
+    options.unshift(selectedOption);
+  }
   select._allOptions = options;
   select._optionsLoaded = true;
   renderSelectOptions(select, options, selectedValue);
@@ -501,6 +513,7 @@ function wireLazySelect(select) {
 }
 
 function renderSelectOptions(select, options, selectedValue = select.value) {
+  options = dedupePickerOptions(select, options, selectedValue);
   const previousValue = String(selectedValue || '');
   const selectedOption = previousValue
     ? (select._allOptions || options).find((item) => String(item.value) === previousValue)
@@ -532,6 +545,7 @@ function renderSelectOptions(select, options, selectedValue = select.value) {
   if (previousValue && selectHasValue(select, previousValue)) {
     select.value = previousValue;
   }
+  renderDiscoverySelect(select);
 }
 
 function selectHasValue(select, value) {
@@ -581,24 +595,16 @@ function enhanceSearchableSelect(select) {
       select.focus();
     }
   });
+  attachDiscoverySelect(select, input);
   select.dataset.searchReady = '1';
 }
 
 function filterSelectOptions(select) {
   ensureSelectOptionsLoaded(select);
   const input = select.parentNode.querySelector(`[data-search-for="${select.id}"]`);
-  const query = String(input?.value || '').trim().toLowerCase();
-  select._lastQuery = query;
-  const allOptions = select._allOptions || [];
-  const selectedValue = select.value;
-  const filtered = query
-    ? allOptions.filter((item) => `${item.label} ${item.value} ${item.search || ''}`.toLowerCase().includes(query))
-    : allOptions;
-  const selectedOption = allOptions.find((item) => item.value === selectedValue);
-  const nextOptions = selectedOption && !filtered.some((item) => item.value === selectedValue)
-    ? [selectedOption, ...filtered]
-    : filtered;
-  renderSelectOptions(select, nextOptions, selectedValue);
+  select._lastQuery = input?.value || '';
+  // The native select retains the selection; the expanded list holds only matches.
+  renderDiscoverySelect(select);
 }
 
 function titleSummaryMarkup(character) {
@@ -753,7 +759,7 @@ function renderSpawnHelp(prefix) {
   `;
 }
 
-function setMode(mode) {
+function setMode(mode, { deferRender = false } = {}) {
   state.mode = mode;
   setWorkView('editor');
   clearReferenceEditWarning();
@@ -762,6 +768,7 @@ function setMode(mode) {
   }
   $('editPanel').classList.toggle('active', mode === 'edit');
   $('createPanel').classList.toggle('active', mode === 'create');
+  if (deferRender) return;
   refreshStageButtons();
   updateAllSpawnFieldLabels();
   renderSelectedPreview();
@@ -821,18 +828,20 @@ function setWorkTab(target) {
   renderEditorFlowSummary();
 }
 
-function syncEquipmentSummary(prefix, sourceId) {
+function syncEquipmentSummary(prefix, sourceId, { deferValidation = false } = {}) {
   const character = characters().find((item) => item.key === $(sourceId).value);
   if (!character) return;
   $(`${prefix}EquipmentSummary`).innerHTML = equipmentSummaryMarkup(character, prefix);
   if (prefix === 'source') syncDedicatedArmourControls(character);
-  renderValidation();
+  if (!deferValidation) renderValidation();
 }
 
 function syncDedicatedArmourControls(character) {
   const toggle = $('sourceDedicatedArmourEnabled');
   const bonusInputs = [
     ['sourceDedicatedArmourValue', '방어력'],
+    ['sourceMeleeDefenceBonus', '근접 회피'],
+    ['sourceMissileDefenceBonus', '원거리 방어 확률'],
   ];
   const statusNode = $('sourceDedicatedArmourStatus');
   if (!toggle || !statusNode) return;
@@ -868,7 +877,7 @@ function syncDedicatedArmourControls(character) {
   }
 }
 
-function syncUnitSummary(prefix, sourceId) {
+function syncUnitSummary(prefix, sourceId, { deferValidation = false } = {}) {
   const character = characters().find((item) => item.key === $(sourceId).value);
   if (!character) return;
   $(`${prefix}UnitSummary`).innerHTML = unitSummaryMarkup(character, prefix);
@@ -880,10 +889,10 @@ function syncUnitSummary(prefix, sourceId) {
       bindValidationInput(input);
     }
   }
-  renderValidation();
+  if (!deferValidation) renderValidation();
 }
 
-function syncAttributeSummary(prefix, sourceId) {
+function syncAttributeSummary(prefix, sourceId, { deferValidation = false } = {}) {
   const character = resolveAttributeChoice($(sourceId).value);
   if (!character) return;
   $(`${prefix}AttributeSummary`).innerHTML = attributeSummaryMarkup(character, prefix);
@@ -891,34 +900,56 @@ function syncAttributeSummary(prefix, sourceId) {
     const input = $(`${prefix}Attr${suffix}`);
     bindValidationInput(input);
   }
-  renderValidation();
+  if (!deferValidation) renderValidation();
 }
 
 function attributeSetChoices() {
-  const catalog = (state.options?.attributeSetCatalog || [])
-    .filter((item) => item?.key)
-    .map((item) => ({
-      key: `attribute_set::${item.key}`,
-      name: attributeSetDisplayName(item.key, item.label),
-      attributeSet: item.key,
-      attributeStats: item.stats || state.options?.attributeStatsBySet?.[item.key] || {},
-      details: [
-        { gameMode: 'historical', attributeSet: item.key },
-        { gameMode: 'romance', attributeSet: item.key },
-      ],
-      sourceTag: item.sourceTag || '',
-      sourceIdentity: item.sourceTablePath || '',
-      referenceSourcePath: item.referenceSourcePath || '',
-    }));
-  if (catalog.length) return catalog;
-  return characters();
+  return cachedDerived('attributeSetChoices:grouped', () => {
+    const catalog = state.options?.attributeSetCatalog || [];
+    if (!catalog.length) return characters();
+    const groups = new Map();
+    const priority = (item) => item.key.startsWith('3k_main_') ? 0 : 1;
+    for (const item of [...catalog].sort((a, b) => priority(a) - priority(b) || a.key.localeCompare(b.key))) {
+      if (!item?.key || !Object.keys(item.stats || {}).length || item.key === 'placeholder_attribute_set') continue;
+      const groupKey = item.equivalenceKey && item.gameMode ? item.equivalenceKey : item.key;
+      if (!groups.has(groupKey)) groups.set(groupKey, []);
+      groups.get(groupKey).push(item);
+    }
+    return [...groups.values()].map((items) => {
+      const first = items[0];
+      const historical = items.find((item) => item.gameMode === 'historical');
+      const romance = items.find((item) => item.gameMode === 'romance');
+      const selected = romance || first;
+      let name = attributeSetDisplayName(selected.key, selected.label);
+      if (name === '능력치') {
+        const stats = ATTRIBUTE_FIELDS.map(([, key, label]) => ({label, value: Number(selected.stats[key])}));
+        stats.sort((a, b) => b.value - a.value);
+        name = new Set(stats.map((stat) => stat.value)).size === 1
+          ? '균형 기본 능력치' : `${stats.slice(0, 2).map((stat) => stat.label).join('·')} 중심 능력치`;
+      }
+      return {
+        key: `attribute_set::${selected.key}`,
+        name,
+        attributeSet: selected.key,
+        attributeStats: selected.stats,
+        attributeAliases: items.map((item) => item.key),
+        details: [
+          { gameMode: 'historical', attributeSet: historical?.key || selected.key },
+          { gameMode: 'romance', attributeSet: romance?.key || selected.key },
+        ],
+        sourceTag: selected.sourceTag || '',
+        sourceIdentity: selected.sourceTablePath || '',
+        referenceSourcePath: selected.referenceSourcePath || '',
+      };
+    });
+  });
 }
 
 function resolveAttributeChoice(value) {
   const key = String(value || '');
   const character = characters().find((item) => item.key === key);
   const attributeSetKey = character?.attributeSet || key.replace(/^attribute_set::/, '');
-  return attributeSetChoices().find((item) => item.key === key || item.attributeSet === attributeSetKey)
+  return attributeSetChoices().find((item) => item.key === key || item.attributeSet === attributeSetKey || item.attributeAliases?.includes(attributeSetKey))
     || character
     || characters().find((item) => item.attributeSet === attributeSetKey)
     || null;
@@ -972,12 +1003,15 @@ function attributeSetCloneFrom(prefix, character, slug, index) {
     changes.push({ key, label, value, previousValue });
   }
   if (!changes.length) return null;
-  return {
-    sourceSetKey: character.attributeSet,
-    newSetKey: `hby_attribute_set_${slug}_${index}`,
+  const baseKey = `3k_main_attribute_set_general_hby_${slug}_${index}`;
+  const details = detailsByMode(character);
+  const modeClones = ['historical', 'romance'].map((mode) => ({
+    sourceSetKey: details[mode]?.attributeSet || character.attributeSet,
+    newSetKey: `${baseKey}_${mode === 'historical' ? 'records' : 'romance'}`,
     overrides,
-    changes,
-  };
+    gameMode: mode,
+  }));
+  return { ...modeClones[1], overrides, changes, modeClones };
 }
 
 function attributePatchDescription(clone) {

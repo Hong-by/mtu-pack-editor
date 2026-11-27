@@ -52,6 +52,8 @@ const state = {
   dedicatedArmour: null,
   selectedKey: SAMPLE_CHARACTERS[0].key,
   filter: 'all',
+  rosterFaction: 'all',
+  favoritesOnly: false,
   mode: 'edit',
   workView: 'queue',
   workflowGender: 'male',
@@ -91,7 +93,7 @@ const state = {
 
 const INTERNAL_MATERIAL_BUILD = {
   enabledForSaveMode: 'patch_pack',
-  materialPath: 'work\\internal_materials\\materials.v015.json',
+  materialPath: 'work\\internal_materials\\vanilla_mtu\\materials.v015.json',
   coreAssetSourceId: '17309a40b912',
 };
 

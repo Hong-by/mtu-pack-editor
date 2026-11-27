@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .rpfm_fields import field_names as _rpfm_field_names
+
 import copy
 import hashlib
 import json
@@ -47,7 +49,7 @@ from .stat_tables import TABLE_ALIASES, StatTarget, resolve_stat_target, resolve
 LEGACY_TEMPLATE_PACK = Path("work/legacy_template/8King_4P_1.7_up.pack")
 ROOT = Path(os.environ.get("TK_PACK_EDITOR_ROOT", Path(__file__).resolve().parents[1])).resolve()
 EXTRACTED_ASSET_ROOT = ROOT / "work" / "assets"
-INTERNAL_MATERIALS_PATH = ROOT / "work" / "internal_materials" / "materials.v015.json"
+INTERNAL_MATERIALS_PATH = ROOT / "work" / "internal_materials" / "vanilla_mtu" / "materials.v015.json"
 CORE_ASSET_SOURCE_ID = "17309a40b912"
 IMAGE_ONLY_ASSET_PREFIX = "__image_only_reference__"
 TEMP_IMAGE_ASSET_ROOT = ROOT / "work" / "tmp_delta_image_assets"
@@ -59,8 +61,8 @@ DEDICATED_ARMOUR_POOL_ROOTS = (
     ROOT / "work" / "dedicated_armour_pools",
 )
 SPAWN_SCRIPT_SAVE_VERSION = 8
-CEO_SET_SCRIPT_SAVE_VERSION = 8
-EQUIPMENT_SCRIPT_SAVE_VERSION = 26
+CEO_SET_SCRIPT_SAVE_VERSION = 9
+EQUIPMENT_SCRIPT_SAVE_VERSION = 27
 DEDICATED_ARMOUR_MIGRATION_SAVE_VERSION = 6
 DEDICATED_ARMOUR_REGULAR_CEO_SOURCE = (
     "3k_main_ancillary_armour_medium_armour_metal_extraordinary"
@@ -310,6 +312,14 @@ def build_delta_pack(
     output_path: Path,
     reference_paths: list[Path] | None = None,
 ) -> list[dict[str, object]]:
+    from .source_policy import require_supported_sources, require_clean_references, require_clean_pack
+    require_supported_sources(reference_paths or [])
+    require_clean_references(recipe)
+    from .title_registry import validate_recipe_titles
+    validate_recipe_titles(recipe)
+    for reference_path in reference_paths or []:
+        if reference_path.is_file():
+            require_clean_pack(reference_path)
     output_path = output_path.resolve()
     messages: list[Any] = []
 
@@ -431,6 +441,7 @@ def build_delta_pack(
         _spawn_entries_for_clones(processed_clones),
         ceo_set_entries,
         equipment_entries,
+        work_entries=_diagnostic_work_entries(processed_clones, processed_patches),
         escape=_lua_escape,
         string_list=_lua_string_list,
     )
@@ -453,6 +464,8 @@ def build_delta_pack(
         equipment_entries=equipment_entries,
     )
 
+    require_clean_references(list(rows_by_table))
+    require_clean_references(list(rows_by_table.values()))
     target_key = _new_delta_pack(session)
     try:
         for table_path, rows in rows_by_table.items():
@@ -623,6 +636,7 @@ def _validate_hidden_armour_adjustment_links(recipe: Recipe) -> None:
             )
         bonuses = {
             "armour_bonus": int(assignment.armour_value) - int(source_value),
+            "melee_defence_bonus": int(assignment.melee_defence_bonus),
             "melee_attack_bonus": int(assignment.melee_attack_bonus),
             "melee_damage_bonus": int(assignment.melee_damage_bonus),
             "ap_melee_damage_bonus": int(assignment.ap_melee_damage_bonus),
@@ -1279,7 +1293,11 @@ def _collect_skill_set_clone_rows(
             }
             _upsert_delta_row(rows_by_table, table_names["character_skill_node_links"], _skill_link_key, new_link)
 
-        if clone.armour_bonus:
+        if (
+            clone.armour_bonus
+            or clone.melee_defence_bonus
+            or clone.missile_defence_bonus
+        ):
             _add_hidden_armour_bonus_skill(
                 clone,
                 source_nodes,
@@ -1324,17 +1342,32 @@ def _add_hidden_armour_bonus_skill(
             int(clone.armour_bonus),
             "3k_main_effect_character_stat_mod_armour",
             "character_to_character_own",
+            500,
+        ),
+        (
+            "melee defence",
+            int(clone.melee_defence_bonus),
+            "3k_main_effect_character_stat_mod_melee_defence",
+            "character_to_character_own",
+            100,
+        ),
+        (
+            "missile defence",
+            int(clone.missile_defence_bonus),
+            "3k_main_effect_character_stat_mod_missile_defence",
+            "character_to_character_own",
+            100,
         ),
     ]
     active_effects = [
-        (label, bonus, effect_key, effect_scope)
-        for label, bonus, effect_key, effect_scope in bonus_effects
+        (label, bonus, effect_key, effect_scope, limit)
+        for label, bonus, effect_key, effect_scope, limit in bonus_effects
         if bonus
     ]
-    for label, bonus, _effect_key_value, _effect_scope in active_effects:
-        if not -500 <= bonus <= 500:
+    for label, bonus, _effect_key_value, _effect_scope, limit in active_effects:
+        if not -limit <= bonus <= limit:
             raise ValueError(
-                f"Hidden {label} skill bonus is outside -500..500: {bonus}"
+                f"Hidden {label} skill bonus is outside -{limit}..{limit}: {bonus}"
             )
     if not source_nodes:
         raise ValueError(
@@ -1344,6 +1377,8 @@ def _add_hidden_armour_bonus_skill(
     skill_key, node_key = _hidden_armour_skill_keys(
         clone.new_set_key,
         int(clone.armour_bonus),
+        int(clone.melee_defence_bonus),
+        int(clone.missile_defence_bonus),
     )
     source_skill = _find_row(
         tables.get("character_skills", []),
@@ -1402,7 +1437,7 @@ def _add_hidden_armour_bonus_skill(
     effect_table = str(table_names.get("character_skill_level_to_effects_junctions") or "")
     if not effect_table:
         raise ValueError("Output table for the hidden combat effects was not resolved.")
-    for _label, bonus, effect_key, effect_scope in active_effects:
+    for _label, bonus, effect_key, effect_scope, _limit in active_effects:
         _upsert_delta_row(
             rows_by_table,
             effect_table,
@@ -1428,8 +1463,19 @@ def _add_hidden_armour_bonus_skill(
 def _hidden_armour_skill_keys(
     skill_set_key: str,
     armour_bonus: int,
+    melee_defence_bonus: int = 0,
+    missile_defence_bonus: int = 0,
 ) -> tuple[str, str]:
-    profile = f"armour:{int(armour_bonus)}"
+    if not melee_defence_bonus and not missile_defence_bonus:
+        # Preserve the existing armour-only key so regenerated packs remain
+        # compatible with saves made before the defence-chance controls.
+        profile = f"armour:{int(armour_bonus)}"
+    else:
+        profile = (
+            f"armour:{int(armour_bonus)}"
+            f"|melee_defence:{int(melee_defence_bonus)}"
+            f"|missile_defence:{int(missile_defence_bonus)}"
+        )
     skill_checksum = zlib.crc32(profile.encode("utf-8")) & 0xFFFFFFFF
     skill_token = f"{skill_checksum:08x}"
     skill_key = f"hby_mtu_hidden_armour_adjustment_{skill_token}"
@@ -1488,7 +1534,7 @@ def _collect_character_patch_rows(
         art_overrides = patch.art_overrides or {}
         source_template = _find_required(templates, "key", patch.template_key)
         source_art_set_id = str(source_template.get("art_set_override") or "")
-        related_template_keys_list = korea_related_template_keys(patch.template_key)
+        related_template_keys_list = [patch.template_key]
         related_template_keys = set(related_template_keys_list)
         if not related_template_keys:
             related_template_keys = {patch.template_key}
@@ -1691,11 +1737,43 @@ def _apply_character_patch_name(
             "id": str(name_id),
             "frequency": 1,
         }
+        _bind_private_name_group(session, source_dbs, rows_by_table, name_row, name_column)
         _upsert_delta_row(rows_by_table, names_table, "id", _clean_source_row(name_row))
     _set_template_single_name(template, name_column, name_id)
     loc_rows[f"names_name_{name_id}"] = display_name
     loc_rows[f"names_alt_name_{name_id}"] = display_name
     return True
+
+
+def _bind_private_name_group(session, source_dbs, rows_by_table, name_row, name_column):
+    """Keep explicit custom names visible across bundled faction name groups.
+
+    Zero-weight private pools cannot feed names into random character creation.
+    Existing cultural pools and their probabilities are never rewritten.
+    """
+    families = ('names_groups', 'name_orders', 'faction_to_name_groups')
+    paths = {family: next((p for p in session.list_tables()
+                          if f'/{family}_tables/' in p), None) for family in families}
+    if not all(paths.values()):
+        return  # Older/base bundles retain their existing naming behaviour.
+    rows = {family: _read_rows(session, path, source_dbs) for family, path in paths.items()}
+    group = int(name_row['id'])
+    used = {int(r['key']) for r in rows['names_groups']}
+    used.update(int(r['key']) for r in rows_by_table.get(paths['names_groups'], []))
+    while group in used:
+        group += 1
+    name_row['names_group'] = group
+    name_row['frequency'] = 0
+    _upsert_delta_row(rows_by_table, paths['names_groups'], 'key', {'key': group})
+    _upsert_delta_row(rows_by_table, paths['name_orders'],
+                      lambda r: (r['name_group'], r['order'], r['type'], r['optional_language']),
+                      {'name_group': group, 'order': 0,
+                       'type': 'other' if name_column == 'other_name' else name_column,
+                       'optional_language': ''})
+    for faction in sorted({r['faction'] for r in rows['faction_to_name_groups']}):
+        _upsert_delta_row(rows_by_table, paths['faction_to_name_groups'],
+                          lambda r: (r['faction'], r['name_group']),
+                          {'faction': faction, 'name_group': group, 'probability': 0})
 
 
 def _used_name_ids(
@@ -2062,6 +2140,7 @@ def _collect_character_clone_rows(
                 "id": str(name_id),
                 "frequency": 1,
             }
+            _bind_private_name_group(session, source_dbs, rows_by_table, name_row, name_column)
             _upsert_delta_row(rows_by_table, target_names_table, "id", _clean_source_row(name_row))
             names.append(name_row)
             _set_template_single_name(new_template, name_column, name_id)
@@ -2108,13 +2187,9 @@ def _collect_character_clone_rows(
             if is_male is not None:
                 new_template["is_male"] = is_male
 
-        _clone_frontend_character_ceos_delta(
-            tables,
-            source_dbs,
-            rows_by_table,
-            clone.source_template_key,
-            clone.new_template_key,
-        )
+        # Campaign-only templates are not frontend_characters. Copying their
+        # source's frontend CEO rows creates dangling menu-character references.
+        # Campaign traits/equipment continue to come from initial_ceos and Lua.
 
         if clone.new_age_range_key:
             new_template["spawn_age_range"] = clone.new_age_range_key
@@ -3199,39 +3274,6 @@ def _title_initial_override_to_ignore(title_ceo_key: Any, initial_ceo_override: 
         return False
     title_initial = _initial_ceo_from_title_ceo_key(title_ceo_key)
     return bool(title_initial and initial_key == title_initial)
-
-
-def _clone_frontend_character_ceos_delta(
-    tables: dict[str, list[dict[str, Any]]],
-    source_dbs: dict[str, dict[str, Any]],
-    rows_by_table: dict[str, list[dict[str, Any]]],
-    source_template_key: Any,
-    new_template_key: Any,
-) -> None:
-    source_key = str(source_template_key or "")
-    target_key = str(new_template_key or "")
-    if not source_key or not target_key:
-        return
-    source_rows = [
-        row for row in tables.get("frontend_character_ceos", [])
-        if str(row.get("frontend_character") or "") == source_key
-    ]
-    if not source_rows:
-        return
-    source_table = str(source_rows[0].get("_sourceTablePath") or "")
-    if source_table:
-        _ensure_output_source_db(source_dbs, MTU_FRONTEND_CHARACTER_CEOS_TABLE, source_table)
-    for source_row in source_rows:
-        new_row = {
-            **source_row,
-            "frontend_character": target_key,
-        }
-        _upsert_delta_row(
-            rows_by_table,
-            MTU_FRONTEND_CHARACTER_CEOS_TABLE,
-            _frontend_character_ceo_key,
-            _clean_source_row(new_row),
-        )
 
 
 def _resolve_non_generic_initial_ceo(
@@ -5051,19 +5093,45 @@ def _merge_reference_dependency_tables(
             continue
         try:
             reference_key = _open_pack_reusing_existing(session, resolved, opened_pack_keys)
-            tree = session.client.send({"GetPackFileDataForTreeView": reference_key})
-            _raise_rpfm_error(tree)
-            file_infos = tree["data"]["ContainerInfoVecRFileInfo"][1]
-            reference_tables = sorted(
-                info["path"]
-                for info in file_infos
-                if info.get("path", "").startswith(("db/", "ceo_db/"))
+            reference_tables = _reference_table_paths(
+                session,
+                reference_key,
             )
             _merge_dependency_tables_from_pack(session, reference_key, reference_tables, aliases, tables, source_dbs)
             for alias, table_path in _optional_table_names_from_list(reference_tables, aliases).items():
                 table_names.setdefault(alias, table_path)
         except Exception:
             continue
+
+
+def _reference_table_paths(
+    session: RpfmPackSession,
+    pack_key: str,
+) -> list[str]:
+    """Return a reference pack's DB tree without repeating RPFM round trips.
+
+    A multi-character recipe visits the same reference packs from several
+    dependency collectors for every work item.  The pack tree cannot change
+    during a build, so fetching it once per open pack is sufficient.
+    """
+    cache = getattr(session, "_delta_reference_table_paths", None)
+    if cache is None:
+        cache = {}
+        setattr(session, "_delta_reference_table_paths", cache)
+    cached = cache.get(pack_key)
+    if cached is not None:
+        return list(cached)
+
+    tree = session.client.send({"GetPackFileDataForTreeView": pack_key})
+    _raise_rpfm_error(tree)
+    file_infos = tree["data"]["ContainerInfoVecRFileInfo"][1]
+    reference_tables = tuple(sorted(
+        info["path"]
+        for info in file_infos
+        if info.get("path", "").startswith(("db/", "ceo_db/"))
+    ))
+    cache[pack_key] = reference_tables
+    return list(reference_tables)
 
 
 def _merge_vanilla_dependency_tables(
@@ -5205,14 +5273,26 @@ def _read_rows_from_pack_key(
     table_name: str,
     source_dbs: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    cache = getattr(session, "_delta_decoded_rows_by_source", None)
+    if cache is None:
+        cache = {}
+        setattr(session, "_delta_decoded_rows_by_source", cache)
+    cache_key = (str(pack_key), table_name.replace("\\", "/"))
+    cached_rows = cache.get(cache_key)
+    if cached_rows is not None:
+        # Callers may edit selected source rows before writing a delta table.
+        # A shallow row copy is enough because decoded DB cells are scalars.
+        return [dict(row) for row in cached_rows]
+
     response = session.client.send({"DecodePackedFile": [pack_key, table_name, "PackFile"]})
     _raise_rpfm_error(response)
     data = response.get("data", {})
     if "DBRFileInfo" not in data:
+        cache[cache_key] = ()
         return []
     source_dbs.setdefault(table_name, copy.deepcopy(data["DBRFileInfo"][0]))
     table = data["DBRFileInfo"][0]["table"]
-    fields = [field["name"] for field in table["definition"]["fields"]]
+    fields = _rpfm_field_names(table)
     rows = [
         {
             field_name: _decode_rpfm_cell(value)
@@ -5222,6 +5302,7 @@ def _read_rows_from_pack_key(
     ]
     for row in rows:
         row["_sourceTablePath"] = table_name
+    cache[cache_key] = tuple(dict(row) for row in rows)
     return rows
 
 
@@ -5379,7 +5460,7 @@ def _source_table_path_for_rows(rows: list[dict[str, Any]], table_name: str) -> 
 def _db_with_rows(source_db: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     db = copy.deepcopy(source_db)
     table = db["table"]
-    fields = [field["name"] for field in table["definition"]["fields"]]
+    fields = _rpfm_field_names(table)
     if not table["table_data"]:
         table["table_data"] = []
         return db
@@ -5396,7 +5477,7 @@ def _db_with_rows(source_db: dict[str, Any], rows: list[dict[str, Any]]) -> dict
 
 def _decoded_rows_from_db(source_db: dict[str, Any]) -> list[dict[str, Any]]:
     table = source_db["table"]
-    fields = [field["name"] for field in table["definition"]["fields"]]
+    fields = _rpfm_field_names(table)
     return [
         {
             field_name: _decode_rpfm_cell(value)
@@ -5474,7 +5555,7 @@ def _table_key_for_path(path: str, source_db: dict[str, Any]) -> str | Any | Non
     for marker, alias in alias_by_folder.items():
         if marker in folder:
             return _dependency_key_for_alias(alias)
-    fields = [field["name"] for field in source_db["table"]["definition"]["fields"]]
+    fields = _rpfm_field_names(source_db["table"])
     if "key" in fields:
         return "key"
     if "id" in fields:
@@ -5770,7 +5851,7 @@ def _decode_db_from_pack(session: RpfmPackSession, pack_key: str, path: str) -> 
 
 def _rows_from_db(db: dict[str, Any]) -> list[dict[str, Any]]:
     table = db["table"]
-    fields = [field["name"] for field in table["definition"]["fields"]]
+    fields = _rpfm_field_names(table)
     return [
         {
             field_name: _decode_rpfm_cell(value)
@@ -5882,7 +5963,7 @@ def _loc_db_with_rows(session: RpfmPackSession, rows: dict[str, str]) -> dict[st
     if source is None:
         raise ValueError("Source pack has no loc file to use as a loc table template.")
     table = source["table"]
-    fields = [field["name"] for field in table["definition"]["fields"]]
+    fields = _rpfm_field_names(table)
     template_row = table["table_data"][0] if table["table_data"] else [
         _default_loc_template_cell(field_name)
         for field_name in fields
@@ -6600,7 +6681,7 @@ def _find_extracted_asset(packed_path: str, source_path: str | None = None) -> P
             if candidate.is_file():
                 return candidate
     for pack_dir in EXTRACTED_ASSET_ROOT.iterdir():
-        if pack_dir.name == CORE_ASSET_SOURCE_ID:
+        if pack_dir.name != "hby_generated_character_sets":
             continue
         for candidate_parts in _image_asset_candidate_parts(parts):
             candidate = pack_dir.joinpath(*candidate_parts)
@@ -6862,6 +6943,7 @@ def _write_delta_diagnostics(
                     if clone.dedicated_armour.source_armour_value is not None
                     else None
                 ),
+                "meleeDefenceBonus": clone.dedicated_armour.melee_defence_bonus,
                 "meleeAttackBonus": clone.dedicated_armour.melee_attack_bonus,
                 "meleeDamageBonus": clone.dedicated_armour.melee_damage_bonus,
                 "apMeleeDamageBonus": clone.dedicated_armour.ap_melee_damage_bonus,
@@ -7837,6 +7919,13 @@ def _legacy_campaign_start_spawn_script(
     return "\n".join(lines)
 
 
+def _diagnostic_work_entries(clones: list[CharacterClone], patches: list[CharacterPatch]) -> list[dict[str, str]]:
+    return [
+        *({"template": clone.new_template_key, "kind": "new_character"} for clone in clones),
+        *({"template": patch.template_key, "kind": "existing_character"} for patch in patches),
+    ]
+
+
 def _campaign_start_spawn_script(
     clones: list[CharacterClone],
     patches: list[CharacterPatch] | None = None,
@@ -7850,6 +7939,7 @@ def _campaign_start_spawn_script(
         _spawn_entries_for_clones(clones),
         _ceo_set_entries_for_characters(clones, patches or []),
         _equipment_entries_for_characters(clones, patches or []),
+        work_entries=_diagnostic_work_entries(clones, patches or []),
         escape=_lua_escape,
         string_list=_lua_string_list,
     )

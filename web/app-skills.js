@@ -253,7 +253,7 @@ const SKILL_ELEMENT_TABS = [
 function activeSkillCandidateTab(prefix, activeInfo = null) {
   const saved = state.skillCandidateTabs[prefix];
   if (saved) return saved;
-  return activeInfo?.element || 'all';
+  return 'all';
 }
 
 function skillCandidateTabsMarkup(prefix, activeTab) {
@@ -332,10 +332,11 @@ function renderSkillTreeEditor(prefix) {
         <strong>교체할 노드: ${escapeHtml(activeInfo?.name || '노드 선택')}</strong>
         <span>${escapeHtml(skillEffectText(activeInfo))}</span>
       </div>
-      <input class="skill-search" data-skill-search="${prefix}" placeholder="스킬 이름이나 효과 검색">
+      <input class="skill-search" data-skill-search="${prefix}" value="${escapeHtml(skillDiscoveryState(prefix).query)}" aria-label="스킬 이름·효과 검색" placeholder="이름·효과 검색 (예: 방어 아군)">
+      ${skillDiscoveryMarkup(prefix)}
       ${skillCandidateTabsMarkup(prefix, activeCandidateTab)}
       <div class="skill-candidates" data-skill-candidates="${prefix}">
-        ${renderSkillCandidates(prefix, '')}
+        ${renderSkillCandidates(prefix, skillDiscoveryState(prefix).query)}
       </div>
     </div>` : ''}
   `;
@@ -350,21 +351,22 @@ function renderSkillCandidates(prefix, query) {
   const activeNode = nodes.find((node) => node.key === activeNodeKey);
   const activeInfo = activeNode ? skillInfo(activeNode.skillKey) : null;
   const activeTab = activeSkillCandidateTab(prefix, activeInfo);
-  const q = String(query || '').trim().toLowerCase();
+  const discovery = skillDiscoveryState(prefix);
+  const q = String(query || '').trim();
   const candidates = skillIndexList()
     .filter((item) => {
       const haystack = `${item.name} ${item.description} ${item.effectSummary} ${item.key}`.toLowerCase();
       const matchesTab = activeTab === 'all' || item.element === activeTab;
-      return matchesTab && (!q || haystack.includes(q));
+      return matchesTab && discoveryMatches(haystack, q) && effectMatches(item.effectSummary || item.description, discovery.filters);
     })
     .sort((a, b) => {
       const aSame = a.element && a.element === activeInfo?.element ? 1 : 0;
       const bSame = b.element && b.element === activeInfo?.element ? 1 : 0;
       if (aSame !== bSame) return bSame - aSame;
       return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
-    })
-    .slice(0, 80);
-  return candidates.map((item) => `
+    });
+  const status = `<p class="discovery-status" role="status">${escapeHtml(discoveryConditions(discovery.filters, q))} · ${activeTab === 'all' ? '모든 오행' : escapeHtml(elementMeta(activeTab).name)} · ${candidates.length}개 결과</p>`;
+  const cards = candidates.slice(0, discovery.limit).map((item) => `
     <button
       type="button"
       class="skill-candidate element-${item.element || 'none'}"
@@ -375,7 +377,8 @@ function renderSkillCandidates(prefix, query) {
     >
       ${skillSourceBadgeMarkup(item)}
       <b>${escapeHtml(item.name)}</b>
-      <span>${escapeHtml(skillEffectText(item))}</span>
+      <span>${effectDescriptionMarkup(skillEffectText(item), discovery.filters)}</span>
     </button>
-  `).join('') || '<p class="skill-tree-empty">검색 결과가 없습니다.</p>';
+  `).join('') || '<p class="skill-tree-empty">일치하는 항목이 없습니다. 검색·필터 전체 해제를 눌러보세요.</p>';
+  return status + cards + (candidates.length > discovery.limit ? `<button type="button" data-skill-more="${prefix}">더 보기 (${discovery.limit}/${candidates.length})</button>` : '');
 }

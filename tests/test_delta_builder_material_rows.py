@@ -23,6 +23,9 @@ from tk_pack_builder.delta_builder import (
     _copy_skill_dependency,
     _loc_db_with_rows,
     _merge_source_table_rows,
+    _processing_recipes,
+    _reference_table_paths,
+    _read_rows_from_pack_key,
     _read_rows,
     _spawn_entries_for_clones,
     _unique_lua_ceo_keys,
@@ -44,6 +47,143 @@ from tk_pack_builder.recipe import (
 
 
 class DeltaBuilderMaterialRowsTest(unittest.TestCase):
+    def test_reference_table_tree_is_loaded_once_per_open_pack(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+
+            def send(self, command: object) -> dict[str, object]:
+                self.commands.append(command)
+                return {
+                    "data": {
+                        "ContainerInfoVecRFileInfo": [None, [
+                            {"path": "db/example_tables/data__"},
+                            {"path": "text/not_a_db_file.txt"},
+                        ]],
+                    },
+                }
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.client = FakeClient()
+
+        session = FakeSession()
+        first = _reference_table_paths(session, "reference.pack")  # type: ignore[arg-type]
+        first.append("db/edited_tables/data__")
+        second = _reference_table_paths(session, "reference.pack")  # type: ignore[arg-type]
+
+        self.assertEqual(second, ["db/example_tables/data__"])
+        self.assertEqual(len(session.client.commands), 1)
+
+    def test_reference_db_rows_are_decoded_once_per_pack_and_table(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+
+            def send(self, command: object) -> dict[str, object]:
+                self.commands.append(command)
+                return {
+                    "data": {
+                        "DBRFileInfo": [{
+                            "table": {
+                                "definition": {"fields": [{"name": "key"}]},
+                                "table_data": [[{"StringU8": "source"}]],
+                            },
+                        }],
+                    },
+                }
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.client = FakeClient()
+
+        session = FakeSession()
+        source_dbs: dict[str, dict[str, object]] = {}
+        path = "db/example_tables/data__"
+
+        first = _read_rows_from_pack_key(session, "reference.pack", path, source_dbs)  # type: ignore[arg-type]
+        first[0]["key"] = "edited"
+        second = _read_rows_from_pack_key(session, "reference.pack", path, source_dbs)  # type: ignore[arg-type]
+
+        self.assertEqual(second[0]["key"], "source")
+        self.assertEqual(len(session.client.commands), 1)
+
+    def test_reference_db_row_cache_is_scoped_by_pack(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+
+            def send(self, command: object) -> dict[str, object]:
+                self.commands.append(command)
+                pack_key = command["DecodePackedFile"][0]  # type: ignore[index]
+                return {
+                    "data": {
+                        "DBRFileInfo": [{
+                            "table": {
+                                "definition": {"fields": [{"name": "key"}]},
+                                "table_data": [[{"StringU8": pack_key}]],
+                            },
+                        }],
+                    },
+                }
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.client = FakeClient()
+
+        session = FakeSession()
+        source_dbs: dict[str, dict[str, object]] = {}
+        path = "db/example_tables/data__"
+
+        first = _read_rows_from_pack_key(session, "first.pack", path, source_dbs)  # type: ignore[arg-type]
+        second = _read_rows_from_pack_key(session, "second.pack", path, source_dbs)  # type: ignore[arg-type]
+
+        self.assertEqual(first[0]["key"], "first.pack")
+        self.assertEqual(second[0]["key"], "second.pack")
+        self.assertEqual(len(session.client.commands), 2)
+
+    def test_processing_recipes_remaps_legacy_attribute_sets_for_190e(self) -> None:
+        def work_item(index: int) -> dict[str, object]:
+            old_key = f"hby_attribute_set_generated_{index}"
+            return {
+                "recipe": {
+                    "attributeSetClones": [{
+                        "sourceSetKey": "3k_main_attribute_set_general_water_records",
+                        "newSetKey": old_key,
+                        "overrides": {"expertise": 80 + index},
+                    }],
+                    "characterCloneRecipes": [{
+                        "newTemplateKey": f"hby_template_generated_{index}",
+                        "sourceTemplateKey": "3k_main_template_historical_lady_sun_shangxiang_hero_fire",
+                        "detailOverrides": {
+                            "romance": {"attribute_set": old_key},
+                            "historical": {"attribute_set": old_key},
+                        },
+                    }],
+                },
+            }
+
+        recipe = recipe_from_dict({
+            "modName": "multi_character_compat",
+            "workItems": [work_item(1), work_item(2)],
+        })
+
+        processed = _processing_recipes(recipe)
+
+        self.assertEqual(len(processed), 2)
+        for index, work_recipe in enumerate(processed, start=1):
+            expected = f"3k_main_attribute_set_general_hby_generated_{index}"
+            self.assertEqual(work_recipe.attribute_set_clones[0].new_set_key, expected)
+            clone = work_recipe.character_clones[0]
+            self.assertEqual(
+                clone.detail_overrides["romance"]["attribute_set"],
+                expected,
+            )
+            self.assertEqual(
+                clone.detail_overrides["historical"]["attribute_set"],
+                expected,
+            )
+
     def test_armour_bonus_skills_are_shared_by_value_across_separate_work_items(self) -> None:
         def table(rows: list[dict[str, object]]) -> dict[str, object]:
             return {
@@ -99,6 +239,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                     }
                     for effect_key in (
                         "3k_main_effect_character_stat_mod_armour",
+                        "3k_main_effect_character_stat_mod_melee_defence",
                         "3k_main_skill_attack_rate",
                         "3k_main_effect_character_stat_mod_melee_damage",
                         "3k_main_effect_character_stat_mod_ap_damage_melee",
@@ -127,6 +268,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                             new_set_key="hby_skill_set_with_armour",
                             replacements={},
                             armour_bonus=27,
+                            melee_defence_bonus=11,
                             melee_attack_bonus=11,
                             melee_damage_bonus=12,
                             ap_melee_damage_bonus=13,
@@ -151,13 +293,23 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                             new_set_key="hby_romance_skill_set_with_armour",
                             replacements={},
                             armour_bonus=27,
+                            melee_defence_bonus=11,
+                            missile_defence_bonus=15,
+                        ),
+                        SkillSetClone(
+                            source_set_key="source_skill_set",
+                            new_set_key="hby_different_defence_skill_set",
+                            replacements={},
+                            armour_bonus=27,
+                            melee_defence_bonus=12,
+                            missile_defence_bonus=15,
                         ),
                     ],
                     {},
                     rows_by_table,
                 )
 
-        self.assertEqual(created, 3)
+        self.assertEqual(created, 4)
         hidden_skills = [
             row
             for table_path, rows in rows_by_table.items()
@@ -183,9 +335,9 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                 "hby_mtu_hidden_armour_adjustment_"
             )
         ]
-        self.assertEqual(len(hidden_skills), 2)
-        self.assertEqual(len(hidden_nodes), 3)
-        self.assertEqual(len(hidden_effects), 2)
+        self.assertEqual(len(hidden_skills), 3)
+        self.assertEqual(len(hidden_nodes), 4)
+        self.assertEqual(len(hidden_effects), 7)
         self.assertEqual(
             {
                 str(row["character_skill_node_set_key"])
@@ -195,6 +347,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                 "hby_skill_set_with_armour",
                 "hby_second_skill_set_with_armour",
                 "hby_romance_skill_set_with_armour",
+                "hby_different_defence_skill_set",
             },
         )
         self.assertTrue(all(not row["visible_in_ui"] for row in hidden_nodes))
@@ -211,12 +364,20 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             skill_by_node_set["hby_skill_set_with_armour"],
             skill_by_node_set["hby_second_skill_set_with_armour"],
         )
+        self.assertNotEqual(
+            skill_by_node_set["hby_skill_set_with_armour"],
+            skill_by_node_set["hby_different_defence_skill_set"],
+        )
         self.assertEqual(
             {
                 row["effect_key"]
                 for row in hidden_effects
             },
-            {"3k_main_effect_character_stat_mod_armour"},
+            {
+                "3k_main_effect_character_stat_mod_armour",
+                "3k_main_effect_character_stat_mod_melee_defence",
+                "3k_main_effect_character_stat_mod_missile_defence",
+            },
         )
         self.assertEqual(
             {
@@ -227,7 +388,33 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         )
         self.assertEqual(
             {row["value"] for row in hidden_effects},
-            {27.0, 99.0},
+            {11.0, 12.0, 15.0, 27.0, 99.0},
+        )
+        shared_skill = skill_by_node_set["hby_skill_set_with_armour"]
+        different_skill = skill_by_node_set["hby_different_defence_skill_set"]
+        self.assertEqual(
+            {
+                row["effect_key"]: row["value"]
+                for row in hidden_effects
+                if row["character_skill_key"] == shared_skill
+            },
+            {
+                "3k_main_effect_character_stat_mod_armour": 27.0,
+                "3k_main_effect_character_stat_mod_melee_defence": 11.0,
+                "3k_main_effect_character_stat_mod_missile_defence": 15.0,
+            },
+        )
+        self.assertEqual(
+            {
+                row["effect_key"]: row["value"]
+                for row in hidden_effects
+                if row["character_skill_key"] == different_skill
+            },
+            {
+                "3k_main_effect_character_stat_mod_armour": 27.0,
+                "3k_main_effect_character_stat_mod_melee_defence": 12.0,
+                "3k_main_effect_character_stat_mod_missile_defence": 15.0,
+            },
         )
 
     def test_hidden_armour_adjustment_requires_a_linked_skill_set(self) -> None:
@@ -237,6 +424,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                 "newSetKey": "hby_skill_set_with_armour",
                 "replacements": [],
                 "armourBonus": 27,
+                "meleeDefenceBonus": 10,
                 "meleeAttackBonus": 11,
                 "meleeDamageBonus": 12,
                 "apMeleeDamageBonus": 13,
@@ -257,6 +445,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                     "sourceArmourTypeKey": "source_armour_type",
                     "sourceArmourValue": 45,
                     "armourBonus": 27,
+                    "meleeDefenceBonus": 10,
                     "meleeAttackBonus": 11,
                     "meleeDamageBonus": 12,
                     "apMeleeDamageBonus": 13,
@@ -814,10 +1003,10 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
     def test_character_patch_name_uses_existing_name_group(self) -> None:
         payload = {
             "tables": {
-                "db/character_generation_templates_tables/!!ironic_addon_korea_leader_fix": {
+                "db/character_generation_templates_tables/_mtu_fixture_leader_fix": {
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [{
-                        "key": "3k_mod_template_historical_gogukcheon_hero_fire",
+                        "key": "3k_mtu_template_historical_gogukcheon_hero_fire",
                         "forename": "7654410",
                         "family_name": 0,
                         "clan_name": 0,
@@ -825,10 +1014,10 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                         "art_set_override": "3k_mod_art_set_historical_go_nammu_general",
                     }],
                 },
-                "db/character_generation_template_game_mode_details_tables/!!ironic_addon_korea_leader_fix": {
+                "db/character_generation_template_game_mode_details_tables/_mtu_fixture_leader_fix": {
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [{
-                        "character_generation_template": "3k_mod_template_historical_gogukcheon_hero_fire",
+                        "character_generation_template": "3k_mtu_template_historical_gogukcheon_hero_fire",
                         "game_mode": "historical",
                     }],
                 },
@@ -836,7 +1025,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [{"names_group": 221, "type": 1, "gender": 2, "frequency": 1, "id": "unrelated"}],
                 },
-                "db/names_tables/!!ironic_addon_korea_unique_names_two": {
+                "db/names_tables/_mtu_fixture_unique_names_two": {
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [{"names_group": 342318990, "type": 0, "gender": 0, "frequency": 0, "id": "7654410"}],
                 },
@@ -854,7 +1043,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         _collect_character_patch_rows(
             session,
             [CharacterPatch(
-                template_key="3k_mod_template_historical_gogukcheon_hero_fire",
+                template_key="3k_mtu_template_historical_gogukcheon_hero_fire",
                 display_name="고남무",
                 template_overrides={},
                 detail_overrides={},
@@ -864,19 +1053,19 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             loc_rows,
         )
 
-        names = rows_by_table["db/names_tables/!!ironic_addon_korea_unique_names_two"]
+        names = rows_by_table["db/names_tables/_mtu_fixture_unique_names_two"]
         self.assertEqual(names[0]["names_group"], 342318990)
         self.assertEqual(names[0]["type"], 0)
         self.assertEqual(names[0]["gender"], 0)
         self.assertEqual(loc_rows[f"names_name_{names[0]['id']}"], "고남무")
 
     def test_character_patch_name_id_avoids_existing_ids(self) -> None:
-        template_key = "3k_mod_template_historical_go_gyesu_hero_wood"
+        template_key = "3k_mtu_template_historical_go_gyesu_hero_wood"
         display_name = "고계수"
         colliding_id = str(2_000_000_000 + (zlib.crc32(f"{template_key}:{display_name}".encode("utf-8")) % 100_000_000))
         payload = {
             "tables": {
-                "db/character_generation_templates_tables/!!ironic_addon_korea": {
+                "db/character_generation_templates_tables/_mtu_fixture": {
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [{
                         "key": template_key,
@@ -887,14 +1076,14 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
                         "art_set_override": "3k_mod_art_set_historical_go_gyesu_general",
                     }],
                 },
-                "db/character_generation_template_game_mode_details_tables/!!ironic_addon_korea": {
+                "db/character_generation_template_game_mode_details_tables/_mtu_fixture": {
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [{
                         "character_generation_template": template_key,
                         "game_mode": "historical",
                     }],
                 },
-                "db/names_tables/!!ironic_addon_korea_unique_names_two": {
+                "db/names_tables/_mtu_fixture_unique_names_two": {
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [
                         {"names_group": 342318990, "type": 0, "gender": 0, "frequency": 0, "id": "7654410"},
@@ -925,7 +1114,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             loc_rows,
         )
 
-        template = rows_by_table["db/character_generation_templates_tables/!!ironic_addon_korea"][0]
+        template = rows_by_table["db/character_generation_templates_tables/_mtu_fixture"][0]
         self.assertNotEqual(str(template["forename"]), colliding_id)
         self.assertEqual(loc_rows[f"names_name_{template['forename']}"], display_name)
 
@@ -1862,7 +2051,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertEqual(art_sets[0]["agent_subtype"], "")
         self.assertFalse(any("hby_general_metal" in str(row) for rows in rows_by_table.values() for row in rows))
 
-    def test_material_metal_spawn_does_not_patch_other_mod_pool_art_sets(self) -> None:
+    def test_material_metal_spawn_does_not_patch_other_mod_pool_art_sets_rejected_by_source_policy(self) -> None:
         payload = {
             "tables": {
                 "db/character_generation_templates_tables/_mtu_characters": {
@@ -1938,40 +2127,9 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "materials.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
-            session = MaterialPackSession.open(path)
+            with self.assertRaisesRegex(ValueError, "모드 참조"):
+                MaterialPackSession.open(path)
 
-        rows_by_table = {}
-        _collect_character_clone_rows(
-            session,
-            [CharacterClone(
-                new_template_key="hby_template_metal",
-                source_template_key="source_template",
-                detail_source_template_key="source_template",
-                new_art_set_id="hby_art_metal",
-                art_set_source_id=None,
-                new_age_range_key=None,
-                age_range_source_key=None,
-                new_initial_ceo_key=None,
-                initial_ceo_source_key=None,
-                template_overrides={"subtype": "3k_general_metal"},
-                detail_overrides={},
-                art_set_overrides={},
-                art_overrides={},
-                age_range_overrides={},
-                spawn_event="campaign_start",
-            )],
-            {},
-            rows_by_table,
-            {},
-        )
-
-        # Character generation must not rewrite another mod's generic art pool.
-        # Doing so leaks into sandbox mode and unrelated campaigns.
-        self.assertNotIn("db/campaign_character_art_sets_tables/barbarians", rows_by_table)
-        # the clone's own art set keeps its blank agent_subtype
-        art_sets = rows_by_table["db/campaign_character_art_sets_tables/_mtu_characters"]
-        clone_rows = [row for row in art_sets if row.get("art_set_id") == "hby_art_metal"]
-        self.assertEqual(clone_rows[0]["agent_subtype"], "")
 
     def test_material_clone_grants_selected_armour_and_source_unique_armour(self) -> None:
         payload = {
@@ -2152,24 +2310,27 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             script or "",
         )
         self.assertIn("hby_remove_ceo(manager, item.remove_ceos[i])", script or "")
-        self.assertIn("hby_add_ceo(manager, item.title_ceo)", script or "")
+        self.assertIn("hby_set_character_title(character, manager, item.title_ceo)", script or "")
+        self.assertIn('local category_key = "3k_main_ceo_category_career"', script or "")
+        self.assertIn("manager:all_ceos_for_category(category_key)", script or "")
+        self.assertIn("hby_remove_ceo(manager, current_title)", script or "")
+        self.assertIn("hby_character_ceo_for_category(character, category_key) == title_ceo", script or "")
         self.assertIn("hby_add_ceo(manager, item.add_ceos[i])", script or "")
         self.assertIn("ceo_manager:remove_ceos(ceo_key)", script or "")
         self.assertNotIn("ceo_manager:remove_ceo(ceo_key)", script or "")
         self.assertIn("ceo_manager:add_ceo(ceo_key)", script or "")
         self.assertNotIn("ceo_manager:add_ceos(ceo_key)", script or "")
-        self.assertIn("cm:set_saved_value(item.save_key, true)", script or "")
+        self.assertIn('output("MTU Pack Editor: character title and traits applied:', script or "")
         self.assertIn("return true", script or "")
-        self.assertNotIn("if all_applied then", script or "")
-        self.assertIn("hby_mtu_pack_editor_ceo_sets_v8_", script or "")
+        self.assertIn("hby_mtu_pack_editor_ceo_sets_v9_", script or "")
         self.assertIn("hby_apply_ceos(hby_ceo_items[i])", script or "")
         self.assertNotIn("force_add_ceo", script or "")
         self.assertNotIn("force_add_trait", script or "")
         self.assertIn('ceos = { "equipment_a" }', script or "")
         self.assertNotIn('"equipment_old"', script or "")
-        self.assertIn("hby_mtu_pack_editor_equipment_v26_", script or "")
-        self.assertIn("hby_mtu_pack_editor_equipment_grant_v26_", script or "")
-        self.assertIn('grant_key = "hby_mtu_pack_editor_equipment_grant_v26_', script or "")
+        self.assertIn("hby_mtu_pack_editor_equipment_v27_", script or "")
+        self.assertIn("hby_mtu_pack_editor_equipment_grant_v27_", script or "")
+        self.assertIn('grant_key = "hby_mtu_pack_editor_equipment_grant_v27_', script or "")
         self.assertIn("local function hby_grant_equipment", script or "")
         self.assertIn('local item_save_key = item.grant_key .. "_" .. tostring(i)', script or "")
         self.assertIn("cm:set_saved_value(item_save_key, true)", script or "")
@@ -2177,18 +2338,15 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertNotIn("cm:force_add_ancillary", script or "")
         self.assertNotIn("cm:force_remove_ancillary", script or "")
         self.assertIn("cm:modify_character(character):ceo_management()", script or "")
-        self.assertIn(
-            "cm:add_ancillary_to_faction(faction, ancillary_key, false)",
-            script or "",
-        )
-        self.assertIn("return cm:query_faction(faction_key)", script or "")
+        self.assertIn("return cm:modify_faction(faction_key)", script or "")
+        self.assertIn("return faction:ceo_management()", script or "")
+        self.assertIn("return manager:add_ceo(ancillary_key)", script or "")
         self.assertNotIn(
             "cm:add_ancillary_to_faction(faction_key, ancillary_key, false)",
             script or "",
         )
+        self.assertNotIn("cm:add_ancillary_to_faction(faction, ancillary_key, false)", script or "")
         self.assertNotIn("hby_faction_has_ancillary", script or "")
-        self.assertNotIn("return manager:add_ceo(ancillary_key)", script or "")
-        self.assertNotIn("cm:modify_faction(faction)", script or "")
 
     def test_dedicated_armour_restores_source_title_and_traits(self) -> None:
         dedicated = DedicatedArmourAssignment(
@@ -3124,13 +3282,11 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertIn('ceos = { "new_weapon", "new_mount" }', script or "")
         self.assertNotIn('"old_weapon"', script or "")
         self.assertIn("hby_grant_equipment(hby_equipment_items[i], faction_key)", script or "")
-        self.assertIn(
-            "cm:add_ancillary_to_faction(faction, ancillary_key, false)",
-            script or "",
-        )
-        self.assertIn("return cm:query_faction(faction_key)", script or "")
+        self.assertIn("return cm:modify_faction(faction_key)", script or "")
+        self.assertIn("return faction:ceo_management()", script or "")
+        self.assertIn("return manager:add_ceo(ancillary_key)", script or "")
         self.assertNotIn("hby_faction_has_ancillary", script or "")
-        self.assertNotIn("return manager:add_ceo(ancillary_key)", script or "")
+        self.assertNotIn("cm:add_ancillary_to_faction(", script or "")
         self.assertIn('output("MTU Pack Editor: equipment granted to faction inventory:', script or "")
         self.assertNotIn("cm:force_add_ancillary", script or "")
         self.assertNotIn("cm:force_remove_ancillary", script or "")
@@ -3168,19 +3324,53 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         script = _campaign_start_spawn_script([clone])
 
         self.assertEqual(entries[0]["grantEquipmentCeos"], list(vanguard_set))
-        self.assertIn("_v26_", entries[0]["saveKey"])
-        self.assertIn("_v26_", entries[0]["grantKey"])
+        self.assertIn("_v27_", entries[0]["saveKey"])
+        self.assertIn("_v27_", entries[0]["grantKey"])
         for ancillary_key in vanguard_set:
             self.assertIn(f'"{ancillary_key}"', script or "")
-        self.assertIn("return cm:query_faction(faction_key)", script or "")
-        self.assertIn(
-            "cm:add_ancillary_to_faction(faction, ancillary_key, false)",
-            script or "",
+        self.assertIn("return cm:modify_faction(faction_key)", script or "")
+        self.assertIn("return faction:ceo_management()", script or "")
+        self.assertIn("return manager:add_ceo(ancillary_key)", script or "")
+        self.assertNotIn("cm:add_ancillary_to_faction(", script or "")
+
+    def test_campaign_script_grants_the_same_set_once_for_each_generated_character(self) -> None:
+        equipment = (
+            "3k_main_ancillary_weapon_two_handed_spear_exceptional",
+            "3k_main_ancillary_armour_medium_armour_fire_extraordinary",
         )
-        self.assertNotIn(
-            "cm:add_ancillary_to_faction(faction_key, ancillary_key, false)",
-            script or "",
-        )
+
+        def clone(index: int) -> CharacterClone:
+            return CharacterClone(
+                new_template_key=f"hby_template_inventory_{index}",
+                source_template_key="source",
+                detail_source_template_key="source",
+                new_art_set_id=None,
+                art_set_source_id=None,
+                new_age_range_key=None,
+                age_range_source_key=None,
+                new_initial_ceo_key=None,
+                initial_ceo_source_key=None,
+                template_overrides={"subtype": "3k_general_fire"},
+                detail_overrides={},
+                art_set_overrides={},
+                art_overrides={},
+                age_range_overrides={},
+                spawn_event="campaign_start",
+                equipment_set_key="vanguard",
+                equipment_ceo_keys=equipment,
+            )
+
+        clones = [clone(1), clone(2)]
+        entries = delta_builder._equipment_entries_for_characters(clones, [])
+        script = _campaign_start_spawn_script(clones)
+
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0]["grantEquipmentCeos"], list(equipment))
+        self.assertEqual(entries[1]["grantEquipmentCeos"], list(equipment))
+        self.assertNotEqual(entries[0]["saveKey"], entries[1]["saveKey"])
+        self.assertNotEqual(entries[0]["grantKey"], entries[1]["grantKey"])
+        self.assertEqual((script or "").count(f'ceos = {{ "{equipment[0]}", "{equipment[1]}" }}'), 2)
+        self.assertIn("return manager:add_ceo(ancillary_key)", script or "")
 
     def test_lua_ceo_key_list_rejects_object_sentinel_values(self) -> None:
         self.assertEqual(
@@ -4965,7 +5155,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertNotIn("baby", {row.get("card") for row in art_rows})
         self.assertNotIn("child_03_male", {row.get("card") for row in art_rows})
 
-    def test_material_character_clone_copies_frontend_character_ceos_to_new_template(self) -> None:
+    def test_campaign_clone_does_not_create_dangling_frontend_ceo_rows(self) -> None:
         payload = {
             "tables": {
                 "db/character_generation_templates_tables/data__": {
@@ -5059,34 +5249,26 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
             {},
         )
 
-        rows = rows_by_table["db/frontend_character_ceos_tables/_mtu_characters_ceo"]
-        self.assertEqual(
-            {row["ceo"] for row in rows},
-            {
-                "3k_main_ceo_trait_personality_fraternal",
-                "3k_main_ceo_trait_personality_honourable",
-            },
-        )
-        self.assertEqual({row["frontend_character"] for row in rows}, {"hby_template_guan_yu_clone"})
-        self.assertIn("db/frontend_character_ceos_tables/_mtu_characters_ceo", source_dbs)
+        self.assertNotIn("db/frontend_character_ceos_tables/_mtu_characters_ceo", rows_by_table)
+        self.assertNotIn("db/frontend_character_ceos_tables/_mtu_characters_ceo", source_dbs)
 
     def test_material_character_clone_writes_new_art_rows_to_mtu_table(self) -> None:
         payload = {
             "tables": {
-                "db/character_generation_templates_tables/!!ironic_addon_korea_leader_fix": {
+                "db/character_generation_templates_tables/_mtu_fixture_leader_fix": {
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [{"key": "source_template", "art_set_override": "source_art", "forename": "1"}],
                 },
-                "db/character_generation_template_game_mode_details_tables/!!ironic_addon_korea_leader_fix": {
+                "db/character_generation_template_game_mode_details_tables/_mtu_fixture_leader_fix": {
                     "db": {"table": {"definition": {"fields": []}, "table_data": []}},
                     "rows": [{"character_generation_template": "source_template", "game_mode": "historical"}],
                 },
-                "db/campaign_character_art_sets_tables/!!ironic_addon_korea": {
-                    "db": {"table": {"table_name": "!!ironic_addon_korea", "definition": {"fields": []}, "table_data": []}},
+                "db/campaign_character_art_sets_tables/_mtu_fixture": {
+                    "db": {"table": {"table_name": "_mtu_fixture", "definition": {"fields": []}, "table_data": []}},
                     "rows": [{"art_set_id": "source_art"}],
                 },
-                "db/campaign_character_arts_tables/!!ironic_addon_korea": {
-                    "db": {"table": {"table_name": "!!ironic_addon_korea", "definition": {"fields": []}, "table_data": []}},
+                "db/campaign_character_arts_tables/_mtu_fixture": {
+                    "db": {"table": {"table_name": "_mtu_fixture", "definition": {"fields": []}, "table_data": []}},
                     "rows": [{"art_set_id": "source_art", "age": 16, "has_come_of_age": True, "portrait": "old/", "card": "old"}],
                 },
                 "db/character_generation_spawn_age_ranges_tables/_mtu_characters": {
@@ -5135,7 +5317,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         art_rows = rows_by_table["db/campaign_character_arts_tables/_mtu_characters"]
         self.assertEqual(art_rows[0]["art_set_id"], "hby_art_new")
         self.assertEqual(art_rows[0]["portrait"], "hby_image/")
-        self.assertNotIn("db/campaign_character_arts_tables/!!ironic_addon_korea", rows_by_table)
+        self.assertNotIn("db/campaign_character_arts_tables/_mtu_fixture", rows_by_table)
         self.assertEqual(source_dbs["db/campaign_character_art_sets_tables/_mtu_characters"]["table"]["table_name"], "_mtu_characters")
         self.assertEqual(source_dbs["db/campaign_character_arts_tables/_mtu_characters"]["table"]["table_name"], "_mtu_characters")
 
@@ -6421,7 +6603,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertEqual(by_mode["romance"]["retinue"], "hby_retinue")
         self.assertEqual(by_mode["romance"]["skill_set_override"], "source_skillset")
 
-    def test_korea_addon_character_patch_updates_mod_and_ironic_template_rows(self) -> None:
+    def test_korea_addon_character_patch_updates_mod_and_ironic_template_rows_rejected_by_source_policy(self) -> None:
         payload = {
             "tables": {
                 "db/character_generation_templates_tables/!!ironic_addon_korea_leader_fix": {
@@ -6480,59 +6662,11 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "materials.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
-            session = MaterialPackSession.open(path)
+            with self.assertRaisesRegex(ValueError, "모드 참조"):
+                MaterialPackSession.open(path)
 
-        rows_by_table = {}
-        source_dbs = {}
-        loc_rows = {}
-        _collect_character_patch_rows(
-            session,
-            [CharacterPatch(
-                template_key="3k_mod_template_historical_gogukcheon_hero_fire",
-                template_overrides={},
-                detail_overrides={"historical": {"retinue": "hby_retinue"}},
-                art_overrides={"portrait": "hby_patch_go_nammu/", "card": "hby_patch_go_nammu"},
-            )],
-            source_dbs,
-            rows_by_table,
-            loc_rows,
-        )
 
-        templates = rows_by_table["db/character_generation_templates_tables/!!ironic_addon_korea_leader_fix"]
-        self.assertEqual(
-            {row["key"] for row in templates},
-            {
-                "3k_mod_template_historical_gogukcheon_hero_fire",
-                "ironic_template_historical_gogukcheon_hero_fire",
-            },
-        )
-        self.assertTrue(all(row["art_set_override"] == "3k_mod_art_set_historical_go_nammu_general" for row in templates))
-        details = rows_by_table["db/character_generation_template_game_mode_details_tables/!!ironic_addon_korea_leader_fix"]
-        self.assertEqual(
-            {row["character_generation_template"] for row in details},
-            {
-                "3k_mod_template_historical_gogukcheon_hero_fire",
-                "ironic_template_historical_gogukcheon_hero_fire",
-            },
-        )
-        modes_by_template = defaultdict(set)
-        for detail in details:
-            modes_by_template[detail["character_generation_template"]].add(detail["game_mode"])
-        self.assertEqual(
-            modes_by_template,
-            {
-                "3k_mod_template_historical_gogukcheon_hero_fire": {"historical", "romance"},
-                "ironic_template_historical_gogukcheon_hero_fire": {"historical", "romance"},
-            },
-        )
-        self.assertTrue(all(row["retinue"] == "hby_retinue" for row in details))
-        art = rows_by_table["db/campaign_character_arts_tables/!!ironic_addon_korea"][0]
-        self.assertEqual(art["art_set_id"], "3k_mod_art_set_historical_go_nammu_general")
-        self.assertEqual(art["portrait"], "hby_patch_go_nammu/")
-        self.assertEqual(art["card"], "hby_patch_go_nammu")
-        self.assertNotIn("db/campaign_character_arts_tables/_mtu_characters", rows_by_table)
-
-    def test_korea_addon_character_patch_updates_all_related_art_sets(self) -> None:
+    def test_korea_addon_character_patch_updates_all_related_art_sets_rejected_by_source_policy(self) -> None:
         payload = {
             "tables": {
                 "db/character_generation_templates_tables/!!ironic_addon_korea_leader_fix": {
@@ -6596,28 +6730,9 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "materials.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
-            session = MaterialPackSession.open(path)
+            with self.assertRaisesRegex(ValueError, "모드 참조"):
+                MaterialPackSession.open(path)
 
-        rows_by_table = {}
-        _collect_character_patch_rows(
-            session,
-            [CharacterPatch(
-                template_key="3k_mod_template_historical_chogo_hero_earth",
-                template_overrides={},
-                detail_overrides={},
-                art_overrides={"portrait": "hby_chogo/", "card": "hby_chogo"},
-            )],
-            {},
-            rows_by_table,
-            {},
-        )
-
-        addon_art = rows_by_table["db/campaign_character_arts_tables/!!ironic_addon_korea"][0]
-        base_art = rows_by_table["db/campaign_character_arts_tables/ironic_culture_korea"][0]
-        self.assertEqual(addon_art["portrait"], "hby_chogo/")
-        self.assertEqual(addon_art["card"], "hby_chogo")
-        self.assertEqual(base_art["portrait"], "hby_chogo/")
-        self.assertEqual(base_art["card"], "hby_chogo")
 
     def test_material_stat_patch_uses_source_table_path(self) -> None:
         payload = {
@@ -6717,7 +6832,7 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         self.assertEqual(row["key"], "actual_selected_armour")
         self.assertEqual(row["armour_value"], 80)
 
-    def test_material_stat_patch_reads_addon_equipment_variant_tables(self) -> None:
+    def test_material_stat_patch_reads_addon_equipment_variant_tables_rejected_by_source_policy(self) -> None:
         payload = {
             "tables": {
                 "db/ceos_to_equipment_variants_tables/!!ironic_addon_korea": {
@@ -6735,30 +6850,9 @@ class DeltaBuilderMaterialRowsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "materials.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
-            session = MaterialPackSession.open(path)
+            with self.assertRaisesRegex(ValueError, "모드 참조"):
+                MaterialPackSession.open(path)
 
-        rows_by_table = {}
-        changed = _collect_stat_patch_rows(
-            session,
-            Recipe(
-                mod_name="test",
-                equipment_stat_patches=[StatPatch("addon_armour_ceo", "armour", "armour_value", 88)],
-                land_unit_clones=[],
-                skill_set_clones=[],
-                attribute_set_clones=[],
-                age_range_clones=[],
-                character_clones=[],
-                character_patches=[],
-                raw={},
-            ),
-            {},
-            rows_by_table,
-        )
-
-        self.assertEqual(changed, 1)
-        row = rows_by_table["db/unit_armour_types_tables/!!ironic_addon_korea"][0]
-        self.assertEqual(row["key"], "addon_armour_row")
-        self.assertEqual(row["armour_value"], 88)
 
     def test_material_stat_patch_skips_missing_equipment_mapping(self) -> None:
         payload = {

@@ -368,11 +368,11 @@ function titleStatValueForFilter(character, filter = 'all') {
 function manualSkillEffectFor(infoOrKey = '') {
   const key = typeof infoOrKey === 'string' ? infoOrKey : infoOrKey?.key;
   const name = typeof infoOrKey === 'string' ? '' : infoOrKey?.name;
-  const haystack = normalizeLookupText(`${name || ''} ${friendlyKey(key || '')} ${key || ''}`);
-  if (!haystack) return null;
+  const candidates = [name, key].map((value) => normalizeLookupText(value || '')).filter(Boolean);
+  if (!candidates.length) return null;
   return MANUAL_SKILL_EFFECTS.find((item) => {
     const needles = [item.name, ...(item.aliases || [])].map((value) => normalizeLookupText(value)).filter(Boolean);
-    return needles.some((needle) => haystack.includes(needle) || needle.includes(haystack));
+    return needles.some((needle) => candidates.includes(needle));
   }) || null;
 }
 
@@ -394,6 +394,9 @@ function enrichedSkillInfo(infoOrKey) {
         element: '',
       })
     : (infoOrKey || {});
+  // Real DB-backed skills keep their own effects. Display-name aliases are
+  // ambiguous (e.g. Dignity) and cannot identify a game's skill record.
+  if (base.key && /^(3k_|ep_)/.test(base.key)) return base;
   const manual = manualSkillEffectFor(base);
   if (!manual) return base;
   return {
